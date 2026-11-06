@@ -50,6 +50,12 @@ pub struct SimConfig {
     pub eps: f64,
     /// 昼夜节律开关
     pub enable_rhythm: bool,
+    /// 新用户随机曝光开关
+    pub enable_exposure: bool,
+    /// 曝光粉丝数下限
+    pub exposure_min: usize,
+    /// 曝光粉丝数上限
+    pub exposure_max: usize,
     /// 随机种子
     pub seed: u64,
 }
@@ -71,6 +77,9 @@ impl Default for SimConfig {
             max_iters: 30,
             eps: 1e-4,
             enable_rhythm: true,
+            enable_exposure: true,
+            exposure_min: 10,
+            exposure_max: 20,
             seed: 42,
         }
     }
@@ -440,6 +449,24 @@ impl Sim {
                 self.add_edge(id, chosen, 1.0);
             }
         }
+
+        // 随机曝光：少数人主动关注新人，给中性偏正的初始评分
+        if self.cfg.enable_exposure {
+            let k = self.cfg.exposure_min
+                + self.rng.next_usize(self.cfg.exposure_max - self.cfg.exposure_min + 1);
+            for _ in 0..k {
+                let v = self.rng.next_usize(n - 1);
+                if v == id || self.accounts[v].left.is_some() {
+                    continue;
+                }
+                // v 关注新人，权重较低（只是弱边）
+                self.add_edge(v, id, 0.3);
+                // v 给新人一个中性偏正的初始评分
+                let rating = 0.05 + self.rng.next_f64() * 0.2;
+                self.accounts[v].ratings[id] = rating;
+            }
+        }
+
         self.normalize_edges();
     }
 

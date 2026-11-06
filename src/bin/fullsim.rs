@@ -104,6 +104,36 @@ fn main() {
         }
     }
 
+    // ---- 实验二 b：随机曝光的对比 ----
+    println!("\n[2b] 随机曝光对冷启动的影响（N=200, 30 天, 10% 攻击）");
+    println!(
+        "{:<14} {:<16} {:<16} {:<16}",
+        "曝光", "新用户信任", "目标信任", "垃圾信任"
+    );
+
+    for &enabled in &[false, true] {
+        let cfg = SimConfig {
+            n_initial: 200,
+            days: 30,
+            attack_ratio: 0.1,
+            spam_ratio: 0.1,
+            enable_rhythm: true,
+            enable_exposure: enabled,
+            ..Default::default()
+        };
+        let mut sim = Sim::new(cfg);
+        sim.run();
+        if let Some(s) = sim.stats.last() {
+            println!(
+                "{:<14} {:<16.4} {:<16} {:<16.4}",
+                if enabled { "开" } else { "关" },
+                s.new_user_trust,
+                s.target_trust.map(|v| format!("{:+.4}", v)).unwrap_or("-".into()),
+                s.spam_trust,
+            );
+        }
+    }
+
     // ---- 实验三：规模对比 ----
     println!("\n[3] 规模对比（30 天，10% 攻击 + 10% 垃圾）");
     println!(

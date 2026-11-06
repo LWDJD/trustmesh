@@ -327,10 +327,16 @@ impl Sim {
             .map(|a| a.id)
             .collect();
 
-        for i in 0..sybils.len() {
-            for j in 0..sybils.len() {
-                if i != j {
-                    self.add_edge(sybils[i], sybils[j], 10.0);
+        // 女巫内部：每个女巫连 10 个随机女巫（避免 O(n²)）
+        if !sybils.is_empty() {
+            let link = 10usize.min(sybils.len().saturating_sub(1));
+            for (i, &s) in sybils.iter().enumerate() {
+                for _ in 0..link {
+                    let j = self.rng.next_usize(sybils.len());
+                    if j == i {
+                        continue;
+                    }
+                    self.add_edge(s, sybils[j], 10.0);
                 }
             }
         }

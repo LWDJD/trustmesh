@@ -1,0 +1,23 @@
+[package]
+name = "social_trust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "social_trust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simulate"
+path = "src/bin/simulate.rs"
+
+[[bin]]
+name = "attack_report"
+path = "src/bin/attack_sim.rs"
+
+[[bin]]
+name = "scope_report"
+path = "src/bin/scope_report.rs"
+
+[profile.release]
+opt-level = 3

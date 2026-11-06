@@ -122,5 +122,24 @@ fn main() {
         }
     }
 
+    println!("\n[5] 关注数量 s 与误差（N=100000）");
+    println!("{:<8} {:<10} {:<12} {:<12}", "s", "k", "大小(KB)", "平均误差");
+
+    for &s in &[20usize, 100, 500, 2000, 10000] {
+        let r = sparse_row(100_000, s, 31);
+        for &k in &[1024usize, 4096, 16384] {
+            let mut sk = Sketch::new(5, k, 2);
+            sk.add_row_sparse(&r, 0.5, 1.0);
+            let err = eval_sparse(&sk, &r);
+            println!(
+                "{:<8} {:<10} {:<12.1} {:<12.4e}",
+                s,
+                k,
+                sk.bytes() as f64 / 1024.0,
+                err
+            );
+        }
+    }
+
     println!("\n完成。");
 }

@@ -23,5 +23,9 @@ path = "src/bin/scope_report.rs"
 name = "sketch_report"
 path = "src/bin/sketch_report.rs"
 
+[[bin]]
+name = "fullsim"
+path = "src/bin/fullsim.rs"
+
 [profile.release]
 opt-level = 3

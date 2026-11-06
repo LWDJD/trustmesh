@@ -34,6 +34,7 @@
 pub mod attack;
 pub mod dense;
 pub mod exact;
+pub mod fullsim;
 pub mod graph;
 pub mod local_push;
 pub mod rng;

@@ -19,5 +19,9 @@ path = "src/bin/attack_sim.rs"
 name = "scope_report"
 path = "src/bin/scope_report.rs"
 
+[[bin]]
+name = "sketch_report"
+path = "src/bin/sketch_report.rs"
+
 [profile.release]
 opt-level = 3

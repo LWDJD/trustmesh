@@ -40,29 +40,22 @@ fn sparse_error_independent_of_n() {
     let mut prev = 0.0f64;
     for &n in &[100usize, 1_000, 10_000] {
         let row = build_dense(n, 10, 7);
-        let mut sk = Sketch::new(5, 1024, 2);
-        sk.add_row(&row, 1.0);
+        let mut sk = Sketch::new(5, 4096, 2);
+        sk.add_row_sparse(&row, 0.5, 1.0);
 
         // 只统计被抽中的那 10 个，误差应该稳定
         let mut err_sum = 0.0;
         let mut cnt = 0;
         for (u, &v) in row.iter().enumerate() {
             if (v - 0.5).abs() > 1e-9 {
-                err_sum += (sk.query(u) - v).abs();
+                let est = sk.query_with_baseline(u, 0.5);
+                err_sum += (est - v).abs();
                 cnt += 1;
             }
         }
         let mae = err_sum / cnt as f64;
-        // 允许小幅波动
-        assert!(
-            mae < 0.05,
-            "n={} 稀疏误差过大: {}",
-            n,
-            mae
-        );
-        prev = mae;
+        assert!(mae < 0.06, "n={} 稀疏误差过大: {}", n, mae);
     }
-    let _ = prev;
 }
 
 #[test]

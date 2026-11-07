@@ -143,5 +143,52 @@ fn main() {
         );
     }
 
+    // ---- 实验四：β 对抽样误差的影响 ----
+    println!("\n[4] 个人权重 β 对抽样误差的影响（N=100, BA 图）");
+    println!(
+        "{:<10} {:<10} {:<14} {:<14}",
+        "个人:群体", "K", "平均误差", "最大误差"
+    );
+
+    use social_trust::graph::Graph;
+    use social_trust::local_push::{solve_local, LocalPushParams};
+    use social_trust::scope::{sample, score};
+    use social_trust::sim;
+
+    for &beta in &[0.3f64, 0.5, 0.7] {
+        let mut gen = Rng::new(777);
+        let mut g: Graph = sim::gen_ba(100, 3, &mut gen);
+        sim::random_ratings(&mut g, 8, &mut gen);
+
+        let params = LocalPushParams {
+            beta,
+            eps: 1e-5,
+            max_iter: 1_000_000,
+        };
+        let exact = solve_local(&g, 0, &params);
+
+        for &k in &[10usize, 50, 100, 200] {
+            let mut r = Rng::new(888 + k as u64);
+            let sc = sample(&g, 0, k, beta, &mut r);
+            let mut abs_err = 0.0;
+            let mut max_err = 0.0f64;
+            for u in 0..100 {
+                let est = score(&sc, &g, u);
+                let e = (est - exact[u]).abs();
+                abs_err += e;
+                if e > max_err {
+                    max_err = e;
+                }
+            }
+            println!(
+                "{:<10} {:<10} {:<14.4e} {:<14.4e}",
+                format!("{:.0}:{:.0}", beta * 10.0, (1.0 - beta) * 10.0),
+                k,
+                abs_err / 100.0,
+                max_err
+            );
+        }
+    }
+
     println!("\n完成。");
 }

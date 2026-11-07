@@ -190,5 +190,75 @@ fn main() {
         }
     }
 
+    // ---- 实验五：β 对群体估计误差的影响 ----
+    println!("\n[5] 个人权重 β 对『群体均值估计』误差的影响（N=100）");
+    println!(
+        "{:<10} {:<10} {:<14} {:<14}",
+        "个人:群体", "K", "平均误差", "相对误差"
+    );
+
+    for &beta in &[0.3f64, 0.5, 0.7] {
+        let mut gen = Rng::new(999);
+        let mut g: Graph = sim::gen_ba(100, 3, &mut gen);
+        sim::random_ratings(&mut g, 8, &mut gen);
+
+        let params = LocalPushParams {
+            beta,
+            eps: 1e-4,
+            max_iter: 200_000,
+        };
+
+        // 所有用户的 trust 向量
+        let mut all: Vec<Vec<f64>> = Vec::with_capacity(100);
+        for s in 0..100 {
+            all.push(solve_local(&g, s, &params));
+        }
+
+        // 每个目标的群体均值作为真值
+        let mut truth = vec![0.0; 100];
+        for t in all.iter() {
+            for u in 0..100 {
+                truth[u] += t[u];
+            }
+        }
+        for x in truth.iter_mut() {
+            *x /= 100.0;
+        }
+
+        for &k in &[10usize, 50, 100] {
+            let mut abs_err = 0.0;
+            let mut rel_err = 0.0;
+            let mut cnt = 0;
+            // 多次重复，减少单次随机波动
+            for trial in 0..20 {
+                let mut r = Rng::new(7000 + trial * 13 + k as u64);
+                let mut chosen = Vec::with_capacity(k);
+                while chosen.len() < k {
+                    let s = r.next_usize(100);
+                    if !chosen.contains(&s) {
+                        chosen.push(s);
+                    }
+                }
+                for u in 0..100 {
+                    let est: f64 =
+                        chosen.iter().map(|&s| all[s][u]).sum::<f64>() / k as f64;
+                    let e = (est - truth[u]).abs();
+                    abs_err += e;
+                    if truth[u].abs() > 1e-9 {
+                        rel_err += e / truth[u].abs();
+                    }
+                    cnt += 1;
+                }
+            }
+            println!(
+                "{:<10} {:<10} {:<14.4e} {:<14.2}%",
+                format!("{:.0}:{:.0}", beta * 10.0, (1.0 - beta) * 10.0),
+                k,
+                abs_err / cnt as f64,
+                rel_err / cnt as f64 * 100.0
+            );
+        }
+    }
+
     println!("\n完成。");
 }

@@ -31,5 +31,9 @@ path = "src/bin/fullsim.rs"
 name = "merge_report"
 path = "src/bin/merge_report.rs"
 
+[[bin]]
+name = "large_scale"
+path = "src/bin/large_scale.rs"
+
 [profile.release]
 opt-level = 3

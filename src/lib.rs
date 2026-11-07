@@ -38,6 +38,7 @@ pub mod fullsim;
 pub mod graph;
 pub mod local_push;
 pub mod policy;
+pub mod rating_list;
 pub mod rng;
 pub mod scope;
 pub mod sim;

@@ -338,5 +338,66 @@ fn main() {
         }
     }
 
+    println!("\n[3] 评分清单模式（RatingList）与直接抽样对比");
+
+    use social_trust::rating_list::{RatingList, StorageMode};
+
+    let mut rng3 = Rng::new(999);
+    for &k in &[20usize, 50, 100] {
+        let mut abs_err = 0.0;
+        let mut pairs = 0usize;
+        let mut exacts = Vec::new();
+        let mut ests = Vec::new();
+
+        for _ in 0..100 {
+            let s = rng3.next_usize(n);
+
+            // 从 net 构建清单（时间戳 0）
+            let mut list = RatingList::new(72, 1000, StorageMode::Memory);
+            for (&v, &p) in net.ratings[s].iter() {
+                list.record(v, p, 0);
+            }
+
+            // 当前时刻 12 小时，全部有衰减
+            let now = 12u64;
+            let samples = list.sample(k, now, &mut rng3);
+
+            for _ in 0..5 {
+                let u = rng3.next_usize(n);
+                let est: f64 = beta * net.rating(s, u)
+                    + (1.0 - beta) * samples.iter().map(|&(v, w)| w * exact[v][u]).sum::<f64>();
+                abs_err += (est - exact[s][u]).abs();
+                exacts.push(exact[s][u]);
+                ests.push(est);
+                pairs += 1;
+            }
+        }
+
+        let mut idx: Vec<usize> = (0..pairs).collect();
+        idx.sort_by(|&a, &b| exacts[a].partial_cmp(&exacts[b]).unwrap());
+        let mut agree = 0usize;
+        let mut total = 0usize;
+        for i in 0..pairs {
+            for j in (i + 1)..pairs {
+                let ea = exacts[idx[i]] - exacts[idx[j]];
+                let eb = ests[idx[i]] - ests[idx[j]];
+                if ea.abs() < 1e-9 {
+                    continue;
+                }
+                total += 1;
+                if ea * eb > 0.0 {
+                    agree += 1;
+                }
+            }
+        }
+        let rate = if total > 0 { agree as f64 / total as f64 } else { 1.0 };
+        println!(
+            "{:<8} {:<14.4e} {:<12.3}",
+            k,
+            abs_err / pairs as f64,
+            rate
+        );
+    }
+
     println!("\n完成。");
 }

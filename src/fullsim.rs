@@ -62,7 +62,8 @@ pub struct SimConfig {
     pub endorsement_ratio: f64,
     /// 每个背书者背书多少个攻击账户（测试背书预算稀释）
     pub endorse_count: usize,
-    /// 影响力预算：打正分超过这个数量后，单个评分开始衰减
+    /// 影响力预算（已由完全按比例归一化替代，保留字段供旧配置兼容）
+    #[allow(dead_code)]
     pub influence_budget: f64,
     /// 随机种子
     pub seed: u64,
@@ -625,39 +626,34 @@ impl Sim {
         let beta = self.cfg.beta;
         let threshold = self.cfg.positive_threshold;
 
-        // 预处理每个账户的正分邻居及归一化权重，并计算影响力折扣
-        let budget = self.cfg.influence_budget.max(1.0);
+        // 预处理：每个账户的正分按比例归一化，总输出恒为 1。
+        // 不管给多少人打分，总份额不变，打的人越多每个越弱。
+        let mut norm: Vec<Vec<f64>> = Vec::with_capacity(n);
         let mut neighbors: Vec<Vec<(usize, f64)>> = Vec::with_capacity(n);
         for s in 0..n {
+            let mut row = vec![0.0; n];
             let mut list: Vec<(usize, f64)> = Vec::new();
+            let mut total: f64 = 0.0;
             for &(v, _) in &self.edges[s] {
                 if v >= n {
                     continue;
                 }
                 let p = self.accounts[s].ratings[v];
                 if p > threshold {
+                    total += p;
                     list.push((v, p));
                 }
             }
-            let total: f64 = list.iter().map(|(_, w)| w).sum();
             if total > 0.0 {
+                for &(v, p) in &list {
+                    row[v] = p / total;
+                }
                 for (_, w) in list.iter_mut() {
                     *w /= total;
                 }
             }
+            norm.push(row);
             neighbors.push(list);
-        }
-
-        // 影响力预算：打正分超过预算的数量，按比例折扣
-        let mut influence: Vec<f64> = Vec::with_capacity(n);
-        for s in 0..n {
-            let high_count = neighbors[s].len() as f64;
-            let factor = if high_count <= budget {
-                1.0
-            } else {
-                budget / high_count
-            };
-            influence.push(factor);
         }
 
         for _ in 0..self.cfg.max_iters {
@@ -666,7 +662,7 @@ impl Sim {
 
             for s in 0..n {
                 for u in 0..n {
-                    let mut val = beta * self.accounts[s].ratings[u] * influence[s];
+                    let mut val = beta * norm[s][u];
                     for &(v, w) in &neighbors[s] {
                         val += (1.0 - beta) * w * self.trust[v][u];
                     }

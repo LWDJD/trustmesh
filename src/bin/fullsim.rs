@@ -314,7 +314,7 @@ fn main() {
             .map(|a| a.id)
             .collect();
 
-        let endorsed = sim.endorsed_attacker;
+        let endorsed = sim.endorsed_targets.first().copied();
         let mut endorsed_trust = 0.0;
         let mut endorsed_n = 0;
         let mut other_sybil = 0.0;
@@ -347,6 +347,111 @@ fn main() {
             if other_n > 0 { other_sybil / other_n as f64 } else { 0.0 },
             if honest_n > 0 { honest_trust / honest_n as f64 } else { 0.0 },
         );
+    }
+
+    // ---- 实验七：背书预算稀释 ----
+    println!("\n[7] 背书预算稀释（背书比例 30%, 攻击者 1 倍, 30 天）");
+    println!(
+        "{:<10} {:<14} {:<14} {:<14} {:<14}",
+        "背书数", "第1个目标", "第5个", "第20个", "第100个"
+    );
+
+    for &count in &[1usize, 5, 20, 100] {
+        let cfg = SimConfig {
+            n_initial: 200,
+            days: 30,
+            attack_ratio: 1.0,
+            spam_ratio: 0.0,
+            enable_rhythm: true,
+            enable_exposure: false,
+            endorsement_ratio: 0.3,
+            endorse_count: count,
+            ..Default::default()
+        };
+        let mut sim = Sim::new(cfg);
+        sim.run();
+
+        let honest: Vec<usize> = sim
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+            .map(|a| a.id)
+            .collect();
+
+        let sample = |idx: usize| -> String {
+            if idx >= sim.endorsed_targets.len() {
+                return "-".into();
+            }
+            let t = sim.endorsed_targets[idx];
+            let mut sum = 0.0;
+            for &s in &honest {
+                sum += sim.trust[s][t];
+            }
+            format!("{:.4}", sum / honest.len().max(1) as f64)
+        };
+
+        println!(
+            "{:<10} {:<14} {:<14} {:<14} {:<14}",
+            count,
+            sample(0),
+            sample(4),
+            sample(19),
+            sample(99),
+        );
+    }
+
+    // ---- 实验七：背书预算稀释 ----
+    println!("\n[7] 背书预算稀释（背书比例 30%, 攻击者 1 倍, 30 天）");
+    println!(
+        "{:<12} {:<10} {:<14} {:<14} {:<14}",
+        "影响力预算", "背书数", "第1个目标", "第20个", "第100个"
+    );
+
+    for &budget in &[10000.0f64, 50.0] {
+        for &count in &[1usize, 20, 100] {
+            let cfg = SimConfig {
+                n_initial: 200,
+                days: 30,
+                attack_ratio: 1.0,
+                spam_ratio: 0.0,
+                enable_rhythm: true,
+                enable_exposure: false,
+                endorsement_ratio: 0.3,
+                endorse_count: count,
+                influence_budget: budget,
+                ..Default::default()
+            };
+            let mut sim = Sim::new(cfg);
+            sim.run();
+
+            let honest: Vec<usize> = sim
+                .accounts
+                .iter()
+                .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+                .map(|a| a.id)
+                .collect();
+
+            let sample = |idx: usize| -> String {
+                if idx >= sim.endorsed_targets.len() {
+                    return "-".into();
+                }
+                let t = sim.endorsed_targets[idx];
+                let mut sum = 0.0;
+                for &s in &honest {
+                    sum += sim.trust[s][t];
+                }
+                format!("{:.4}", sum / honest.len().max(1) as f64)
+            };
+
+            println!(
+                "{:<12.0} {:<10} {:<14} {:<14} {:<14}",
+                budget,
+                count,
+                sample(0),
+                sample(19),
+                sample(99),
+            );
+        }
     }
 
     println!("\n完成。");

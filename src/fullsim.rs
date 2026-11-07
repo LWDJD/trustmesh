@@ -60,6 +60,10 @@ pub struct SimConfig {
     pub positive_threshold: f64,
     /// 背书攻击：多少比例的高质量账户给攻击者打满分
     pub endorsement_ratio: f64,
+    /// 每个背书者背书多少个攻击账户（测试背书预算稀释）
+    pub endorse_count: usize,
+    /// 影响力预算：打正分超过这个数量后，单个评分开始衰减
+    pub influence_budget: f64,
     /// 随机种子
     pub seed: u64,
 }
@@ -86,6 +90,8 @@ impl Default for SimConfig {
             exposure_max: 20,
             positive_threshold: 0.2,
             endorsement_ratio: 0.0,
+            endorse_count: 1,
+            influence_budget: 100.0,
             seed: 42,
         }
     }
@@ -197,7 +203,7 @@ pub struct Sim {
     next_id: usize,
     sybil_target: Option<usize>,
     /// 被高质量账户背书的攻击者
-    pub endorsed_attacker: Option<usize>,
+    pub endorsed_targets: Vec<usize>,
     /// 背书者列表
     pub endorsers: Vec<usize>,
 }
@@ -266,7 +272,7 @@ impl Sim {
             stats: Vec::new(),
             next_id: 0,
             sybil_target: None,
-            endorsed_attacker: None,
+            endorsed_targets: Vec::new(),
             endorsers: Vec::new(),
         };
         sim.next_id = sim.accounts.len();
@@ -295,9 +301,9 @@ impl Sim {
             .filter(|a| matches!(a.kind, Kind::Sybil { .. }))
             .map(|a| a.id)
             .collect();
-        let Some(&attacker) = sybils.first() else {
+        if sybils.is_empty() {
             return;
-        };
+        }
 
         let high_q: Vec<usize> = self
             .accounts
@@ -306,13 +312,20 @@ impl Sim {
             .map(|a| a.id)
             .collect();
         let n = ((high_q.len() as f64) * self.cfg.endorsement_ratio) as usize;
+        let targets: Vec<usize> = sybils
+            .iter()
+            .take(self.cfg.endorse_count.max(1))
+            .copied()
+            .collect();
 
         for &e in high_q.iter().take(n) {
-            self.add_edge(e, attacker, 1.0);
-            self.accounts[e].ratings[attacker] = 1.0;
+            for &t in &targets {
+                self.add_edge(e, t, 1.0);
+                self.accounts[e].ratings[t] = 1.0;
+            }
             self.endorsers.push(e);
         }
-        self.endorsed_attacker = Some(attacker);
+        self.endorsed_targets = targets;
         self.normalize_edges();
     }
 
@@ -572,8 +585,8 @@ impl Sim {
                     continue;
                 }
 
-                // 背书者持续给被背书攻击者打满分
-                if Some(v) == self.endorsed_attacker && self.endorsers.contains(&s) {
+                // 背书者持续给被背书目标打满分
+                if self.endorsers.contains(&s) && self.endorsed_targets.contains(&v) {
                     self.accounts[s].ratings[v] = 1.0;
                     continue;
                 }
@@ -612,7 +625,8 @@ impl Sim {
         let beta = self.cfg.beta;
         let threshold = self.cfg.positive_threshold;
 
-        // 预处理每个账户的正分邻居及归一化权重
+        // 预处理每个账户的正分邻居及归一化权重，并计算影响力折扣
+        let budget = self.cfg.influence_budget.max(1.0);
         let mut neighbors: Vec<Vec<(usize, f64)>> = Vec::with_capacity(n);
         for s in 0..n {
             let mut list: Vec<(usize, f64)> = Vec::new();
@@ -634,13 +648,25 @@ impl Sim {
             neighbors.push(list);
         }
 
+        // 影响力预算：打正分超过预算的数量，按比例折扣
+        let mut influence: Vec<f64> = Vec::with_capacity(n);
+        for s in 0..n {
+            let high_count = neighbors[s].len() as f64;
+            let factor = if high_count <= budget {
+                1.0
+            } else {
+                budget / high_count
+            };
+            influence.push(factor);
+        }
+
         for _ in 0..self.cfg.max_iters {
             let mut next = self.trust.clone();
             let mut max_change = 0.0;
 
             for s in 0..n {
                 for u in 0..n {
-                    let mut val = beta * self.accounts[s].ratings[u];
+                    let mut val = beta * self.accounts[s].ratings[u] * influence[s];
                     for &(v, w) in &neighbors[s] {
                         val += (1.0 - beta) * w * self.trust[v][u];
                     }
@@ -660,7 +686,6 @@ impl Sim {
     }
 
     fn collect(&mut self, now: u64) {
-        let n = self.accounts.len();
         let alive: Vec<usize> = self
             .accounts
             .iter()

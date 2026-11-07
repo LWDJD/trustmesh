@@ -27,5 +27,9 @@ path = "src/bin/sketch_report.rs"
 name = "fullsim"
 path = "src/bin/fullsim.rs"
 
+[[bin]]
+name = "merge_report"
+path = "src/bin/merge_report.rs"
+
 [profile.release]
 opt-level = 3

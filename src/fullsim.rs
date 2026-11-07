@@ -58,6 +58,8 @@ pub struct SimConfig {
     pub exposure_max: usize,
     /// 正分阈值：低于这个分值的邻居不参与传播
     pub positive_threshold: f64,
+    /// 背书攻击：多少比例的高质量账户给攻击者打满分
+    pub endorsement_ratio: f64,
     /// 随机种子
     pub seed: u64,
 }
@@ -83,6 +85,7 @@ impl Default for SimConfig {
             exposure_min: 10,
             exposure_max: 20,
             positive_threshold: 0.2,
+            endorsement_ratio: 0.0,
             seed: 42,
         }
     }
@@ -114,6 +117,8 @@ pub struct Account {
     pub awake: u64,
     /// 每小时互动次数
     pub activity: f64,
+    /// 内容质量 0-1，决定被关注和被评分的期望
+    pub quality: f64,
     pub kind: Kind,
     /// 本地评分：对目标的评分 [-1,1]
     pub ratings: Vec<f64>,
@@ -134,6 +139,14 @@ impl Account {
         let wake = rng.next_usize(24) as u64;
         let awake = 8 + rng.next_usize(10) as u64; // 8 到 17 小时
 
+        // 内容质量：诚实用户高，攻击者低
+        let quality = match kind {
+            Kind::Honest => 0.3 + rng.next_f64() * 0.6,
+            Kind::Sleeper { .. } => 0.3 + rng.next_f64() * 0.5,
+            Kind::Sybil { .. } => 0.02 + rng.next_f64() * 0.08,
+            Kind::Spammer => 0.01 + rng.next_f64() * 0.04,
+        };
+
         Self {
             id,
             joined: now,
@@ -142,6 +155,7 @@ impl Account {
             wake,
             awake,
             activity: 0.5 + rng.next_f64() * 2.0,
+            quality,
             kind,
             ratings: vec![0.0; cfg.n_initial + 10_000],
             last_active: now,
@@ -182,6 +196,10 @@ pub struct Sim {
     pub stats: Vec<Snapshot>,
     next_id: usize,
     sybil_target: Option<usize>,
+    /// 被高质量账户背书的攻击者
+    pub endorsed_attacker: Option<usize>,
+    /// 背书者列表
+    pub endorsers: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -248,6 +266,8 @@ impl Sim {
             stats: Vec::new(),
             next_id: 0,
             sybil_target: None,
+            endorsed_attacker: None,
+            endorsers: Vec::new(),
         };
         sim.next_id = sim.accounts.len();
 
@@ -258,7 +278,42 @@ impl Sim {
         // 女巫内部互关
         sim.wire_sybils();
 
+        // 背书攻击：一部分高质量账户给某个攻击者打满分
+        sim.apply_endorsement();
+
         sim
+    }
+
+    /// 背书攻击：让高质量账户直接给攻击者打满分，并建立传播边。
+    fn apply_endorsement(&mut self) {
+        if self.cfg.endorsement_ratio <= 0.0 {
+            return;
+        }
+        let sybils: Vec<usize> = self
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.kind, Kind::Sybil { .. }))
+            .map(|a| a.id)
+            .collect();
+        let Some(&attacker) = sybils.first() else {
+            return;
+        };
+
+        let high_q: Vec<usize> = self
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.kind, Kind::Honest) && a.quality > 0.7)
+            .map(|a| a.id)
+            .collect();
+        let n = ((high_q.len() as f64) * self.cfg.endorsement_ratio) as usize;
+
+        for &e in high_q.iter().take(n) {
+            self.add_edge(e, attacker, 1.0);
+            self.accounts[e].ratings[attacker] = 1.0;
+            self.endorsers.push(e);
+        }
+        self.endorsed_attacker = Some(attacker);
+        self.normalize_edges();
     }
 
     /// 按兴趣相似度建立初始关注。
@@ -270,13 +325,9 @@ impl Sim {
                 .filter(|&u| u != s)
                 .map(|u| {
                     let sim = cosine(&self.accounts[s].interest, &self.accounts[u].interest);
-                    // 垃圾账户很难被关注
-                    let damp = if matches!(self.accounts[u].kind, Kind::Spammer) {
-                        0.1
-                    } else {
-                        1.0
-                    };
-                    (u, sim * damp)
+                    // 同质性 × 内容质量：没内容的人不会被关注
+                    let quality = 0.05 + self.accounts[u].quality;
+                    (u, sim * quality)
                 })
                 .collect();
 
@@ -435,11 +486,14 @@ impl Sim {
         self.edges.push(Vec::new());
         self.trust.push(vec![0.0; self.accounts[0].ratings.len()]);
 
-        // 新账户关注几个同好
+        // 新账户关注几个同好（质量加权）
         let n = self.accounts.len();
         for _ in 0..5 {
             let total: f64 = (0..n - 1)
-                .map(|u| cosine(&self.accounts[id].interest, &self.accounts[u].interest) + 0.01)
+                .map(|u| {
+                    (cosine(&self.accounts[id].interest, &self.accounts[u].interest) + 0.01)
+                        * (0.05 + self.accounts[u].quality)
+                })
                 .sum();
             if total <= 0.0 {
                 break;
@@ -447,7 +501,8 @@ impl Sim {
             let mut r = self.rng.next_f64() * total;
             let mut chosen = id;
             for u in 0..n - 1 {
-                let w = cosine(&self.accounts[id].interest, &self.accounts[u].interest) + 0.01;
+                let w = (cosine(&self.accounts[id].interest, &self.accounts[u].interest) + 0.01)
+                    * (0.05 + self.accounts[u].quality);
                 if r < w {
                     chosen = u;
                     break;
@@ -517,10 +572,16 @@ impl Sim {
                     continue;
                 }
 
-                // 给 v 打分：基于兴趣相似度 + 噪声
-                let sim = cosine(&self.accounts[s].interest, &self.accounts[v].interest);
-                let noise = (self.rng.next_f64() - 0.5) * 0.3;
-                let rating = (sim * 1.2 - 0.1 + noise).clamp(-1.0, 1.0);
+                // 背书者持续给被背书攻击者打满分
+                if Some(v) == self.endorsed_attacker && self.endorsers.contains(&s) {
+                    self.accounts[s].ratings[v] = 1.0;
+                    continue;
+                }
+
+                // 给 v 打分：内容质量决定期待，兴趣相似度微调，再加噪声
+                let q = self.accounts[v].quality;
+                let noise = (self.rng.next_f64() - 0.5) * 0.2;
+                let rating = (q * 1.4 - 0.35 + noise).clamp(-1.0, 1.0);
                 self.accounts[s].ratings[v] = rating;
 
                 // 潜伏者突变

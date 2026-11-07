@@ -280,5 +280,74 @@ fn main() {
         }
     }
 
+    // ---- 实验七：背书攻击 ----
+    println!("\n[7] 背书攻击：高质量账户给攻击者打满分（N=200, 30 天, 攻击者 1 倍）");
+    println!(
+        "{:<14} {:<16} {:<16} {:<16}",
+        "背书比例", "被背书攻击者", "普通攻击者", "诚实用户"
+    );
+
+    for &ratio in &[0.0f64, 0.1, 0.3, 0.5, 0.8] {
+        let cfg = SimConfig {
+            n_initial: 200,
+            days: 30,
+            attack_ratio: 1.0,
+            spam_ratio: 0.0,
+            enable_rhythm: true,
+            enable_exposure: false,
+            endorsement_ratio: ratio,
+            ..Default::default()
+        };
+        let mut sim = Sim::new(cfg);
+        sim.run();
+
+        let honest: Vec<usize> = sim
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+            .map(|a| a.id)
+            .collect();
+        let sybils: Vec<usize> = sim
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Sybil { .. }))
+            .map(|a| a.id)
+            .collect();
+
+        let endorsed = sim.endorsed_attacker;
+        let mut endorsed_trust = 0.0;
+        let mut endorsed_n = 0;
+        let mut other_sybil = 0.0;
+        let mut other_n = 0;
+        let mut honest_trust = 0.0;
+        let mut honest_n = 0;
+
+        for &s in &honest {
+            for &u in &sybils {
+                if Some(u) == endorsed {
+                    endorsed_trust += sim.trust[s][u];
+                    endorsed_n += 1;
+                } else {
+                    other_sybil += sim.trust[s][u];
+                    other_n += 1;
+                }
+            }
+            for &u in &honest {
+                if s != u {
+                    honest_trust += sim.trust[s][u];
+                    honest_n += 1;
+                }
+            }
+        }
+
+        println!(
+            "{:<14.1} {:<16.4} {:<16.4} {:<16.4}",
+            ratio,
+            if endorsed_n > 0 { endorsed_trust / endorsed_n as f64 } else { 0.0 },
+            if other_n > 0 { other_sybil / other_n as f64 } else { 0.0 },
+            if honest_n > 0 { honest_trust / honest_n as f64 } else { 0.0 },
+        );
+    }
+
     println!("\n完成。");
 }

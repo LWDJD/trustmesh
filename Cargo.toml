@@ -35,5 +35,9 @@ path = "src/bin/merge_report.rs"
 name = "large_scale"
 path = "src/bin/large_scale.rs"
 
+[[bin]]
+name = "baseline_compare"
+path = "src/bin/baseline_compare.rs"
+
 [profile.release]
 opt-level = 3

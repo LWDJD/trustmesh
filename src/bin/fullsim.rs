@@ -210,72 +210,74 @@ fn main() {
         );
     }
 
-    // ---- 实验六：攻击者规模扫描 ----
+    // ---- 实验六：攻击者规模扫描（曝光开关对照）----
     println!("\n[6] 攻击者规模扫描（N=200 诚实, 30 天）");
     println!(
-        "{:<12} {:<10} {:<14} {:<16} {:<16}",
-        "攻击者/诚实", "期末N", "目标信任", "诚实→攻击者", "诚实→诚实"
+        "{:<12} {:<8} {:<10} {:<14} {:<16} {:<16}",
+        "攻击者/诚实", "曝光", "期末N", "目标信任", "诚实→攻击者", "诚实→诚实"
     );
 
-    for &ratio in &[0.0f64, 0.1, 0.5, 1.0, 2.0, 5.0] {
-        let cfg = SimConfig {
-            n_initial: 200,
-            days: 30,
-            attack_ratio: ratio,
-            spam_ratio: 0.0,
-            enable_rhythm: true,
-            enable_exposure: true,
-            ..Default::default()
-        };
-        let mut sim = Sim::new(cfg);
-        sim.run();
+    for &exposure in &[false, true] {
+        for &ratio in &[0.1f64, 0.5, 1.0, 2.0, 5.0] {
+            let cfg = SimConfig {
+                n_initial: 200,
+                days: 30,
+                attack_ratio: ratio,
+                spam_ratio: 0.0,
+                enable_rhythm: true,
+                enable_exposure: exposure,
+                ..Default::default()
+            };
+            let mut sim = Sim::new(cfg);
+            sim.run();
 
-        // 诚实用户视角的统计
-        let honest: Vec<usize> = sim
-            .accounts
-            .iter()
-            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
-            .map(|a| a.id)
-            .collect();
-        let attackers: Vec<usize> = sim
-            .accounts
-            .iter()
-            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Sybil { .. }))
-            .map(|a| a.id)
-            .collect();
+            let honest: Vec<usize> = sim
+                .accounts
+                .iter()
+                .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+                .map(|a| a.id)
+                .collect();
+            let attackers: Vec<usize> = sim
+                .accounts
+                .iter()
+                .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Sybil { .. }))
+                .map(|a| a.id)
+                .collect();
 
-        let mut h_to_a = 0.0;
-        let mut h_to_a_n = 0;
-        let mut h_to_h = 0.0;
-        let mut h_to_h_n = 0;
-        for &s in &honest {
-            for &u in &attackers {
-                h_to_a += sim.trust[s][u];
-                h_to_a_n += 1;
-            }
-            for &u in &honest {
-                if s != u {
-                    h_to_h += sim.trust[s][u];
-                    h_to_h_n += 1;
+            let mut h_to_a = 0.0;
+            let mut h_to_a_n = 0;
+            let mut h_to_h = 0.0;
+            let mut h_to_h_n = 0;
+            for &s in &honest {
+                for &u in &attackers {
+                    h_to_a += sim.trust[s][u];
+                    h_to_a_n += 1;
+                }
+                for &u in &honest {
+                    if s != u {
+                        h_to_h += sim.trust[s][u];
+                        h_to_h_n += 1;
+                    }
                 }
             }
+
+            let target = sim
+                .stats
+                .last()
+                .and_then(|s| s.target_trust)
+                .map(|v| format!("{:+.4}", v))
+                .unwrap_or("-".into());
+
+            println!(
+                "{:<12.1} {:<8} {:<10} {:<14} {:<16.4} {:<16.4}",
+                ratio,
+                if exposure { "开" } else { "关" },
+                sim.accounts.len(),
+                target,
+                if h_to_a_n > 0 { h_to_a / h_to_a_n as f64 } else { 0.0 },
+                if h_to_h_n > 0 { h_to_h / h_to_h_n as f64 } else { 0.0 },
+            );
         }
-
-        let target = sim
-            .stats
-            .last()
-            .and_then(|s| s.target_trust)
-            .map(|v| format!("{:+.4}", v))
-            .unwrap_or("-".into());
-
-        println!(
-            "{:<12.1} {:<10} {:<14} {:<16.4} {:<16.4}",
-            ratio,
-            sim.accounts.len(),
-            target,
-            if h_to_a_n > 0 { h_to_a / h_to_a_n as f64 } else { 0.0 },
-            if h_to_h_n > 0 { h_to_h / h_to_h_n as f64 } else { 0.0 },
-        );
     }
 
     println!("\n完成。");

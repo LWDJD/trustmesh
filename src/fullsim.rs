@@ -56,6 +56,8 @@ pub struct SimConfig {
     pub exposure_min: usize,
     /// 曝光粉丝数上限
     pub exposure_max: usize,
+    /// 正分阈值：低于这个分值的邻居不参与传播
+    pub positive_threshold: f64,
     /// 随机种子
     pub seed: u64,
 }
@@ -80,6 +82,7 @@ impl Default for SimConfig {
             enable_exposure: true,
             exposure_min: 10,
             exposure_max: 20,
+            positive_threshold: 0.2,
             seed: 42,
         }
     }
@@ -309,12 +312,12 @@ impl Sim {
 
     fn init_ratings(&mut self) {
         let n = self.accounts.len();
+        // 只对关注的人打分。陌生人之间没有评分，也就没有信任。
         for s in 0..n {
-            for u in 0..n {
-                if s != u {
-                    let base = 0.5 * cosine(&self.accounts[s].interest, &self.accounts[u].interest);
-                    self.accounts[s].ratings[u] = (base + 0.1).clamp(-1.0, 1.0);
-                }
+            let targets: Vec<usize> = self.edges[s].iter().map(|(v, _)| *v).collect();
+            for u in targets {
+                let base = 0.5 * cosine(&self.accounts[s].interest, &self.accounts[u].interest);
+                self.accounts[s].ratings[u] = (base + 0.1).clamp(-1.0, 1.0);
             }
         }
     }
@@ -540,22 +543,45 @@ impl Sim {
     }
 
     /// 异步迭代重算信任。
+    ///
+    /// 关键：传播只沿「我打了正分的人」走，不沿关注列表走。
+    /// 负分和未评分不传播，这是单向传播的前提。
     pub fn recompute_trust(&mut self) {
         let n = self.accounts.len();
         let beta = self.cfg.beta;
-        let mut max_change = 0.0;
+        let threshold = self.cfg.positive_threshold;
+
+        // 预处理每个账户的正分邻居及归一化权重
+        let mut neighbors: Vec<Vec<(usize, f64)>> = Vec::with_capacity(n);
+        for s in 0..n {
+            let mut list: Vec<(usize, f64)> = Vec::new();
+            for &(v, _) in &self.edges[s] {
+                if v >= n {
+                    continue;
+                }
+                let p = self.accounts[s].ratings[v];
+                if p > threshold {
+                    list.push((v, p));
+                }
+            }
+            let total: f64 = list.iter().map(|(_, w)| w).sum();
+            if total > 0.0 {
+                for (_, w) in list.iter_mut() {
+                    *w /= total;
+                }
+            }
+            neighbors.push(list);
+        }
 
         for _ in 0..self.cfg.max_iters {
             let mut next = self.trust.clone();
-            max_change = 0.0;
+            let mut max_change = 0.0;
 
             for s in 0..n {
                 for u in 0..n {
                     let mut val = beta * self.accounts[s].ratings[u];
-                    for &(v, w) in &self.edges[s] {
-                        if v < n {
-                            val += (1.0 - beta) * w * self.trust[v][u];
-                        }
+                    for &(v, w) in &neighbors[s] {
+                        val += (1.0 - beta) * w * self.trust[v][u];
                     }
                     let d = (val - next[s][u]).abs();
                     if d > max_change {

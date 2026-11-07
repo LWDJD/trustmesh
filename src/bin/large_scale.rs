@@ -87,20 +87,38 @@ impl LargeSim {
             kinds[idx[i]] = Kind::Sybil;
         }
 
-        // 评分：每个节点对 ratings_per_node 个随机目标打分
+        // 评分：对一半的直接邻居 + 少量二跳邻居评分。
+        // 真实社交里，你对关注的人有印象；二跳是偶尔看到的内容。
         let mut ratings: Vec<HashMap<usize, f64>> = Vec::with_capacity(n);
         for s in 0..n {
             let mut m2 = HashMap::new();
-            for _ in 0..ratings_per_node {
-                let t = rng.next_usize(n);
-                // 女巫给所有人打高分（但只有被抽样才生效）
-                let score = if kinds[s] == Kind::Sybil {
-                    1.0
-                } else {
-                    0.1 + rng.next_f64() * 0.8
-                };
-                m2.insert(t, score);
+            let sybil = kinds[s] == Kind::Sybil;
+
+            for &v in &edges[s] {
+                if rng.chance(0.5) {
+                    let score = if sybil { 1.0 } else { 0.1 + rng.next_f64() * 0.8 };
+                    m2.insert(v, score);
+                }
             }
+
+            // 二跳：少量
+            let mut two_hop: HashSet<usize> = HashSet::new();
+            for &v in &edges[s] {
+                for &w in &edges[v] {
+                    if w != s {
+                        two_hop.insert(w);
+                    }
+                }
+            }
+            let cands: Vec<usize> = two_hop.into_iter().collect();
+            if !cands.is_empty() {
+                for _ in 0..ratings_per_node.min(cands.len()) {
+                    let t = cands[rng.next_usize(cands.len())];
+                    let score = if sybil { 1.0 } else { 0.1 + rng.next_f64() * 0.8 };
+                    m2.insert(t, score);
+                }
+            }
+
             ratings.push(m2);
         }
 
@@ -114,6 +132,20 @@ impl LargeSim {
 
     fn rating(&self, s: usize, t: usize) -> f64 {
         self.ratings[s].get(&t).copied().unwrap_or(0.5)
+    }
+
+    /// 从 s 出发随机走 steps 步，返回终点。
+    /// 用于选出「与 s 有关联的目标」，而不是随机陌生人。
+    fn walk(&self, s: usize, steps: usize, rng: &mut Rng) -> usize {
+        let mut x = s;
+        for _ in 0..steps {
+            let nbrs = &self.edges[x];
+            if nbrs.is_empty() {
+                break;
+            }
+            x = nbrs[rng.next_usize(nbrs.len())];
+        }
+        x
     }
 
     /// 局部精确 PPR：从 s 出发，收集 hops 跳内的节点，在子图上迭代。
@@ -229,34 +261,75 @@ fn main() {
 
         // 每个观察者选 5 个目标
         let n_targets = 5;
-        println!("{:<10} {:<10} {:<14} {:<14} {:<12}", "K", "样本对数", "平均误差", "最大误差", "耗时");
+        println!(
+            "{:<8} {:<10} {:<14} {:<14} {:<14} {:<12}",
+            "K", "真值标准差", "平均误差", "灰色区比例", "排序一致率", "耗时"
+        );
         for &k in &[20usize, 50, 100] {
             let t0 = std::time::Instant::now();
             let mut abs_err = 0.0;
-            let mut max_err = 0.0f64;
             let mut pairs = 0;
+            let mut exacts: Vec<f64> = Vec::new();
+            let mut ests: Vec<f64> = Vec::new();
+            let mut flat = 0usize;
 
             for &s in &observers {
                 for _ in 0..n_targets {
-                    let t = rng.next_usize(n);
+                    // 目标从 s 的二跳邻域里取，模拟「你关心的人」
+                    let t = sim.walk(s, 2, &mut rng);
+                    if t == s {
+                        continue;
+                    }
                     let exact = sim.local_ppr(s, t, 0.3, 5, 5000, 20);
                     let est = sim.sample_estimate(s, t, k, 0.3, &mut rng);
-                    let e = (est - exact).abs();
-                    abs_err += e;
-                    if e > max_err {
-                        max_err = e;
+                    abs_err += (est - exact).abs();
+                    // 真值接近中性，说明没有区分度
+                    if (exact - 0.5).abs() < 0.01 {
+                        flat += 1;
                     }
+                    exacts.push(exact);
+                    ests.push(est);
                     pairs += 1;
                 }
             }
 
+            // 真值标准差
+            let mean = exacts.iter().sum::<f64>() / pairs as f64;
+            let var = exacts.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / pairs as f64;
+            let std = var.sqrt();
+
+            // 排序一致率：按真值排序后，估计值是否同序
+            let mut idx: Vec<usize> = (0..pairs).collect();
+            idx.sort_by(|&a, &b| exacts[a].partial_cmp(&exacts[b]).unwrap());
+            let mut agree = 0usize;
+            let mut total = 0usize;
+            for i in 0..pairs {
+                for j in (i + 1)..pairs {
+                    let ea = exacts[idx[i]] - exacts[idx[j]];
+                    let eb = ests[idx[i]] - ests[idx[j]];
+                    if ea.abs() < 1e-9 {
+                        continue;
+                    }
+                    total += 1;
+                    if ea * eb > 0.0 {
+                        agree += 1;
+                    }
+                }
+            }
+            let agree_rate = if total > 0 {
+                agree as f64 / total as f64
+            } else {
+                1.0
+            };
+
             let dt = t0.elapsed();
             println!(
-                "{:<10} {:<10} {:<14.4e} {:<14.4e} {:<12.2?}",
+                "{:<8} {:<10.4e} {:<14.4e} {:<14.2} {:<14.2} {:<12.2?}",
                 k,
-                pairs,
+                std,
                 abs_err / pairs as f64,
-                max_err,
+                flat as f64 / pairs as f64,
+                agree_rate,
                 dt
             );
         }

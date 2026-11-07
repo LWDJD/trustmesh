@@ -454,5 +454,36 @@ fn main() {
         }
     }
 
+    // ---- 实验八：个人/群体权重与圈子化 ----
+    println!("\n[8] 个人/群体权重对圈子化与反女巫的影响（N=200, 10% 攻击）");
+    println!(
+        "{:<12} {:<14} {:<16} {:<12}",
+        "个人:群体", "目标信任", "信任标准差", "圈子化"
+    );
+
+    for &beta in &[0.3f64, 0.5, 0.7, 0.9] {
+        let cfg = SimConfig {
+            n_initial: 200,
+            days: 30,
+            attack_ratio: 0.1,
+            spam_ratio: 0.0,
+            beta,
+            enable_rhythm: true,
+            enable_exposure: true,
+            ..Default::default()
+        };
+        let mut sim = Sim::new(cfg);
+        sim.run();
+        if let Some(s) = sim.stats.last() {
+            println!(
+                "{:<12} {:<14} {:<16.4} {:<12.3}",
+                format!("{:.0}:{:.0}", beta * 10.0, (1.0 - beta) * 10.0),
+                s.target_trust.map(|v| format!("{:+.4}", v)).unwrap_or("-".into()),
+                s.trust_std,
+                s.homophily,
+            );
+        }
+    }
+
     println!("\n完成。");
 }

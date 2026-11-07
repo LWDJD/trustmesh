@@ -126,6 +126,8 @@ pub struct Account {
     pub activity: f64,
     /// 内容质量 0-1，决定被关注和被评分的期望
     pub quality: f64,
+    /// 兴趣分组：兴趣向量最大值所在的维度
+    pub group: usize,
     pub kind: Kind,
     /// 本地评分：对目标的评分 [-1,1]
     pub ratings: Vec<f64>,
@@ -154,6 +156,13 @@ impl Account {
             Kind::Spammer => 0.01 + rng.next_f64() * 0.04,
         };
 
+        let group = interest
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
         Self {
             id,
             joined: now,
@@ -163,6 +172,7 @@ impl Account {
             awake,
             activity: 0.5 + rng.next_f64() * 2.0,
             quality,
+            group,
             kind,
             ratings: vec![0.0; cfg.n_initial + 10_000],
             last_active: now,
@@ -221,6 +231,8 @@ pub struct Snapshot {
     pub target_trust: Option<f64>,
     pub spam_trust: f64,
     pub new_user_trust: f64,
+    /// 圈子化：组内平均信任 / 组间平均信任，>1 表示圈子化
+    pub homophily: f64,
 }
 
 impl Sim {
@@ -592,10 +604,11 @@ impl Sim {
                     continue;
                 }
 
-                // 给 v 打分：内容质量决定期待，兴趣相似度微调，再加噪声
+                // 给 v 打分：内容质量 + 兴趣相似度 + 噪声
                 let q = self.accounts[v].quality;
+                let sim = cosine(&self.accounts[s].interest, &self.accounts[v].interest);
                 let noise = (self.rng.next_f64() - 0.5) * 0.2;
-                let rating = (q * 1.4 - 0.35 + noise).clamp(-1.0, 1.0);
+                let rating = (q * 0.9 + sim * 0.6 - 0.4 + noise).clamp(-1.0, 1.0);
                 self.accounts[s].ratings[v] = rating;
 
                 // 潜伏者突变
@@ -791,6 +804,39 @@ impl Sim {
             if cnt == 0 { 0.0 } else { sum / cnt as f64 }
         };
 
+        // 圈子化：组内与组间的平均信任
+        let mut in_sum = 0.0;
+        let mut in_n = 0usize;
+        let mut out_sum = 0.0;
+        let mut out_n = 0usize;
+        let honest_alive: Vec<usize> = self
+            .accounts
+            .iter()
+            .filter(|a| a.left.is_none() && matches!(a.kind, Kind::Honest))
+            .map(|a| a.id)
+            .collect();
+        for &s in &honest_alive {
+            for &u in &honest_alive {
+                if s == u {
+                    continue;
+                }
+                if self.accounts[s].group == self.accounts[u].group {
+                    in_sum += self.trust[s][u];
+                    in_n += 1;
+                } else {
+                    out_sum += self.trust[s][u];
+                    out_n += 1;
+                }
+            }
+        }
+        let in_mean = if in_n > 0 { in_sum / in_n as f64 } else { 0.0 };
+        let out_mean = if out_n > 0 { out_sum / out_n as f64 } else { 0.0 };
+        let homophily = if out_mean.abs() > 1e-9 {
+            in_mean / out_mean
+        } else {
+            1.0
+        };
+
         self.stats.push(Snapshot {
             hour: now,
             n_alive: alive.len(),
@@ -802,6 +848,7 @@ impl Sim {
             target_trust,
             spam_trust,
             new_user_trust,
+            homophily,
         });
     }
 

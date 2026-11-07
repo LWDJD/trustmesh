@@ -37,6 +37,7 @@ pub mod exact;
 pub mod fullsim;
 pub mod graph;
 pub mod local_push;
+pub mod policy;
 pub mod rng;
 pub mod scope;
 pub mod sim;

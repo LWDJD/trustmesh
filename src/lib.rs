@@ -36,6 +36,7 @@ pub mod dense;
 pub mod exact;
 pub mod fullsim;
 pub mod graph;
+pub mod identity;
 pub mod local_push;
 pub mod policy;
 pub mod presets;

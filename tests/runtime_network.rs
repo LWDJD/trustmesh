@@ -3,7 +3,7 @@
 //! 验证：A 信任 B，B 信任 C，A 是否间接信任 C。
 
 use social_trust::presets::Preset;
-use social_trust::runtime::{run_loop, MemoryTransport, Runtime, RuntimeConfig};
+use social_trust::runtime::{account, run_loop, MemoryTransport, Runtime, RuntimeConfig};
 
 fn node(id: u64, peers: Vec<u64>) -> Runtime {
     let mut cfg = RuntimeConfig::default();
@@ -16,15 +16,20 @@ fn node(id: u64, peers: Vec<u64>) -> Runtime {
 
 #[test]
 fn indirect_trust_propagates() {
-    // A(1) → B(2) → C(3)
-    let mut a = node(1, vec![2]);
-    let mut b = node(2, vec![1, 3]);
-    let mut c = node(3, vec![2]);
+    // 节点 ID 用哈希生成，保证池内均匀
+    let a_id = account(b"node-a");
+    let b_id = account(b"node-b");
+    let c_id = account(b"node-c");
+
+    // A → B → C
+    let mut a = node(a_id, vec![b_id]);
+    let mut b = node(b_id, vec![a_id, c_id]);
+    let mut c = node(c_id, vec![b_id]);
 
     // A 信任 B，B 信任 C
-    a.rate(2, 1.0);
-    b.rate(3, 1.0);
-    c.rate(2, 1.0);
+    a.rate(b_id, 1.0);
+    b.rate(c_id, 1.0);
+    c.rate(b_id, 1.0);
 
     // 手动驱动三轮，交换消息
     for t in 0..30u64 {
@@ -38,30 +43,30 @@ fn indirect_trust_propagates() {
 
         for act in a_out {
             if let social_trust::runtime::Action::Send { to, msg } = act {
-                if to == 2 {
-                    b.on_message(1, msg);
+                if to == b_id {
+                    b.on_message(a_id, msg);
                 }
             }
         }
         for act in b_out {
             if let social_trust::runtime::Action::Send { to, msg } = act {
                 match to {
-                    1 => a.on_message(2, msg),
-                    3 => c.on_message(2, msg),
+                    x if x == a_id => a.on_message(b_id, msg),
+                    x if x == c_id => c.on_message(b_id, msg),
                     _ => {}
                 }
             }
         }
         for act in c_out {
             if let social_trust::runtime::Action::Send { to, msg } = act {
-                if to == 2 {
-                    b.on_message(3, msg);
+                if to == b_id {
+                    b.on_message(c_id, msg);
                 }
             }
         }
     }
 
-    let qc = a.query(3);
+    let qc = a.query(c_id);
     // A 自己没给 C 打分（默认 0.5），但 B 信任 C
     // 期望：q > 0.5
     assert!(

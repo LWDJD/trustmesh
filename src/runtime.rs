@@ -29,7 +29,14 @@ use crate::sketch::Sketch;
 pub type PeerId = u64;
 
 /// 账户标识。
-pub type AccountId = u64;
+pub type AccountId = crate::identity::PeerId;
+
+/// 从任意原始标识得到账户 ID（u64，SHA-256 前 8 字节）。
+///
+/// 所有进入评分池的 ID 都应该经过这个函数，保证均态分布。
+pub fn account(raw: &[u8]) -> AccountId {
+    crate::identity::peer_id(raw)
+}
 
 /// 单向映射：账户 → 应该去问哪个节点。
 ///
@@ -409,8 +416,10 @@ mod tests {
 
     #[test]
     fn peer_mapping_deterministic() {
-        assert_eq!(peer_of(100), peer_of(100));
-        assert_ne!(peer_of(100), peer_of(101));
+        let a = account(b"alice");
+        let b = account(b"alice");
+        assert_eq!(a, b);
+        assert_ne!(account(b"alice"), account(b"bob"));
     }
 
     #[test]

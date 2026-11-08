@@ -88,6 +88,8 @@ fn summary_request_roundtrip() {
 
     // A 向 B 发请求：模拟 B 收到并入站
     b.rate(100, 0.9);
+    // A 必须信任 B（给 B 打分），B 才会进入抽样池
+    a.rate(2, 1.0);
 
     // B 收到来自 A 的请求，应产生回应
     b.on_message(1, social_trust::runtime::Message::RequestSummary { target: 100, at: 0 });

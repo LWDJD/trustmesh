@@ -11,7 +11,7 @@ fn node(id: u64, peers: Vec<u64>) -> Runtime {
     cfg.peers = peers;
     cfg.publish_every = 5;
     cfg.samples_per_tick = 10;
-    Runtime::new(id, cfg, id * 1000)
+    Runtime::new(id, cfg, id | 1)
 }
 
 #[test]

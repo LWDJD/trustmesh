@@ -184,7 +184,7 @@ impl Runtime {
     pub fn tick(&mut self, now: u64) {
         self.now = now;
 
-        // 抽样
+        // 抽样一次，复用于调试和计算
         let samples = self
             .list
             .sample(self.config.samples_per_tick, now, &mut self.rng);
@@ -193,24 +193,36 @@ impl Runtime {
             .map(|(a, w)| (*a as AccountId, *w))
             .collect();
 
-        // 重算 trust：本地评分 + 对端 trust 的加权
-        self.recompute_trust();
+        self.recompute_trust_with(&samples);
 
-        // 定期发布
         if now.saturating_sub(self.last_publish) >= self.config.publish_every {
             self.publish();
             self.last_publish = now;
         }
     }
 
-    /// 重算自己对所有已知账户的 trust。
+    /// 重算 trust（自己抽一次样本，供 rate/on_message 调用）。
     fn recompute_trust(&mut self) {
-        let beta = self.config.preset.beta;
+        let samples = self
+            .list
+            .sample(self.config.samples_per_tick, self.now, &mut self.rng);
+        self.recompute_trust_with(&samples);
+    }
 
-        // 收集所有已知账户：本地评过的 + 对端发布过的
+    /// 用给定样本重算 trust。
+    ///
+    /// 公式：
+    /// trust[s][u] = β · 本地评分 + (1-β) · Σ w·trust[v][u]
+    /// 其中 v 是「从正分账户中按评分加权抽到的样本」，w 是命中比例。
+    fn recompute_trust_with(&mut self, samples: &[(usize, f64)]) {
+        let beta = self.config.preset.beta;
+        let now = self.now;
+
+        // 收集账户：本地评过的 + 对端发布过的
+        let local = self.list.decayed_weights(now);
         let mut accounts: std::collections::HashSet<AccountId> = std::collections::HashSet::new();
-        for (a, _) in self.list.decayed_weights(self.now) {
-            accounts.insert(a as AccountId);
+        for (a, _) in &local {
+            accounts.insert(*a as AccountId);
         }
         for m in self.peer_trust.values() {
             for &a in m.keys() {
@@ -218,9 +230,8 @@ impl Runtime {
             }
         }
 
-        let local = self.list.decayed_weights(self.now);
+        // 3. 逐账户计算
         let mut next = HashMap::with_capacity(accounts.len());
-
         for &u in &accounts {
             let own = local
                 .iter()
@@ -228,15 +239,18 @@ impl Runtime {
                 .map(|(_, w)| *w)
                 .unwrap_or(0.5);
 
+            // 群体：只来自抽到的样本，按命中比例加权
             let mut sum = 0.0;
-            let mut cnt = 0usize;
-            for m in self.peer_trust.values() {
-                if let Some(v) = m.get(&u) {
-                    sum += *v as f64;
-                    cnt += 1;
+            let mut wsum = 0.0;
+            for &(v, w) in samples {
+                if let Some(m) = self.peer_trust.get(&(v as PeerId)) {
+                    if let Some(val) = m.get(&u) {
+                        sum += w * (*val as f64);
+                        wsum += w;
+                    }
                 }
             }
-            let group = if cnt > 0 { sum / cnt as f64 } else { 0.5 };
+            let group = if wsum > 0.0 { sum / wsum } else { 0.5 };
 
             next.insert(u, beta * own + (1.0 - beta) * group);
         }

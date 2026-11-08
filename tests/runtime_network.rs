@@ -1,3 +1,5 @@
+#![allow(irrefutable_let_patterns)]
+
 //! 多节点运行时端到端测试。
 //!
 //! 验证：A 信任 B，B 信任 C，A 是否间接信任 C。

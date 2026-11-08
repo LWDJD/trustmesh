@@ -43,5 +43,9 @@ path = "src/bin/baseline_compare.rs"
 name = "neg_attack"
 path = "src/bin/neg_attack.rs"
 
+[[bin]]
+name = "vouch"
+path = "src/bin/vouch.rs"
+
 [profile.release]
 opt-level = 3

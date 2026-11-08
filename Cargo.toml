@@ -39,5 +39,9 @@ path = "src/bin/large_scale.rs"
 name = "baseline_compare"
 path = "src/bin/baseline_compare.rs"
 
+[[bin]]
+name = "neg_attack"
+path = "src/bin/neg_attack.rs"
+
 [profile.release]
 opt-level = 3

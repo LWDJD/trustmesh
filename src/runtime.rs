@@ -34,14 +34,12 @@ pub type AccountId = u64;
 /// 运行时之间传递的消息。
 #[derive(Clone, Debug)]
 pub enum Message {
-    /// 发布自己的评分摘要。
+    /// 发布自己的信任摘要。
+    /// 携带「我对各账户的 trust」，不是「我的评分」。
     Publish {
         owner: PeerId,
-        /// 压缩后的桶，长度应为 buckets × hashers
-        buckets: Vec<f32>,
-        /// 声明的评分数
-        count: u32,
-        /// 时间戳
+        /// 稀疏的 (账户, trust) 列表
+        trust: Vec<(AccountId, f32)>,
         at: u64,
     },
     /// 请求某个账户的摘要。
@@ -49,7 +47,6 @@ pub enum Message {
     /// 回应摘要请求。
     SummaryResponse {
         target: AccountId,
-        /// 加权后的摘要值
         value: f32,
         at: u64,
     },
@@ -148,11 +145,12 @@ pub struct Runtime {
     pub id: PeerId,
     pub config: RuntimeConfig,
     list: RatingList,
-    sketch: Sketch,
     rng: Rng,
     now: u64,
-    /// 收到的摘要缓存：peer → (target → value)
-    peer_summaries: HashMap<PeerId, HashMap<AccountId, f32>>,
+    /// 我对各账户的当前信任分
+    trust: HashMap<AccountId, f64>,
+    /// 对端发布的信任摘要：peer → (account → trust)
+    peer_trust: HashMap<PeerId, HashMap<AccountId, f32>>,
     outbox: Vec<Action>,
     last_publish: u64,
     /// 本轮抽样结果，用于调试
@@ -162,14 +160,13 @@ pub struct Runtime {
 impl Runtime {
     pub fn new(id: PeerId, config: RuntimeConfig, seed: u64) -> Self {
         let list = config.preset.rating_list();
-        let sketch = config.preset.sketch(seed);
         Self {
             id,
             list,
-            sketch,
             rng: Rng::new(seed),
             now: 0,
-            peer_summaries: HashMap::new(),
+            trust: HashMap::new(),
+            peer_trust: HashMap::new(),
             outbox: Vec::new(),
             last_publish: 0,
             config,
@@ -177,12 +174,13 @@ impl Runtime {
         }
     }
 
-    /// 记录一次本地评分。
+    /// 记录一次本地评分，并立即更新 trust。
     pub fn rate(&mut self, target: AccountId, score: f64) {
         self.list.record(target as usize, score, self.now);
+        self.recompute_trust();
     }
 
-    /// 推进时间。执行抽样、衰减、定期发布。
+    /// 推进时间。执行抽样、重算 trust、定期发布。
     pub fn tick(&mut self, now: u64) {
         self.now = now;
 
@@ -195,6 +193,9 @@ impl Runtime {
             .map(|(a, w)| (*a as AccountId, *w))
             .collect();
 
+        // 重算 trust：本地评分 + 对端 trust 的加权
+        self.recompute_trust();
+
         // 定期发布
         if now.saturating_sub(self.last_publish) >= self.config.publish_every {
             self.publish();
@@ -202,14 +203,57 @@ impl Runtime {
         }
     }
 
+    /// 重算自己对所有已知账户的 trust。
+    fn recompute_trust(&mut self) {
+        let beta = self.config.preset.beta;
+
+        // 收集所有已知账户：本地评过的 + 对端发布过的
+        let mut accounts: std::collections::HashSet<AccountId> = std::collections::HashSet::new();
+        for (a, _) in self.list.decayed_weights(self.now) {
+            accounts.insert(a as AccountId);
+        }
+        for m in self.peer_trust.values() {
+            for &a in m.keys() {
+                accounts.insert(a);
+            }
+        }
+
+        let local = self.list.decayed_weights(self.now);
+        let mut next = HashMap::with_capacity(accounts.len());
+
+        for &u in &accounts {
+            let own = local
+                .iter()
+                .find(|(a, _)| *a as AccountId == u)
+                .map(|(_, w)| *w)
+                .unwrap_or(0.5);
+
+            let mut sum = 0.0;
+            let mut cnt = 0usize;
+            for m in self.peer_trust.values() {
+                if let Some(v) = m.get(&u) {
+                    sum += *v as f64;
+                    cnt += 1;
+                }
+            }
+            let group = if cnt > 0 { sum / cnt as f64 } else { 0.5 };
+
+            next.insert(u, beta * own + (1.0 - beta) * group);
+        }
+
+        self.trust = next;
+    }
+
     /// 构造发布消息，放进 outbox。
     fn publish(&mut self) {
-        let buckets: Vec<f32> = self.sketch.raw().iter().map(|&x| x as f32).collect();
-        let count = self.list.len() as u32;
+        let trust: Vec<(AccountId, f32)> = self
+            .trust
+            .iter()
+            .map(|(&a, &v)| (a, v as f32))
+            .collect();
         let msg = Message::Publish {
             owner: self.id,
-            buckets,
-            count,
+            trust,
             at: self.now,
         };
         for &peer in &self.config.peers {
@@ -222,17 +266,11 @@ impl Runtime {
     /// 处理入站消息。
     pub fn on_message(&mut self, from: PeerId, msg: Message) {
         match msg {
-            Message::Publish {
-                owner,
-                buckets,
-                count: _,
-                at,
-            } => {
-                // 存下对端的摘要，供后续查询
-                let entry = self.peer_summaries.entry(owner).or_default();
-                // 简化：只存桶的和，实际应还原成逐目标值
-                let sum: f32 = buckets.iter().sum();
-                entry.insert(0, sum);
+            Message::Publish { owner, trust, at } => {
+                let entry = self.peer_trust.entry(owner).or_default();
+                for (a, v) in trust {
+                    entry.insert(a, v);
+                }
                 let _ = at;
             }
             Message::RequestSummary { target, at } => {
@@ -251,7 +289,7 @@ impl Runtime {
                 value,
                 at: _,
             } => {
-                self.peer_summaries
+                self.peer_trust
                     .entry(from)
                     .or_default()
                     .insert(target, value);
@@ -260,6 +298,8 @@ impl Runtime {
                 let _ = at;
             }
         }
+        // 状态变了，立即重算
+        self.recompute_trust();
     }
 
     /// 取走本轮产生的出站动作。
@@ -267,28 +307,9 @@ impl Runtime {
         std::mem::take(&mut self.outbox)
     }
 
-    /// 查询某个账户的合成信任分。
-    ///
-    /// 本地评分 + 对端摘要的加权平均。
+    /// 查询某个账户的当前信任分。
     pub fn query(&self, target: AccountId) -> f64 {
-        let beta = self.config.preset.beta;
-        let own = self.list.decayed_weights(self.now)
-            .into_iter()
-            .find(|(a, _)| *a == target as usize)
-            .map(|(_, w)| w)
-            .unwrap_or(0.5);
-
-        let mut sum = 0.0;
-        let mut cnt = 0;
-        for (_, m) in self.peer_summaries.iter() {
-            if let Some(v) = m.get(&target) {
-                sum += *v as f64;
-                cnt += 1;
-            }
-        }
-        let group = if cnt > 0 { sum / cnt as f64 } else { 0.5 };
-
-        beta * own + (1.0 - beta) * group
+        self.trust.get(&target).copied().unwrap_or(0.5)
     }
 
     /// 抽样结果（调试用）。

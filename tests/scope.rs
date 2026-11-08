@@ -5,11 +5,11 @@
 //! 2. 合并后的范围仍能正确打分。
 //! 3. 加噪后不泄露节点，但分数仍可用。
 
-use social_trust::graph::Graph;
-use social_trust::local_push::{solve_local, LocalPushParams};
-use social_trust::rng::Rng;
-use social_trust::scope::{merge, merge_published, publish, query, sample, score};
-use social_trust::sim;
+use trustmesh::graph::Graph;
+use trustmesh::local_push::{solve_local, LocalPushParams};
+use trustmesh::rng::Rng;
+use trustmesh::scope::{merge, merge_published, publish, query, sample, score};
+use trustmesh::sim;
 
 fn make_graph(n: usize, seed: u64) -> Graph {
     let mut rng = Rng::new(seed);

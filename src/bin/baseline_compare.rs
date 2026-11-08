@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use social_trust::rng::Rng;
+use trustmesh::rng::Rng;
 
 struct Net {
     n: usize,
@@ -340,7 +340,7 @@ fn main() {
 
     println!("\n[3] 评分清单模式（RatingList）与直接抽样对比");
 
-    use social_trust::rating_list::{RatingList, StorageMode};
+    use trustmesh::rating_list::{RatingList, StorageMode};
 
     let mut rng3 = Rng::new(999);
     for &k in &[20usize, 50, 100] {

@@ -1,9 +1,9 @@
 //! 范围化系统报告：抽样、合并、模糊化。
 
-use social_trust::local_push::{solve_local, LocalPushParams};
-use social_trust::rng::Rng;
-use social_trust::scope::{merge, merge_published, publish, sample, score};
-use social_trust::sim;
+use trustmesh::local_push::{solve_local, LocalPushParams};
+use trustmesh::rng::Rng;
+use trustmesh::scope::{merge, merge_published, publish, sample, score};
+use trustmesh::sim;
 
 fn main() {
     println!("范围化系统报告");

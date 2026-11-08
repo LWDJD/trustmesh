@@ -1,7 +1,7 @@
 //! Sketch 报告：大小、精度、规模特性。
 
-use social_trust::rng::Rng;
-use social_trust::sketch::Sketch;
+use trustmesh::rng::Rng;
+use trustmesh::sketch::Sketch;
 
 fn sparse_row(n: usize, per_node: usize, seed: u64) -> Vec<f64> {
     let mut rng = Rng::new(seed);

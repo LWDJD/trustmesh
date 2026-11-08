@@ -1,6 +1,20 @@
-# 社交信任库
+# trustmesh
 
-去中心化社交信任的 Rust 实现。核心是「以自己为中心」的评分传播 + 抽样压缩。
+去中心化信任网络。核心是「伪名 + 信誉」：每个操作都挂在一个有历史的账户上，攻击成本从技术转移到时间。
+
+## 它做什么
+
+- 按评分加权的信任传播，每个节点只信自己评过分的人
+- 线性衰减，旧关系 2 倍半衰期后归零
+- Count Sketch 压缩，发布体积固定
+- 极轻量运行时，不绑定 async，单线程无锁
+- 四套实测参数，默认防攻击优先
+
+## 它不做什么
+
+- 不做全局共识（每个人看到的分数不同）
+- 不做内容分类（只输出作者可信度）
+- 不做公共可验证评分（第三方无法验证你算的对不对）
 
 ## 文档
 
@@ -9,24 +23,26 @@
 | `SPEC.md` | 协议标准：数学模型、数据结构、算法、身份 |
 | `SECURITY.md` | 安全模型：攻击方式、防御机制、实测数据 |
 | `PARAMETERS.md` | 参数公式、调优流程、推荐配置 |
-
-三份文档配套读。`SPEC.md` 说「应该怎样」，`SECURITY.md` 说「为什么这样」，`PARAMETERS.md` 说「参数取多少」。
+| `ARCHITECTURE.md` | 运行时分层、消息协议、测试策略 |
+| `SIMULATION.md` | 全真模拟数据 |
+| `AUDIT.md` | 实现审计：哪些正式、哪些实验、哪些废弃 |
 
 ## 核心数学
 
 ```
 Π = β·P + (1-β)·W·Π
-Π = β·(I - (1-β)·W)⁻¹·P
 ```
 
-`Π[s][u]` 是观察者 s 眼中账户 u 的信任分。β=0.7 表示个人判断占七成。
+`Π[s][u]` 是观察者 s 眼中账户 u 的信任分。默认 β=0.3，表示个人判断占三成，群体占七成。
 
 传播无跳数上限，第 t 跳权重 `(1-β)^t`。数值实现可截断，但误差需小于总质量 1%。
+
+信任只从「我评过分的账户」进入，按评分比例加权。没评过的人，它的意见不影响我。
 
 ## 快速开始
 
 ```rust
-use social_trust::presets::Preset;
+use trustmesh::presets::Preset;
 
 // 一套默认参数，实测最优（防攻击优先）
 let p = Preset::recommended();
@@ -36,7 +52,7 @@ let mut list = p.rating_list();
 list.record(42, 0.8, 0);       // 给账户 42 打 0.8 分
 
 // 抽样（按评分加权，半衰期 3 天线性衰减）
-let mut rng = social_trust::rng::Rng::new(1);
+let mut rng = trustmesh::rng::Rng::new(1);
 let samples = list.sample(p.samples, 0, &mut rng);
 
 // 压缩
@@ -68,7 +84,7 @@ cargo run --release --bin sketch_report # 压缩报告
 ## 核心接口
 
 ```rust
-use social_trust::{Graph, solve_exact, solve_local, LocalPushParams};
+use trustmesh::{Graph, solve_exact, solve_local, LocalPushParams};
 
 let mut g = Graph::new(n);
 g.add_edge(0, 1, 1.0);

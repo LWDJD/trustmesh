@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use social_trust::rng::Rng;
+use trustmesh::rng::Rng;
 
 const N: usize = 500;
 const BETA: f64 = 0.3;

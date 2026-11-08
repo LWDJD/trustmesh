@@ -4,8 +4,8 @@
 //! 1. 合并 K 个用户，相对误差是否与 K 无关
 //! 2. 最终桶数 B 是否决定精度
 
-use social_trust::rng::Rng;
-use social_trust::sketch::Sketch;
+use trustmesh::rng::Rng;
+use trustmesh::sketch::Sketch;
 
 fn main() {
     println!("合并与精度报告");
@@ -150,10 +150,10 @@ fn main() {
         "个人:群体", "K", "平均误差", "最大误差"
     );
 
-    use social_trust::graph::Graph;
-    use social_trust::local_push::{solve_local, LocalPushParams};
-    use social_trust::scope::{sample, score};
-    use social_trust::sim;
+    use trustmesh::graph::Graph;
+    use trustmesh::local_push::{solve_local, LocalPushParams};
+    use trustmesh::scope::{sample, score};
+    use trustmesh::sim;
 
     for &beta in &[0.3f64, 0.5, 0.7] {
         let mut gen = Rng::new(777);

@@ -1,6 +1,6 @@
 //! 全真模拟报告。
 
-use social_trust::fullsim::{Sim, SimConfig, Snapshot};
+use trustmesh::fullsim::{Sim, SimConfig, Snapshot};
 
 fn run_case(name: &str, cfg: SimConfig) -> Vec<Snapshot> {
     let mut sim = Sim::new(cfg);
@@ -234,13 +234,13 @@ fn main() {
             let honest: Vec<usize> = sim
                 .accounts
                 .iter()
-                .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+                .filter(|a| matches!(a.kind, trustmesh::fullsim::Kind::Honest))
                 .map(|a| a.id)
                 .collect();
             let attackers: Vec<usize> = sim
                 .accounts
                 .iter()
-                .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Sybil { .. }))
+                .filter(|a| matches!(a.kind, trustmesh::fullsim::Kind::Sybil { .. }))
                 .map(|a| a.id)
                 .collect();
 
@@ -304,13 +304,13 @@ fn main() {
         let honest: Vec<usize> = sim
             .accounts
             .iter()
-            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+            .filter(|a| matches!(a.kind, trustmesh::fullsim::Kind::Honest))
             .map(|a| a.id)
             .collect();
         let sybils: Vec<usize> = sim
             .accounts
             .iter()
-            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Sybil { .. }))
+            .filter(|a| matches!(a.kind, trustmesh::fullsim::Kind::Sybil { .. }))
             .map(|a| a.id)
             .collect();
 
@@ -374,7 +374,7 @@ fn main() {
         let honest: Vec<usize> = sim
             .accounts
             .iter()
-            .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+            .filter(|a| matches!(a.kind, trustmesh::fullsim::Kind::Honest))
             .map(|a| a.id)
             .collect();
 
@@ -427,7 +427,7 @@ fn main() {
             let honest: Vec<usize> = sim
                 .accounts
                 .iter()
-                .filter(|a| matches!(a.kind, social_trust::fullsim::Kind::Honest))
+                .filter(|a| matches!(a.kind, trustmesh::fullsim::Kind::Honest))
                 .map(|a| a.id)
                 .collect();
 

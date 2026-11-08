@@ -2,10 +2,10 @@
 
 use std::time::Instant;
 
-use social_trust::exact::{residual, solve_exact};
-use social_trust::local_push::{solve_local, LocalPushParams};
-use social_trust::rng::Rng;
-use social_trust::sim;
+use trustmesh::exact::{residual, solve_exact};
+use trustmesh::local_push::{solve_local, LocalPushParams};
+use trustmesh::rng::Rng;
+use trustmesh::sim;
 
 fn main() {
     println!("社交信任计算：数学验证报告");

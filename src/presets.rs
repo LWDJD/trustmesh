@@ -15,7 +15,7 @@
 //! # 用法
 //!
 //! ```no_run
-//! use social_trust::presets::Preset;
+//! use trustmesh::presets::Preset;
 //!
 //! let p = Preset::recommended();
 //! let list = p.rating_list();

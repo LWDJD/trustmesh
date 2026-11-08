@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use social_trust::rng::Rng;
+use trustmesh::rng::Rng;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {

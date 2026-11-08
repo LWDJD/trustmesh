@@ -1,10 +1,15 @@
 [package]
-name = "social_trust"
+name = "trustmesh"
 version = "0.1.0"
 edition = "2021"
+description = "Lightweight decentralized trust: personalized propagation, rating-weighted sampling, and sybil resistance"
+license = "MIT"
+keywords = ["p2p", "trust", "sybil", "decentralized", "reputation"]
+categories = ["network-programming", "algorithms"]
+readme = "README.md"
 
 [lib]
-name = "social_trust"
+name = "trustmesh"
 path = "src/lib.rs"
 
 [[bin]]
@@ -49,3 +54,5 @@ path = "src/bin/vouch.rs"
 
 [profile.release]
 opt-level = 3
+lto = true
+strip = true

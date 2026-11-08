@@ -10,11 +10,11 @@
 //! 6. 收敛：eps 越小，误差越小
 //! 7. 一致性：求解与行顺序无关
 
-use social_trust::exact::{residual, solve_exact};
-use social_trust::graph::Graph;
-use social_trust::local_push::{solve_local, solve_local_single, LocalPushParams};
-use social_trust::rng::Rng;
-use social_trust::sim;
+use trustmesh::exact::{residual, solve_exact};
+use trustmesh::graph::Graph;
+use trustmesh::local_push::{solve_local, solve_local_single, LocalPushParams};
+use trustmesh::rng::Rng;
+use trustmesh::sim;
 
 /// 构造一个可复现的小图。
 fn small_graph() -> Graph {

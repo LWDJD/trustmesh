@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "social_trust"
+name = "trustmesh"
 version = "0.1.0"

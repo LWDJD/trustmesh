@@ -5,8 +5,8 @@
 //! 2. 误差是否与 N 无关（稀疏评分时）
 //! 3. 稠密评分时误差是否爆炸
 
-use social_trust::rng::Rng;
-use social_trust::sketch::Sketch;
+use trustmesh::rng::Rng;
+use trustmesh::sketch::Sketch;
 
 fn build_dense(n: usize, per_node: usize, seed: u64) -> Vec<f64> {
     let mut rng = Rng::new(seed);

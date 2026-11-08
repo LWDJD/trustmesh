@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use social_trust::rng::Rng;
+use trustmesh::rng::Rng;
 
 const N: usize = 200;
 const BETA: f64 = 0.3;

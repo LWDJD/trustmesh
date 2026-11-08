@@ -1,6 +1,6 @@
 //! 攻击模拟报告：女巫攻击与信任潜伏。
 
-use social_trust::attack::{latent_attack, sybil_attack};
+use trustmesh::attack::{latent_attack, sybil_attack};
 
 fn main() {
     println!("攻击模拟报告");

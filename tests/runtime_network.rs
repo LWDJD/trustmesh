@@ -2,8 +2,8 @@
 //!
 //! 验证：A 信任 B，B 信任 C，A 是否间接信任 C。
 
-use social_trust::presets::Preset;
-use social_trust::runtime::{account, run_loop, MemoryTransport, Runtime, RuntimeConfig};
+use trustmesh::presets::Preset;
+use trustmesh::runtime::{account, run_loop, MemoryTransport, Runtime, RuntimeConfig};
 
 fn node(id: u64, peers: Vec<u64>) -> Runtime {
     let mut cfg = RuntimeConfig::default();
@@ -42,14 +42,14 @@ fn indirect_trust_propagates() {
         let c_out = c.take_outbox();
 
         for act in a_out {
-            if let social_trust::runtime::Action::Send { to, msg } = act {
+            if let trustmesh::runtime::Action::Send { to, msg } = act {
                 if to == b_id {
                     b.on_message(a_id, msg);
                 }
             }
         }
         for act in b_out {
-            if let social_trust::runtime::Action::Send { to, msg } = act {
+            if let trustmesh::runtime::Action::Send { to, msg } = act {
                 match to {
                     x if x == a_id => a.on_message(b_id, msg),
                     x if x == c_id => c.on_message(b_id, msg),
@@ -58,7 +58,7 @@ fn indirect_trust_propagates() {
             }
         }
         for act in c_out {
-            if let social_trust::runtime::Action::Send { to, msg } = act {
+            if let trustmesh::runtime::Action::Send { to, msg } = act {
                 if to == b_id {
                     b.on_message(c_id, msg);
                 }
@@ -97,13 +97,13 @@ fn summary_request_roundtrip() {
     a.rate(2, 1.0);
 
     // B 收到来自 A 的请求，应产生回应
-    b.on_message(1, social_trust::runtime::Message::RequestSummary { target: 100, at: 0 });
+    b.on_message(1, trustmesh::runtime::Message::RequestSummary { target: 100, at: 0 });
     let b_out = b.take_outbox();
     assert_eq!(b_out.len(), 1, "收到请求应回应");
 
     // A 收到回应
     for act in b_out {
-        if let social_trust::runtime::Action::Send { msg, .. } = act {
+        if let trustmesh::runtime::Action::Send { msg, .. } = act {
             a.on_message(2, msg);
         }
     }

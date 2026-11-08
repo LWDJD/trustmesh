@@ -25,6 +25,38 @@
 
 ## 快速开始
 
+```rust
+use social_trust::presets::Preset;
+
+// 一套默认参数，实测最优（防攻击优先）
+let p = Preset::recommended();
+
+// 评分清单
+let mut list = p.rating_list();
+list.record(42, 0.8, 0);       // 给账户 42 打 0.8 分
+
+// 抽样（按评分加权，半衰期 3 天线性衰减）
+let mut rng = social_trust::rng::Rng::new(1);
+let samples = list.sample(p.samples, 0, &mut rng);
+
+// 压缩
+let mut sk = p.sketch(1);
+sk.add_row_sparse(&[0.5; 100], 0.5, 1.0);
+```
+
+四套预设：
+
+| 预设 | 个人:群体 | K | 半衰期 | 适用 |
+|---|---|---|---|---|
+| `recommended` | 3:7 | 50 | 3 天 | 防攻击优先（默认） |
+| `balanced` | 5:5 | 50 | 7 天 | 平衡 |
+| `personal` | 7:3 | 100 | 14 天 | 个人观点优先 |
+| `mobile` | 3:7 | 20 | 3 天 | 手机、低功耗 |
+
+详细参数见 `PARAMETERS.md`，实测依据见 `SIMULATION.md`。
+
+## 命令行工具
+
 ```bash
 cargo test                              # 28 个测试
 cargo run --release --bin simulate      # 基础验证报告
@@ -54,17 +86,19 @@ let score = row[1];
 
 | 文件 | 职责 | 状态 |
 |---|---|---|
-| `src/graph.rs` | 图结构、评分矩阵 | 完成 |
-| `src/dense.rs` | 矩阵、高斯消元 | 完成 |
-| `src/exact.rs` | 精确解 | 完成 |
-| `src/local_push.rs` | 近似解 | 完成 |
-| `src/scope.rs` | 抽样、合并 | 完成 |
-| `src/sketch.rs` | 压缩、加权合并 | 完成 |
-| `src/attack.rs` | 攻击模拟 | 完成 |
-| `src/sim.rs` | 图生成 | 完成 |
-| `src/rng.rs` | 确定性随机数 | 完成 |
-| 异步迭代 | 持续传播 | 未实现 |
-| 双时间尺度累积 | 突变检测 | 未实现 |
+| `rating_list.rs` | 评分清单、线性衰减 | 完成 |
+| `sketch.rs` | 压缩、加权合并 | 完成 |
+| `presets.rs` | 四套实测最优参数 | 完成 |
+| `local_push.rs` | 近似解 | 完成 |
+| `exact.rs` | 精确解 | 完成 |
+| `graph.rs` | 图结构 | 完成 |
+| `dense.rs` | 矩阵运算 | 完成 |
+| `rng.rs` | 确定性随机数 | 完成 |
+| `fullsim.rs` | 全真模拟 | 实验 |
+| `sim.rs` | 静态图生成 | 实验 |
+| `policy.rs` | 精度策略接口 | 未接入 |
+| `scope.rs` | 旧抽样 | 已废弃 |
+| `attack.rs` | 旧攻击模拟 | 已废弃 |
 | 地址与身份 | CAIP-10、多身份绑定 | 未实现 |
 | 审计 | 虚报检测 | 未实现 |
 

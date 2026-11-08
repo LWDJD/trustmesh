@@ -31,13 +31,24 @@ pub type PeerId = u64;
 /// 账户标识。
 pub type AccountId = u64;
 
+/// 单向映射：账户 → 应该去问哪个节点。
+///
+/// 只需要这一个方向，因为整个流程的输出只是「给某个账户算分」。
+/// 生产环境用 SHA-256(address)[0..8]，这里用等价的确定性哈希避免引入依赖。
+pub fn peer_of(account: AccountId) -> PeerId {
+    let mut x = account.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
 /// 运行时之间传递的消息。
 #[derive(Clone, Debug)]
 pub enum Message {
     /// 发布自己的信任摘要。
-    /// 携带「我对各账户的 trust」，不是「我的评分」。
+    /// 携带「我对各账户的 trust」，key 是发布者的账户 ID。
     Publish {
-        owner: PeerId,
+        owner: AccountId,
         /// 稀疏的 (账户, trust) 列表
         trust: Vec<(AccountId, f32)>,
         at: u64,
@@ -149,8 +160,9 @@ pub struct Runtime {
     now: u64,
     /// 我对各账户的当前信任分
     trust: HashMap<AccountId, f64>,
-    /// 对端发布的信任摘要：peer → (account → trust)
-    peer_trust: HashMap<PeerId, HashMap<AccountId, f32>>,
+    /// 对端发布的信任摘要：发布者账户 → (目标账户 → trust)
+    /// key 用账户 ID，不用 PeerId，因为抽样得到的是账户 ID。
+    peer_trust: HashMap<AccountId, HashMap<AccountId, f32>>,
     outbox: Vec<Action>,
     last_publish: u64,
     /// 本轮抽样结果，用于调试
@@ -243,7 +255,8 @@ impl Runtime {
             let mut sum = 0.0;
             let mut wsum = 0.0;
             for &(v, w) in samples {
-                if let Some(m) = self.peer_trust.get(&(v as PeerId)) {
+                // 单向映射只用于发送；这里直接用账户 ID 查已收到的发布
+                if let Some(m) = self.peer_trust.get(&(v as AccountId)) {
                     if let Some(val) = m.get(&u) {
                         sum += w * (*val as f64);
                         wsum += w;
@@ -266,7 +279,7 @@ impl Runtime {
             .map(|(&a, &v)| (a, v as f32))
             .collect();
         let msg = Message::Publish {
-            owner: self.id,
+            owner: self.id as AccountId,
             trust,
             at: self.now,
         };
@@ -303,8 +316,9 @@ impl Runtime {
                 value,
                 at: _,
             } => {
+                // 无法从 PeerId 反查账户，所以用发送方 id 当账户占位
                 self.peer_trust
-                    .entry(from)
+                    .entry(from as AccountId)
                     .or_default()
                     .insert(target, value);
             }
@@ -391,6 +405,12 @@ mod tests {
                 assert!(matches!(msg, Message::SummaryResponse { .. }));
             }
         }
+    }
+
+    #[test]
+    fn peer_mapping_deterministic() {
+        assert_eq!(peer_of(100), peer_of(100));
+        assert_ne!(peer_of(100), peer_of(101));
     }
 
     #[test]

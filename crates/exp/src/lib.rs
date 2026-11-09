@@ -46,11 +46,15 @@ pub struct PropConfig {
     pub ban_lambda: f32,
     /// 影响力预算：把来源发布的观点归一化到总量 1（打的人越多每份越轻）
     pub normalize_view: bool,
+    /// 攻击者是否也做归一化（false = 攻击者不归一化，试图放大影响力）
+    pub attacker_normalizes: bool,
+    /// 接收方是否按「估计的总质量」再归一化一次（防发布方不归一化）
+    pub receiver_normalizes: bool,
 }
 
 impl Default for PropConfig {
     fn default() -> Self {
-        Self { beta: 0.3, samples: 8, rounds: 4, mode: AggMode::Mean, use_noise_floor: true, exclude_zero: false, banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0, ban_lambda: 0.0, normalize_view: false }
+        Self { beta: 0.3, samples: 8, rounds: 4, mode: AggMode::Mean, use_noise_floor: true, exclude_zero: false, banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0, ban_lambda: 0.0, normalize_view: false, attacker_normalizes: true, receiver_normalizes: false }
     }
 }
 
@@ -89,6 +93,10 @@ pub fn run_case(cfg: SimConfig, pc: &PropConfig) -> Outcome {
 /// 可注入额外评分与额外账户的版本。
 /// inject: (评分者, 被评者, 分数)；extra_accounts 只用于抬大 n。
 pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f32)], extra_accounts: &[usize]) -> Outcome {
+    run_case_full(cfg, pc, inject, extra_accounts, &[])
+}
+
+pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f32)], extra_accounts: &[usize], attacker_ids: &[usize]) -> Outcome {
     let mut world = World::new(cfg);
     world.run();
     let mut ratings = world.ratings();
@@ -118,15 +126,17 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
 
     // 初始观点 = 自身评分的压缩
     let keys: Vec<[u8; 32]> = (0..n).map(key_of).collect();
-    let mk = |list: &[(usize, f32)]| -> CompressedView {
+    let mk = |idx: usize, list: &[(usize, f32)]| -> CompressedView {
         let total: f32 = list.iter().map(|(_, s)| *s).sum();
+        let is_atk = attacker_ids.contains(&idx);
+        let do_norm = if is_atk { pc.attacker_normalizes } else { pc.normalize_view };
         let pairs: Vec<([u8; 32], f32)> = list.iter().map(|(t, s)| {
-            let v = if pc.normalize_view && total > 0.0 { *s / total } else { *s };
+            let v = if do_norm && total > 0.0 { *s / total } else { *s };
             (keys[*t], v)
         }).collect();
         CompressedView::from_pairs(view_params(), &pairs)
     };
-    let mut views: Vec<CompressedView> = positive.iter().map(|l| mk(l)).collect();
+    let mut views: Vec<CompressedView> = (0..n).map(|i| mk(i, &positive[i])).collect();
 
     let mut rng = R(0x1234_5678_9ABC_DEF1);
     let mut rep: Vec<Vec<f32>> = vec![vec![0.0; n]; n];
@@ -134,6 +144,17 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
     let mut mul: Vec<Vec<f32>> = vec![vec![1.0f32; n]; n];
 
     for _round in 0..pc.rounds {
+        // 接收方自行估计每个来源的总质量（发布方可以谎报，所以必须自己算）
+        let mut view_mass: Vec<f32> = vec![1.0; n];
+        if pc.receiver_normalizes {
+            for s in 0..n {
+                let mut m = 0.0f32;
+                for u in 0..n {
+                    m += views[s].query(&keys[u]).clamp(0.0, 1.0);
+                }
+                view_mass[s] = m.max(1e-6);
+            }
+        }
         let mut next_rep = vec![vec![0.0f32; n]; n];
         let mut next_views: Vec<CompressedView> = Vec::with_capacity(n);
 
@@ -157,7 +178,7 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
                     let mut v = views[*s].query(&keys[u]).clamp(0.0, 1.0);
                     if pc.use_noise_floor && v < 1e-6 { v = 0.0; }
                     if pc.exclude_zero && v == 0.0 { continue; }
-                    items.push((*w * mul[i][*s], v));
+                    items.push((*w * mul[i][*s], v / view_mass[*s]));
                 }
                 if pc.ban_exclude > 0.0 && !others.is_empty() {
                     let mut filtered: Vec<(f32, f32)> = Vec::with_capacity(items.len());
@@ -177,8 +198,10 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
                 row[u] = combine(pc.beta, personal, group);
             }
             let total: f32 = row.iter().sum();
+            let is_atk = attacker_ids.contains(&i);
+            let do_norm = if is_atk { pc.attacker_normalizes } else { pc.normalize_view };
             let pairs: Vec<([u8; 32], f32)> = (0..n).filter(|u| row[*u] > 0.0).map(|u| {
-                let v = if pc.normalize_view && total > 0.0 { row[u] / total } else { row[u] };
+                let v = if do_norm && total > 0.0 { row[u] / total } else { row[u] };
                 (keys[u], v)
             }).collect();
             next_views.push(CompressedView::from_pairs(view_params(), &pairs));

@@ -171,6 +171,11 @@ impl World {
     }
 
     /// 存活账户数。
+    /// 只读访问账户表（实验用）。
+    pub fn accounts(&self) -> &[Account] {
+        &self.accounts
+    }
+
     pub fn alive_count(&self) -> usize {
         self.accounts.iter().filter(|a| a.is_alive()).count()
     }

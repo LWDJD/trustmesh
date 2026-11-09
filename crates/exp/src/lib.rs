@@ -1,5 +1,19 @@
 //! 端到端实验框架：把 tm_sim 生产的社交图，喂给 tm_view + tm_agg 做信任传播。
 //!
+//! # ⚠️ 已知局限（未修，仅在文档中标注）
+//!
+//! **本文件是集中式近似，不是真 runtime。**
+//!
+//! 1. **没有时间衰减**。这里搜不到 `decay`/`half_life`，权重只有「评分 × 份额」。
+//!    因此本文件驱动的实验（e2e / sybilcap / factorial / splitnorm / dist）
+//!    测的是一个**不含衰减**的系统。
+//!    真 runtime 的衰减在 `tm_engine::Engine` 里（`use tm_agg::{..., decay, ...}`），
+//!    所以 multinode / latent / grid 三个 bin 的结果不受此影响。
+//!
+//! 2. **新账户编号可能撞号**。各 bin 用 `alive_count()` 当新账户起始编号，
+//!    但 `World` 的账户只增不删，有账户离开时 `alive_count < accounts.len()`，
+//!    注入的账户会与已有账户重号。正确做法是 `accounts().len()`。
+//!
 //! 核心问题：原始评分里女巫可能是最高分（集群内互评 1.0），
 //! 但经过「只从自己评过分的人里传播」之后，诚实观察者眼中的女巫声望还剩多少？
 
@@ -182,6 +196,9 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
                 }
                 if pc.ban_exclude > 0.0 && !others.is_empty() {
                     let mut filtered: Vec<(f32, f32)> = Vec::with_capacity(items.len());
+                    // FIXME(zip 错位，未触发): 上面 exclude_zero 会 continue 跳过条目，
+                    // items 比 picked 短，这里按下标配对就会把权重配到错误的来源上。
+                    // 目前所有 bin 都把 ban_exclude 设成 0.0，走不到这个分支。
                     for (( w, v), (s, _)) in items.iter().zip(picked.iter()) {
                         let mut hit = 0usize;
                         for &b in &others {

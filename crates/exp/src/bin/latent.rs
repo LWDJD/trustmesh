@@ -102,6 +102,13 @@ fn run(cfg: SimConfig, rounds: u64, samples: usize) -> Out {
     Out {
         honest: if hcnt > 0 { hsum / hcnt as f64 } else { 0.0 },
         attacker: if acnt > 0 { asum / acnt as f64 } else { 0.0 },
+        // FIXME(分母错误，未修): ret_att 用 rn 做分母，但 rn 只在上面「诚实目标」
+        // 分支自增（第 89 行），ratt 却在「攻击目标」分支累加（第 88 行）。
+        // 结果是攻击者声望被除以诚实账户计数，攻击比例 10% 时低估约 9 倍。
+        // 影响范围：只有本 bin 输出的「回归看攻击」这一列；
+        //   「诚实/攻击」两列用 hcnt/acnt，正确；
+        //   ret_hon 用 rhon/rn，同源，正确。
+        // 其他 runtime 级仿真（multinode / grid）用的是分开的计数器，没有此问题。
         ret_att: if rn > 0 { ratt / (rn as f64) } else { 0.0 },
         ret_hon: if rn > 0 { rhon / (rn as f64) } else { 0.0 },
         ret_n: rn,

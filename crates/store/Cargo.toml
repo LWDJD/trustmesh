@@ -1,0 +1,20 @@
+[package]
+name = "tm_store"
+version = "0.1.0"
+edition = "2021"
+description = "trustmesh 存储层：账户表、正分清单与轮次抽样器"
+license = "MIT"
+
+# 显式声明本目录是独立的 workspace 根，
+# 避免被上层 trustmesh 包的目录结构误判为某个 workspace 的成员。
+#
+# 注意：其他 crate 若要把 tm_store 作为 path 依赖引入，consumer 不能放在
+# crates/store/ 目录之内（那会被当成这个 workspace 的成员而报错）；
+# 放在仓库任意其他位置都可以，已实测 path = "crates/store" 可用。
+[workspace]
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true

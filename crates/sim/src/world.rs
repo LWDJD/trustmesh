@@ -900,7 +900,17 @@ impl World {
                 for _ in 0..n_attack {
                     list.push(self.spawn(Kind::Sleeper { normal_until }));
                 }
-                self.attack.target = list.first().copied();
+                // 潜伏者必须有一个「被推广」的外部目标。
+                // 早期实现把 target 指向第一个潜伏者自己，而 push_follow 拒绝自环，
+                // 于是单个潜伏者的攻击载荷完全空转（只测到它作为普通账户的结构位置）。
+                if !list.is_empty() {
+                    let promoted = self.spawn(Kind::Promoted);
+                    self.attack.target = Some(promoted);
+                    for &s in &list {
+                        self.push_follow(s, promoted);
+                    }
+                    // 突变后要给目标打满分，得先关注它
+                }
                 self.attack.attackers = list;
             }
             AttackKind::Infiltrator => {

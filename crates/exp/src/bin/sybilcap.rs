@@ -33,6 +33,7 @@ fn main() {
                 use_noise_floor: true, exclude_zero: true,
                 banlist: false, ban_penalty: 0.5, ban_floor: 0.2,
                 ban_exclude: 0.0, ban_lambda: 0.0, normalize_view: norm,
+                attacker_normalizes: true, receiver_normalizes: true,
             };
             let o = run_case_inject(base.clone(), &pc, &inject, &sybils);
             let mut hsum = 0.0f64; let mut hcnt = 0usize;

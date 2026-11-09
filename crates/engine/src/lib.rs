@@ -56,6 +56,25 @@ impl Default for EngineConfig {
     }
 }
 
+/// 「观点有多旧」的分布快照，由 [Engine::freshness_stats] 返回。
+///
+/// 这是一个纯粹的**观测**结果：计算它不会改变任何权重，也不影响后续的查询。
+/// 全部观点都被清理掉时返回全零（而不是 NaN 或最大值）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FreshnessStats {
+    /// 已缓存的观点总数。
+    pub count: usize,
+    /// 年龄不超过一个半衰期的观点数。
+    ///
+    /// 判定口径与衰减严格对齐：恰好等于半衰期的那一条算「新鲜」，
+    /// 因为它在当前时刻的衰减因子正好是 0.5（仍有一半话语权）。
+    pub fresh_within_half_life: usize,
+    /// 年龄中位数；偶数个时取中间两个的均值并向下取整。空集合为 0。
+    pub median_age: Time,
+    /// 最大年龄。空集合为 0。
+    pub max_age: Time,
+}
+
 /// 一次性批量刷新用的请求项。
 pub struct FetchRequest {
     /// 内部编号
@@ -208,12 +227,84 @@ impl Engine {
                 x.1 /= sum;
             }
         }
-        CompressedView::from_pairs(self.cfg.view_params.clone(), &vals)
+        CompressedView::from_pairs(self.cfg.view_params, &vals)
     }
 
     /// 已知账户的编号列表（实验与调试用）。
     pub fn known_accounts(&self) -> Vec<AccountIdx> {
         (0..self.accounts.len() as u32).collect()
+    }
+
+    // ---------- 观点新鲜度 ----------
+
+    /// 某个来源的观点已经多久没更新：`now − last_check`。
+    ///
+    /// * 从没成功取到过它的观点 → `None`（「没有观点」和「观点年龄为 0」是两件事）；
+    /// * 刚刚取到 → `Some(0)`；
+    /// * 时间回拨（`now < last_check`）按 `Some(0)` 处理，绝不产生「负年龄」。
+    ///
+    /// 基准是 [StoredView::last_check]（我上次**成功**取到它观点的时间），
+    /// 不是 [StoredView::published_at]（对方**声称**的发布时间）。
+    /// 这条区别是安全性的关键：`published_at` 由对方随便填，
+    /// 把自己的旧观点说成「刚刚写的」零成本；而 `last_check` 是我自己观察到的，
+    /// 对方无法伪造，所以只有它才配当衰减基准。
+    #[must_use]
+    pub fn view_age(&self, owner: AccountIdx, now: Time) -> Option<Time> {
+        self.views.get(&owner).map(|stored| elapsed(stored.last_check, now))
+    }
+
+    /// 所有已缓存观点的年龄统计。空集合返回全零。
+    ///
+    /// 统计覆盖 `views` 里的全部条目，与「我现在还给不给它打分」无关：
+    /// 一条观点只要还在缓存里、还在参与 [Engine::query] 的群体项，就会计入。
+    /// 因此 `count` 与 `stats().2` 恒等，`prune_stale` 之后两者一起变小。
+    ///
+    /// 半衰期为 0 时按 1 处理（与 `tm_agg::decay` 的约定一致），
+    /// 这样「fresh_within_half_life」始终精确等于「衰减因子 >= 0.5 的来源数」。
+    #[must_use]
+    pub fn freshness_stats(&self, now: Time) -> FreshnessStats {
+        let mut ages: Vec<Time> =
+            self.views.values().map(|stored| elapsed(stored.last_check, now)).collect();
+        let count = ages.len();
+        if count == 0 {
+            return FreshnessStats::default();
+        }
+
+        // 与 decay 的口径对齐：H = 0 等价于 H = 1，避免出现「连 0 时刻的观点都不新鲜」。
+        let half_life = if self.cfg.half_life == 0 { 1 } else { self.cfg.half_life };
+        let fresh_within_half_life = ages.iter().filter(|&&age| age <= half_life).count();
+
+        ages.sort_unstable();
+        let median_age = if count % 2 == 1 {
+            ages[count / 2]
+        } else {
+            // 两个 u64 直接相加可能溢出，先各自折半再补上余数。
+            let (lo, hi) = (ages[count / 2 - 1], ages[count / 2]);
+            lo / 2 + hi / 2 + (lo % 2 + hi % 2) / 2
+        };
+
+        FreshnessStats {
+            count,
+            fresh_within_half_life,
+            median_age,
+            max_age: ages[count - 1],
+        }
+    }
+
+    /// 显式清理：丢掉年龄**超过** `max_age` 的观点，返回丢弃条数。
+    ///
+    /// * 边界：`age == max_age` 的观点**保留**，只有严格更旧才丢弃；
+    ///   `max_age = 0` 因此只保留「恰好在这一刻取到」的观点。
+    /// * 只动观点缓存，**不动正分清单**：评分是我自己的表态，
+    ///   清掉它会改变 [Engine::query] 的个人项，那不是「清理陈旧观点」该做的事。
+    /// * 时间回拨时年龄按 0 算，所以回拨只会让清理更保守，不会误删。
+    ///
+    /// 本方法**不会被自动调用**：什么时候算「太旧」是业务判断，
+    /// 引擎只提供能力，节奏由上层决定（例如每 N 轮扫一次）。
+    pub fn prune_stale(&mut self, now: Time, max_age: Time) -> usize {
+        let before = self.views.len();
+        self.views.retain(|_, stored| elapsed(stored.last_check, now) <= max_age);
+        before - self.views.len()
     }
 
     // ---------- 计算 ----------
@@ -236,7 +327,10 @@ impl Engine {
                 Some(s) => s,
                 None => continue,
             };
-            let dt = now.saturating_sub(stored.last_check);
+            // 衰减基准是 last_check —— 我上次**成功**取到它观点的时间，
+            // 而不是 published_at（对方自己声明的发布时间，可以随意伪造）。
+            // 时间回拨时 dt 按 0 算（saturating_sub），不会产生负数或回绕。
+            let dt = elapsed(stored.last_check, now);
             let w = w_rating * decay(dt, self.cfg.half_life);
             if w <= 0.0 {
                 continue;
@@ -300,6 +394,15 @@ impl Engine {
     }
 }
 
+/// 从 `start` 走到 `now` 经过的时间。
+///
+/// 时间戳由上层给出、不保证单调（见 `tm_store::Time` 的约定），
+/// 所以时间回拨时必须夹到 0：`u64` 直接相减会回绕成一个巨大的正数，
+/// 那会让「刚刚取到的观点」瞬间衰减成 0，后果比「当作没变旧」严重得多。
+fn elapsed(start: Time, now: Time) -> Time {
+    now.saturating_sub(start)
+}
+
 fn noise_seed(idx: AccountIdx) -> u64 {
     (idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xDEAD_BEEF_CAFE_BABE
 }
@@ -349,7 +452,7 @@ mod smoke {
         assert!(reqs.iter().any(|r| r.idx == friend), "应当抽到朋友");
 
         let params = ViewParams::default();
-        let v = CompressedView::from_pairs(params.clone(), &[(key(9), 1.0)]);
+        let v = CompressedView::from_pairs(params, &[(key(9), 1.0)]);
         e.on_view(friend, v, 0, 0);
 
         let q = e.query(target, 0);
@@ -416,7 +519,7 @@ mod smoke {
         e.on_view(friend, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 1.0)]), 0, 0);
         for t in [0u64, 100, 1_000, 100_000, 10_000_000] {
             let q = e.query(target, t);
-            assert!(q >= 0.0 && q <= 1.0, "t={t} 时越界: {q}");
+            assert!((0.0..=1.0).contains(&q), "t={t} 时越界: {q}");
         }
     }
 

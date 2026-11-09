@@ -1,0 +1,74 @@
+done arm=a1 mode=fix D=24 seed=11 ret=0.12
+done arm=a1 mode=fix D=24 seed=11 ret=0
+done arm=a1 mode=fix D=72 seed=11 ret=0.12
+done arm=a1 mode=fix D=72 seed=11 ret=0
+done arm=a1 mode=fix D=216 seed=11 ret=0.12
+done arm=a1 mode=fix D=216 seed=11 ret=0
+done arm=a1 mode=fix D=720 seed=11 ret=0.12
+done arm=a1 mode=fix D=720 seed=11 ret=0
+done arm=a1 mode=cal D=720 seed=11
+done arm=a1 mode=fix D=2160 seed=11 ret=0.12
+done arm=a1 mode=fix D=2160 seed=11 ret=0
+done arm=a1 mode=cal D=2160 seed=11
+done arm=a1 mode=fix D=24 seed=23 ret=0.12
+done arm=a1 mode=fix D=24 seed=23 ret=0
+done arm=a1 mode=fix D=72 seed=23 ret=0.12
+done arm=a1 mode=fix D=72 seed=23 ret=0
+done arm=a1 mode=fix D=216 seed=23 ret=0.12
+done arm=a1 mode=fix D=216 seed=23 ret=0
+done arm=a1 mode=fix D=720 seed=23 ret=0.12
+done arm=a1 mode=fix D=720 seed=23 ret=0
+done arm=a1 mode=cal D=720 seed=23
+done arm=a1 mode=fix D=2160 seed=23 ret=0.12
+done arm=a1 mode=fix D=2160 seed=23 ret=0
+done arm=a1 mode=cal D=2160 seed=23
+done arm=a1 mode=fix D=24 seed=37 ret=0.12
+done arm=a1 mode=fix D=24 seed=37 ret=0
+done arm=a1 mode=fix D=72 seed=37 ret=0.12
+done arm=a1 mode=fix D=72 seed=37 ret=0
+done arm=a1 mode=fix D=216 seed=37 ret=0.12
+done arm=a1 mode=fix D=216 seed=37 ret=0
+done arm=a1 mode=cal D=216 seed=37
+done arm=a1 mode=fix D=720 seed=37 ret=0.12
+done arm=a1 mode=fix D=720 seed=37 ret=0
+done arm=a1 mode=cal D=720 seed=37
+done arm=a1 mode=fix D=2160 seed=37 ret=0.12
+done arm=a1 mode=fix D=2160 seed=37 ret=0
+done arm=a1 mode=cal D=2160 seed=37
+done arm=a5 mode=fix D=24 seed=11 ret=0.12
+done arm=a5 mode=fix D=24 seed=11 ret=0
+done arm=a5 mode=fix D=72 seed=11 ret=0.12
+done arm=a5 mode=fix D=72 seed=11 ret=0
+done arm=a5 mode=fix D=216 seed=11 ret=0.12
+done arm=a5 mode=fix D=216 seed=11 ret=0
+done arm=a5 mode=fix D=720 seed=11 ret=0.12
+done arm=a5 mode=fix D=720 seed=11 ret=0
+done arm=a5 mode=cal D=720 seed=11
+done arm=a5 mode=fix D=2160 seed=11 ret=0.12
+done arm=a5 mode=fix D=2160 seed=11 ret=0
+done arm=a5 mode=cal D=2160 seed=11
+done arm=a5 mode=fix D=24 seed=23 ret=0.12
+done arm=a5 mode=fix D=24 seed=23 ret=0
+done arm=a5 mode=fix D=72 seed=23 ret=0.12
+done arm=a5 mode=fix D=72 seed=23 ret=0
+done arm=a5 mode=fix D=216 seed=23 ret=0.12
+done arm=a5 mode=fix D=216 seed=23 ret=0
+done arm=a5 mode=cal D=216 seed=23
+done arm=a5 mode=fix D=720 seed=23 ret=0.12
+done arm=a5 mode=fix D=720 seed=23 ret=0
+done arm=a5 mode=cal D=720 seed=23
+done arm=a5 mode=fix D=2160 seed=23 ret=0.12
+done arm=a5 mode=fix D=2160 seed=23 ret=0
+done arm=a5 mode=cal D=2160 seed=23
+done arm=a5 mode=fix D=24 seed=37 ret=0.12
+done arm=a5 mode=fix D=24 seed=37 ret=0
+done arm=a5 mode=fix D=72 seed=37 ret=0.12
+done arm=a5 mode=fix D=72 seed=37 ret=0
+done arm=a5 mode=fix D=216 seed=37 ret=0.12
+done arm=a5 mode=fix D=216 seed=37 ret=0
+done arm=a5 mode=fix D=720 seed=37 ret=0.12
+done arm=a5 mode=fix D=720 seed=37 ret=0
+done arm=a5 mode=cal D=720 seed=37
+done arm=a5 mode=fix D=2160 seed=37 ret=0.12
+done arm=a5 mode=fix D=2160 seed=37 ret=0
+done arm=a5 mode=cal D=2160 seed=37

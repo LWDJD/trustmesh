@@ -8,8 +8,38 @@
 //! 引擎本身不做任何 I/O：
 //! - 它产出「我需要谁的观点」的请求意图，由应用层去真正发起
 //! - 应用层拿到观点后回调 `on_view`
+//!
+//! ## 两级衰减、覆盖率与不可达来源（设计规格 4.9）
+//!
+//! * **第一层 · 来源级衰减**（[EngineConfig::half_life]）：调的是来源**之间**的
+//!   相对新鲜度，对「全体一起变旧」免疫（加权平均对均匀缩放不变）。
+//! * **第二层 · 群体级衰减**（[EngineConfig::group_half_life] 与
+//!   [EngineConfig::coverage_exponent]）：按覆盖率与 live 集合的加权平均年龄压
+//!   整个群体项，于是 `声望 = β·个人项 + (1−β)·s·群体项`，
+//!   **改变了 β:(1−β) 的实际配比**——这是第一层做不到的。
+//!
+//! ```text
+//! coverage = |live| / |正分清单|
+//! s        = coverage^α · 0.5^(avg_age_live / H_group)
+//! ```
+//!
+//! **有替代才剔除**：只有 `coverage >= θ_remove` 时才把非 live 来源踢出群体项；
+//! 否则保留它们（它们已被 `fs[v]` 衰减，而那时 `s` 本来就已经很小）。
+//! 无条件剔除会把「诚实但离线」的人先踢掉，只留下 24/7 在线的攻击者，反而有害。
+//! 剔除**只影响群体项**，个人评分与正分清单原封不动。
+//!
+//! 五个参数默认都处于**不生效**的状态（`H_group = 0` 且 `θ_remove = 0` 时 `s` 恒为 1，
+//! `T_remove = 0` 时覆盖率恒为 1，α = 1.0、N_min = 0），所以默认行为与引入本机制
+//! 之前逐位一致；新机制是否有效尚未验证，只在实验里显式打开。
+//!
+//! ## 抽样退避与兜底探测（设计规格 4.9.4）
+//!
+//! * [Engine::tick] 按**连续失败次数**退避（权重 1/2^n）：连续取不到观点的来源
+//!   少占带宽。退避只影响抽样频率，不改评分、不改 `last_check`。
+//! * [Engine::probe] 是**不走退避**的兜底探测，保证离线节点上线后还能被想起来。
+//!   引擎不维护定时器，`T_probe`（建议 24h）的节奏由应用层掌握。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use tm_agg::{aggregate, combine, decay, AggMode};
 use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler, Score, Time};
@@ -47,6 +77,51 @@ pub struct EngineConfig {
     /// 衰减因子下限。0.0 表示无下限；0.5 表示「最多衰减一半」。
     /// 实际 factor = max(0.5^(Δt/H), decay_floor)。
     pub decay_floor: Score,
+    /// **群体级**半衰期 H_group（与 [Time] 同单位），只作用于 s 的「平均年龄」项。
+    ///
+    /// 第二层衰减：`s = coverage^α · 0.5 ^ (avg_age_live / H_group)`，只乘在群体项上——
+    /// `声望 = β·个人项 + (1−β)·s·群体项`。
+    /// 它调整的是**群体项相对于个人项的绝对权重**（改变 β:(1−β) 的实际配比），
+    /// 而 [EngineConfig::half_life] 调整的是来源之间的**相对**新鲜度。
+    ///
+    /// `0` 表示这一项**关闭**（`0.5^(...)` 恒为 1）。**默认 0**。
+    ///
+    /// 注意：这里的 0 是**语义上的「关闭开关」**，不是「把半衰期当 1」——
+    /// 与 `tm_agg::decay(dt, 0)` 把 0 当 1 的约定是两回事（那边只是为了避免除零）。
+    /// 当它与 [EngineConfig::remove_when_coverage] 同时为 0 时 `s` 恒为 1，
+    /// 行为与引入 4.9 节之前逐位一致。
+    pub group_half_life: Time,
+    /// 覆盖率指数 α，默认 1.0。
+    ///
+    /// s 的覆盖率项是 `coverage^α`：α = 1 时它**就等于覆盖率**，
+    /// α > 1 更严厉（覆盖率一降 s 掉得更快），α = 0 时完全不看覆盖率。
+    ///
+    /// 负数或 NaN 一律按 0 处理（防御非法配置，此时覆盖率项恒为 1）。
+    pub coverage_exponent: Score,
+    /// live 判定阈值 T_remove（与 [Time] 同单位），**默认 0（关闭）**。
+    ///
+    /// 判定：`now − last_check < unreachable_after` 的来源才算 **live**；
+    /// `last_check` 是「上次**成功取到它观点**的时间」（[StoredView::last_check]）——
+    /// 改分不算，从没取到过观点也谈不上 live。
+    /// 覆盖率 [Engine::coverage] 就是「live 来源数 ÷ 正分清单条目数」。
+    ///
+    /// `0` 表示**不判定**（所有来源都视为 live，覆盖率恒为 1）。
+    pub unreachable_after: Time,
+    /// 允许剔除非 live 来源所需的最低覆盖率 θ_remove，**默认 0.0（永不剔除）**。
+    ///
+    /// 「**有替代才剔除**」：只有 `coverage >= θ_remove` 时才把非 live 来源踢出
+    /// 群体项（分子分母都不含它）；否则**保留**它们 —— 它们已被 `fs[v]` 衰减过，
+    /// 而覆盖率不足时 `s` 本来就已经很小。
+    ///
+    /// `0`（或负数、非有限值）表示**永不剔除**。
+    pub remove_when_coverage: Score,
+    /// 群体项所需的最低 live 来源数 N_min，**默认 0（不设限）**。
+    ///
+    /// live 来源数少于它时群体项视为空，声望退化为 `β × 个人项` ——
+    /// 少量新鲜来源无法单独构成「群体意见」。
+    ///
+    /// `0` 表示跳过这道门槛（有几个来源就用几个）。
+    pub min_group_sources: usize,
 }
 
 impl Default for EngineConfig {
@@ -59,6 +134,13 @@ impl Default for EngineConfig {
             noise_multiplier: 1.0,
             decay_enabled: true,
             decay_floor: 0.0,
+            // 两级衰减默认全部关闭（H_group = 0 且 θ_remove = 0 ⇒ s 恒为 1）：
+            // 默认行为必须与引入 4.9 节之前逐位一致，新机制由实验显式打开。
+            group_half_life: 0,
+            coverage_exponent: 1.0,
+            unreachable_after: 0,
+            remove_when_coverage: 0.0,
+            min_group_sources: 0,
         }
     }
 }
@@ -82,6 +164,21 @@ pub struct FreshnessStats {
     pub max_age: Time,
 }
 
+/// live 集合的一次扫描结果：来源数、权重和、按权重加权的年龄和。
+///
+/// 仅供 [Engine::live_count] / [Engine::avg_source_age] / [Engine::group_scale]
+/// 三个只读接口内部使用；年龄的权重是**未衰减的份额**（不乘 fs），
+/// 与群体项的 `份额 × fs` 故意不同 —— 理由见 `Engine::live_summary`。
+#[derive(Clone, Copy, Debug, Default)]
+struct LiveSummary {
+    /// live 来源数。
+    count: usize,
+    /// Σ 权重（f64 累加，避免几百个来源时 f32 的可见误差）。
+    weight_sum: f64,
+    /// Σ 权重 × 年龄（单位：权重·时间单位）。
+    age_weighted_sum: f64,
+}
+
 /// 一次性批量刷新用的请求项。
 pub struct FetchRequest {
     /// 内部编号
@@ -94,7 +191,10 @@ pub struct Engine {
     accounts: AccountTable,
     ratings: PositiveList,
     sampler: RoundSampler,
-    views: HashMap<AccountIdx, StoredView>,
+    /// 观点缓存。用 BTreeMap 而不是 HashMap：遍历顺序必须是**编号升序**，
+    /// 否则群体项的浮点累加顺序会随 HashMap 的随机种子变化，
+    /// 破坏「同样输入必然得到同样输出」（设计规格 §8 不变量 1）。
+    views: BTreeMap<AccountIdx, StoredView>,
     cfg: EngineConfig,
     /// 本地屏蔽清单：只用于审查来源，不参与算分
     banlist: HashSet<AccountIdx>,
@@ -116,7 +216,7 @@ impl Engine {
             accounts: AccountTable::new(),
             ratings: PositiveList::new(),
             sampler: RoundSampler::new(),
-            views: HashMap::new(),
+            views: BTreeMap::new(),
             cfg,
             banlist: HashSet::new(),
             rng,
@@ -178,12 +278,43 @@ impl Engine {
     ///
     /// 语义：抽到的账户**立刻**记为本轮已抽过；请求失败也不退回（由上层决定是否调用
     /// `on_view`）。所以这里返回的每一项，无论成败，本轮都不会再出现。
+    ///
+    /// 抽样走 **退避**（设计规格 4.9.4）：连续失败 n 次的来源权重降为 1/2^n。
+    /// 全部来源连败次数相同时它退化为均匀随机，与不分退避时逐个相同 ——
+    /// 所以「一条都没失败过」的网络行为完全不受影响。
+    /// 退避只管抽样频率：不改评分、不改 `last_check`、也不改观点缓存。
     pub fn tick(&mut self, now: Time, k: usize) -> Vec<FetchRequest> {
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);
 
         let _ = now;
-        let picked = self.sampler.draw(k, &mut self.rng);
+        // 三个字段互不重叠，借用是分离的。
+        let picked = self.sampler.draw_backoff(&self.ratings, k, &mut self.rng);
+        self.collect_requests(picked)
+    }
+
+    /// 兜底探测：把**本轮还没抽过**的条目全部返回（不走退避），并置为已抽过。
+    ///
+    /// 设计规格 4.9.4：每 `T_probe`（建议 24 小时）强制完整扫一遍正分清单，
+    /// 否则退避会让长期离线的来源永远抽不到，它也就永远回不到 live 集合。
+    /// 引擎自己不维护定时器 —— **节奏由应用层决定**（例如每 24 小时调一次）。
+    ///
+    /// * 结果按编号升序，**不消耗随机数**，完全确定、可复现；
+    /// * 返回的每一项都算本轮已抽过，本轮剩余清零；本轮恰好抽空时会自动开新一轮，
+    ///   所以只要正分清单非空，一次探测必然覆盖一整轮；
+    /// * 探测请求不走退避，但结果照常计入成功/失败
+    ///   （成功 [Engine::on_view]、失败 [Engine::on_view_failed]）。
+    pub fn probe(&mut self, now: Time) -> Vec<FetchRequest> {
+        let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
+        self.sampler.sync(&current);
+
+        let _ = now;
+        let picked = self.sampler.draw_all(&self.ratings);
+        self.collect_requests(picked)
+    }
+
+    /// 把抽到的编号翻成对外请求项，并累计请求数统计。
+    fn collect_requests(&mut self, picked: Vec<AccountIdx>) -> Vec<FetchRequest> {
         let mut out = Vec::with_capacity(picked.len());
         for idx in picked {
             if let Some(key) = self.accounts.key_of(idx) {
@@ -199,6 +330,17 @@ impl Engine {
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);
         self.sampler.reset(&current);
+    }
+
+    /// 某个来源当前的**连续失败次数**（[Engine::tick] 退避的输入）。
+    ///
+    /// * 连续失败 n 次的来源被抽中的概率降为 1/2^n；
+    /// * **只有** [Engine::on_view] 成功会把它清零 —— 改分（[Engine::rate]）不算
+    ///   「刚取到观点」，不清零；
+    /// * 没有该评分条目时返回 0（没有关系，就无所谓连败）。
+    #[must_use]
+    pub fn fail_streak(&self, idx: AccountIdx) -> u32 {
+        self.ratings.fail_streak(idx)
     }
 
     /// 本轮还剩多少个没抽。
@@ -224,11 +366,22 @@ impl Engine {
             owner,
             StoredView { view, published_at, last_check: now, noise, total_mass },
         );
-        self.ratings.touch(owner, now);
+        // 成功刷新：刷新 last_check（衰减基准）**并清零连败计数**。
+        // 只有这里会清零退避 —— 改分（`rate`）不算「刚取到观点」。
+        self.ratings.record_success(owner, now);
     }
 
-    /// 应用层取观点失败时调用：什么都不做（时间戳不更新，衰减自然发生）。
-    pub fn on_view_failed(&mut self, _owner: AccountIdx, _now: Time) {}
+    /// 应用层取观点失败时调用：连败计数 +1（退避的输入），其余什么都不做。
+    ///
+    /// * **不**更新 `last_check`：失败不是「刚取到」，观点照旧自然变旧；
+    /// * **不**改评分、**不**动观点缓存、**不**阻塞也不重试（规格 0.3）；
+    /// * 连续失败 n 次的来源在 [Engine::tick] 里被抽中的概率降为 1/2^n；
+    ///   下一次 [Engine::on_view] 成功会把它清零。
+    ///
+    /// 普通抽样失败与兜底探测失败都要调用它。
+    pub fn on_view_failed(&mut self, owner: AccountIdx, _now: Time) {
+        self.ratings.record_failure(owner);
+    }
 
     /// 完整的信任分布：所有账户分到的比值，**总和恒为 1**。
     ///
@@ -371,9 +524,261 @@ impl Engine {
         }
     }
 
+    // ---------- 两级衰减、覆盖率与不可达来源（设计规格 4.9） ----------
+
+    /// 当前**群体级衰减系数** `s`，范围 [0, 1]：
+    ///
+    /// ```text
+    /// s = coverage^α · 0.5 ^ (avg_age_live / H_group)
+    /// ```
+    ///
+    /// `s` 只乘在群体项上，所以它改变的是 β:(1−β) 的**实际配比**：
+    /// `声望 = β·个人项 + (1−β)·s·群体项`。这是来源级衰减做不到的事
+    /// （来源级衰减对「全体一起变旧」免疫，因为加权平均对均匀缩放不变）。
+    ///
+    /// 覆盖率项回答「我现在能看到的世界，占我认识的世界的百分之几」：
+    /// 只剩攻击者可达时 `coverage ≈ 0`，群体项权重随之趋零，攻击者的观点就压不动我。
+    ///
+    /// # 边界
+    /// * `group_half_life = 0` **且** `remove_when_coverage = 0` → 恒为 1（完全关闭），
+    ///   而且**不扫描**观点缓存；
+    /// * `coverage = 0`（没有 live 来源，或正分清单为空）→ 0；
+    /// * `unreachable_after = 0`（live 判定关闭）时覆盖率恒为 1，s 只剩年龄项；
+    /// * 覆盖率 100% 且来源全是刚取到的 → 1；
+    /// * 平均年龄恰好等于 `H_group` → 年龄项 0.5；
+    /// * 平均年龄很大 → 年龄项趋近 0，但**永不精确归零**（与 `tm_agg::decay` 同口径）。
+    ///
+    /// 平均年龄的口径见 [Engine::avg_source_age]（四舍五入到整数时间单位），
+    /// 所以年龄项与 `tm_agg::decay(avg, H_group)` 逐位一致。
+    ///
+    /// # 读法：`s = 0` 是「无从判断」，不是「没有问题」
+    ///
+    /// `s = 0` 意味着群体项被彻底关闭，此时声望只剩 `β × 个人项`。
+    /// 这是一个**信息不足**的保守姿态，不代表网络健康：覆盖面极低时群体项恒为零，
+    /// 任何依赖群体项的指标都会「看起来变好」，而那只是判断力没了。
+    /// 观察机制是否真的在起作用，请同时看 [Engine::coverage] 与 [Engine::live_count]。
+    #[must_use]
+    pub fn group_scale(&self, now: Time) -> Score {
+        // 两个旋钮同时关闭：s 恒为 1，等价于「没有第二层衰减」
+        // （也顺手省掉一次全量扫描，默认配置下查询路径的开销与改造前完全一样）。
+        if self.cfg.group_half_life == 0 && self.cfg.remove_when_coverage <= 0.0 {
+            return 1.0;
+        }
+
+        let cov = self.coverage(now);
+        if cov <= 0.0 {
+            // 看不到任何来源 ⇒ 没有可以信任的群体意见。
+            return 0.0;
+        }
+
+        // 覆盖率项：α 取 max(0, α)，NaN 由 f32::max 的「忽略 NaN」语义收敛到 0
+        // （此时这一项恒为 1，等于只看年龄）。
+        let alpha = self.cfg.coverage_exponent.max(0.0);
+        let coverage_term = if alpha == 0.0 {
+            1.0
+        } else if alpha == 1.0 {
+            // α = 1 时覆盖率项**精确等于覆盖率**：不做 powf，避免浮点毛刺。
+            cov
+        } else {
+            cov.powf(alpha)
+        };
+
+        // 年龄项：H_group = 0 时恒为 1（这一项关闭）。
+        let age_term = if self.cfg.group_half_life == 0 {
+            1.0
+        } else {
+            match self.avg_source_age(now) {
+                // 覆盖率 > 0 时 live 必然非空，理论上到不了这里；防御性兜底。
+                None => 0.0,
+                Some(avg) => decay(avg, self.cfg.group_half_life),
+            }
+        };
+
+        // 两项都在 [0,1]，乘积也在 [0,1]；非有限值一律按 0（0 = 最保守的语义）。
+        let s = coverage_term * age_term;
+        if s.is_finite() {
+            s.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// 当前**覆盖率**：`coverage = live 来源数 ÷ 正分清单条目数`，范围 [0, 1]。
+    ///
+    /// 它回答的是「我现在能看到的世界，占我认识的世界的百分之几」：
+    ///
+    /// * `1.0` —— 正分清单里每个人的观点都还新鲜；`unreachable_after = 0`（live 判定
+    ///   关闭）时全部视为 live，因此也恒为 1；
+    /// * `0.0` —— 一个都联系不上；正分清单为空时也返回 0（分母为 0，按 0 处理）。
+    ///
+    /// 分母是**正分清单条目数**，分子是其中「观点还新鲜」的条目数
+    /// （[Engine::live_count]）。给我打过分、但我从没取到过观点的账户
+    /// 计在分母里、不计在分子里 —— 它们正是「认识却看不到」的那部分世界。
+    ///
+    /// 覆盖率只取决于「有多少来源还 live」，与「剔不剔除」无关：
+    /// 剔除是另一道独立的判断，见 [EngineConfig::remove_when_coverage]。
+    #[must_use]
+    pub fn coverage(&self, now: Time) -> Score {
+        let entries = self.ratings.len();
+        if entries == 0 {
+            return 0.0;
+        }
+        if self.cfg.unreachable_after == 0 {
+            // live 判定关闭 ⇒ 全部视为 live ⇒ 覆盖率恒为 1。
+            // 这样「H_group > 0、T_remove = 0」可以干净地只打开年龄项。
+            return 1.0;
+        }
+        self.live_count(now) as Score / entries as Score
+    }
+
+    /// 当前 live 集合里的来源数。
+    ///
+    /// 口径：只数「我打过正分」且「缓存里有观点」且年龄未到达
+    /// `unreachable_after` 的来源（判定见 `Engine::is_live`）。
+    /// 撤销评分会立刻把它移出 live（观点缓存本身还在，见 [Engine::prune_stale]）；
+    /// 有评分但从没取到过观点的来源不算 live —— 它没有观点可参与群体项。
+    ///
+    /// `unreachable_after = 0`（默认，不判定）时，全部这样的来源都算 live。
+    ///
+    /// # 读法
+    ///
+    /// `live_count == 0` 表示「**现在一个来源都问不到**」，随之 `s = 0`、群体项为零。
+    /// 这只是「无从判断」，**不等于「没有问题」** —— 恰恰相反，它通常意味着我
+    /// 已经看不到大部分网络了（见 [Engine::coverage]）。
+    #[must_use]
+    pub fn live_count(&self, now: Time) -> usize {
+        self.live_summary(now).count
+    }
+
+    /// live 集合上的**加权平均**观点年龄；live 为空返回 `None`。
+    ///
+    /// 只在**有观点缓存**的 live 来源上求平均（没有观点就没有年龄可算）；
+    /// 一个 live 来源都没有、或都没有观点时返回 `None`。
+    ///
+    /// 权重口径：**未衰减的份额**（不带 fs）：
+    ///
+    /// ```text
+    /// avg_age = Σ_live 份额[v]·age[v] ÷ Σ_live 份额[v]
+    /// 份额[v] = 评分[v] ÷ Σ评分
+    /// ```
+    ///
+    /// 这与群体项的 `份额 × fs` **刻意不同**：群体项要让新鲜来源在意见上更有
+    /// 话语权，而平均年龄要回答「我这群来源平均有多旧」这个**事实**。
+    /// 如果这里也乘 fs，老来源的年龄贡献会被它自己的衰减压低 → avg_age 偏小 →
+    /// s 偏大 → 群体级衰减几乎失效（等于自己把自己的输入衰减掉）。
+    ///
+    /// 返回值**四舍五入到最近的时间单位**：单来源时等于它的年龄，多来源时是加权
+    /// 平均的整数部分。之所以不直接截断，是因为加权平均的浮点误差有 1 ulp 量级，
+    /// 截断会把「三个来源年龄都是 120」算成 119。
+    /// 时间回拨时年龄按 0 算，所以永远不返回负数、不 panic。
+    #[must_use]
+    pub fn avg_source_age(&self, now: Time) -> Option<Time> {
+        let s = self.live_summary(now);
+        // 权重和必须是有限正数：live 非空时恒成立，这里只是防御性兜底。
+        if s.count == 0 || !s.weight_sum.is_finite() || s.weight_sum <= 0.0 {
+            return None;
+        }
+        let mean = s.age_weighted_sum / s.weight_sum;
+        if !mean.is_finite() || mean <= 0.0 {
+            // 全新鲜或时间回拨时平均年龄就是 0；NaN 也一并归零，绝不放出去。
+            return Some(0);
+        }
+        // 四舍五入消掉加权平均的 1 ulp 误差；f64 → u64 的 `as` 转换是饱和的，
+        // 极端值会截到 u64::MAX，不会 panic、不会回绕。
+        Some(mean.round() as u64)
+    }
+
+    /// 来源 `stored` 在当前时刻是否仍在 live 集合里。
+    ///
+    /// 判定式与规格 4.9.3 一致：`now − last_check < unreachable_after`
+    /// （**严格小于**，等于阈值即退出），`age[v]` 按规格取自
+    /// 「上次**成功取到 v 观点**的时间」，即 [StoredView::last_check]。
+    ///
+    /// 用观点缓存的 `last_check` 而不是正分清单条目上的时间戳，是**有意的**：
+    /// 条目时间戳会被 [Engine::rate] 顺手刷新（改分不等于「刚听到它说话」），
+    /// 而「我看不看得到它的观点」只应该由「我上次成功取到观点」决定。
+    /// 从没取到过观点的账户不在 `views` 里，因此谈不上 live。
+    ///
+    /// `unreachable_after = 0` 表示 live 判定关闭（缓存里的来源全部视为 live）。
+    /// 时间回拨时年龄按 0 算，因此回拨只会让来源更「live」，不会误踢。
+    fn is_live(&self, stored: &StoredView, now: Time) -> bool {
+        if self.cfg.unreachable_after == 0 {
+            return true;
+        }
+        elapsed(stored.last_check, now) < self.cfg.unreachable_after
+    }
+
+    /// 扫一遍观点缓存，统计 live 集合的规模与加权年龄。
+    ///
+    /// # 计数口径
+    ///
+    /// `count` 数的是「我打过正分」且「缓存里有观点」且年龄未到达阈值的来源
+    /// （见 `Engine::is_live`）。撤销评分（打 0）会立刻把它移出 live，
+    /// 尽管观点缓存还在（缓存只能由 [Engine::prune_stale] 清）。
+    ///
+    /// # 年龄口径
+    ///
+    /// 权重是**未衰减的份额** `份额[v] = 评分[v] ÷ Σ评分`（**不乘 fs**），
+    /// 这一点与群体项**刻意不同**，不要合并：
+    ///
+    /// * 群体项用 `份额 × fs` —— 让新鲜来源在**意见**上更有话语权；
+    /// * 平均年龄用**裸份额** —— 它要回答的是「我这群来源平均有多旧」这个**事实**。
+    ///   如果这里也乘 fs，老来源的年龄贡献会被它自己的衰减压低 → avg_age 偏小 →
+    ///   s 偏大 → 群体级衰减等于自己把输入衰减掉，几乎失效。
+    ///
+    /// f64 累加（几百个来源时 f32 连加会有可见误差）。
+    /// 三种只读接口共用同一次扫描，保证 `live_count` / `avg_source_age` /
+    /// `group_scale` 三者口径永远一致。
+    fn live_summary(&self, now: Time) -> LiveSummary {
+        let mut out = LiveSummary::default();
+        let total = self.ratings.total();
+        if total <= 0.0 {
+            return out;
+        }
+        for (idx, stored) in &self.views {
+            if !self.is_live(stored, now) {
+                continue;
+            }
+            // 撤销评分（打 0）的来源立刻退出 live：群体项也不再认它的观点。
+            let rating = match self.ratings.get(*idx) {
+                Some(s) => s,
+                None => continue,
+            };
+            // 份额，**不乘 fs**：平均年龄是「这群来源有多旧」的事实，不是加权意见。
+            let share = f64::from(rating / total);
+            if share <= 0.0 {
+                continue;
+            }
+            out.count += 1;
+            out.weight_sum += share;
+            out.age_weighted_sum += share * (elapsed(stored.last_check, now) as f64);
+        }
+        out
+    }
+
     // ---------- 计算 ----------
 
     /// 查某个账户在自己眼中的声望。
+    ///
+    /// 合成逻辑（设计规格 4.4 + 4.9）：
+    ///
+    /// ```text
+    /// 个人项[u] = 份额[u]                                    // 永不衰减
+    /// 群体项[u] = Σ_参与 份额[v]·fs[v]·观点[v][u] ÷ Σ_参与 份额[v]·fs[v]
+    /// 声望[u]   = β·个人项[u] + (1−β)·s·群体项[u]
+    /// ```
+    ///
+    /// * `fs` 是来源级衰减（[Engine::decay_factor]），只改来源**之间**的相对权重；
+    /// * `s = coverage^α · 0.5^(avg_age_live/H_group)`（[Engine::group_scale]），
+    ///   改 β:(1−β) 的**实际配比**；
+    /// * 「参与」= live 来源；**但有替代才剔除**：只有覆盖率 ≥ θ_remove 时才把
+    ///   非 live 来源踢出群体项，否则保留它们（它们已被 `fs[v]` 衰减，而未达标时
+    ///   `s` 本来就已经很小）。见 [EngineConfig::remove_when_coverage]；
+    /// * live 来源数 < `min_group_sources` 时群体项置空，声望退化为 β·个人项。
+    ///
+    /// 默认配置（`H_group = 0`、`θ_remove = 0`、`T_remove = 0`、`N_min = 0`）下：
+    /// `s ≡ 1`、覆盖率恒为 1、全部来源 live、不设门槛，
+    /// 结果与引入 4.9 节之前**逐位一致**。
     pub fn query(&self, target: AccountIdx, now: Time) -> Score {
         // 影响力预算：自己的评分也要归一化，总配额恒为 1
         let total_rating: f32 = self.ratings.iter().map(|(_, s, _)| s).sum();
@@ -385,12 +790,31 @@ impl Engine {
             None => return combine(self.cfg.beta, personal, None),
         };
 
+        // 「有替代才剔除」：只有覆盖率已达到 θ_remove 时，才允许把非 live 来源
+        // 踢出群体项（分子分母都不含它）。覆盖率不足时保留它们 —— 它们已经被
+        // fs[v] 衰减过，而那时 s 本来就已经很小，硬剔只会让攻击者占比更高。
+        //
+        // θ_remove = 0（默认）时 `&&` 直接短路，连覆盖率都不算。
+        let remove_unreachable = self.cfg.remove_when_coverage > 0.0
+            && self.coverage(now) >= self.cfg.remove_when_coverage;
+
         let mut items: Vec<(f32, f32)> = Vec::with_capacity(self.views.len());
+        // 顺便数一遍 live 来源：N_min 门槛按 **live 数**判定（不是参与聚合的条目数），
+        // 这样「剔除关着、但只剩一个能看到的来源」也会被掐掉群体项。
+        let mut live = 0usize;
         for (owner, stored) in &self.views {
             let w_rating = match self.ratings.get(*owner) {
                 Some(s) => s,
                 None => continue,
             };
+            let is_live = self.is_live(stored, now);
+            if is_live {
+                live += 1;
+            }
+            // 只有「有替代」时才剔：不可达来源退出群体项（个人评分照常保留）。
+            if remove_unreachable && !is_live {
+                continue;
+            }
             // 衰减基准是 last_check —— 我上次**成功**取到它观点的时间，
             // 而不是 published_at（对方自己声明的发布时间，可以随意伪造）。
             // 时间回拨时 dt 按 0 算（saturating_sub），不会产生负数或回绕。
@@ -410,8 +834,18 @@ impl Engine {
             items.push((w, v));
         }
 
-        let group = aggregate(&items, self.cfg.agg_mode);
-        combine(self.cfg.beta, personal, group)
+        // 最低样本数：**live** 来源少于 N_min 时群体项置空 —— 少量新鲜来源不能
+        // 单独构成「群体意见」。`min_group_sources = 0` 表示不设限（跳过门槛）。
+        let group = if live < self.cfg.min_group_sources {
+            None
+        } else {
+            aggregate(&items, self.cfg.agg_mode)
+        };
+
+        // 第二层衰减只压群体项，个人项永不衰减。
+        // s = 1（默认，关闭）时这次乘法是 IEEE 恒等变换，结果逐位不变。
+        let scale = self.group_scale(now);
+        combine(self.cfg.beta, personal, group.map(|g| g * scale))
     }
 
     // ---------- banlist 审查 ----------
@@ -482,8 +916,25 @@ mod smoke {
         k
     }
 
+    /// 默认口径：β = 0.3、来源级半衰期 72 小时。
+    ///
+    /// 两级衰减的三个新参数显式写 0（关闭），让这 8 条冒烟测试继续钉住
+    /// 「来源级衰减 + β 混合」的旧行为；新机制的行为见
+    /// `tests/two_level_decay.rs`。
     fn eng() -> Engine {
-        Engine::with_seed(EngineConfig { beta: 0.3, half_life: 72, ..Default::default() }, 42)
+        Engine::with_seed(
+            EngineConfig {
+                beta: 0.3,
+                half_life: 72,
+                group_half_life: 0,
+                coverage_exponent: 1.0,
+                unreachable_after: 0,
+                remove_when_coverage: 0.0,
+                min_group_sources: 0,
+                ..Default::default()
+            },
+            42,
+        )
     }
 
     /// S1：给某人打满分，没人在场时声望 = β × 个人项

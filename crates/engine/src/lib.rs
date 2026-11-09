@@ -1,0 +1,411 @@
+//! # tm_engine —— trustmesh 运行时
+//!
+//! 把三块拼起来：
+//! - `tm_store`：账户表、正分清单、轮次抽样
+//! - `tm_view`：定长压缩的观点
+//! - `tm_agg`：指数衰减与聚合
+//!
+//! 引擎本身不做任何 I/O：
+//! - 它产出「我需要谁的观点」的请求意图，由应用层去真正发起
+//! - 应用层拿到观点后回调 `on_view`
+
+use std::collections::{HashMap, HashSet};
+
+use tm_agg::{aggregate, combine, decay, AggMode};
+use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler, Score, Time};
+use tm_view::{CompressedView, NoiseStats, ViewParams};
+
+/// 一份缓存下来的观点。
+#[derive(Clone)]
+pub struct StoredView {
+    pub view: CompressedView,
+    /// 对方声明的发布时间
+    pub published_at: Time,
+    /// 上次成功取到的时间（衰减基准）
+    pub last_check: Time,
+    /// 该观点的噪声底
+    pub noise: NoiseStats,
+}
+
+/// 引擎参数。
+#[derive(Clone)]
+pub struct EngineConfig {
+    /// 个人权重 β：声望 = β × 个人项 + (1−β) × 群体项
+    pub beta: Score,
+    /// 半衰期（与 Time 同单位），默认 72
+    pub half_life: Time,
+    /// 观点压缩参数
+    pub view_params: ViewParams,
+    /// 群体项聚合口径
+    pub agg_mode: AggMode,
+    /// 低于多少的查询结果视为「没表态」
+    pub noise_multiplier: Score,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            beta: 0.3,
+            half_life: 72,
+            view_params: ViewParams::default(),
+            agg_mode: AggMode::Mean,
+            noise_multiplier: 1.0,
+        }
+    }
+}
+
+/// 一次性批量刷新用的请求项。
+pub struct FetchRequest {
+    /// 内部编号
+    pub idx: AccountIdx,
+    /// 对外要用的账户号（应用层据此找节点）
+    pub key: AccountKey,
+}
+
+pub struct Engine {
+    accounts: AccountTable,
+    ratings: PositiveList,
+    sampler: RoundSampler,
+    views: HashMap<AccountIdx, StoredView>,
+    cfg: EngineConfig,
+    /// 本地屏蔽清单：只用于审查来源，不参与算分
+    banlist: HashSet<AccountIdx>,
+    /// 抽样用的随机流（固定种子即可复现）
+    rng: Rng,
+    /// 统计：累计请求数 / 成功数
+    stat_requests: u64,
+    stat_hits: u64,
+}
+
+impl Engine {
+    pub fn new(cfg: EngineConfig) -> Self {
+        Self::with_seed(cfg, 0x5EED_1234_ABCD_0001)
+    }
+
+    pub fn with_seed(cfg: EngineConfig, seed: u64) -> Self {
+        let rng = Rng::new(seed);
+        Self {
+            accounts: AccountTable::new(),
+            ratings: PositiveList::new(),
+            sampler: RoundSampler::new(),
+            views: HashMap::new(),
+            cfg,
+            banlist: HashSet::new(),
+            rng,
+            stat_requests: 0,
+            stat_hits: 0,
+        }
+    }
+
+    // ---------- 账户 ----------
+
+    pub fn intern(&mut self, key: AccountKey) -> AccountIdx {
+        self.accounts.intern(key)
+    }
+    pub fn lookup(&self, key: &AccountKey) -> Option<AccountIdx> {
+        self.accounts.lookup(key)
+    }
+    pub fn key_of(&self, idx: AccountIdx) -> Option<AccountKey> {
+        self.accounts.key_of(idx)
+    }
+    pub fn account_count(&self) -> usize {
+        self.accounts.len()
+    }
+
+    // ---------- 评分 ----------
+
+    /// 记录一次评分。score <= 0 表示撤销。
+    pub fn rate(&mut self, idx: AccountIdx, score: Score, now: Time) {
+        self.ratings.set(idx, score, now);
+    }
+
+    pub fn rating_of(&self, idx: AccountIdx) -> Option<Score> {
+        self.ratings.get(idx)
+    }
+
+    pub fn positive_count(&self) -> usize {
+        self.ratings.len()
+    }
+
+    // ---------- 抽样 ----------
+
+    /// 推进一批抽样，返回需要向哪些账户请求观点。
+    ///
+    /// 语义：抽到的账户**立刻**记为本轮已抽过；请求失败也不退回（由上层决定是否调用
+    /// `on_view`）。所以这里返回的每一项，无论成败，本轮都不会再出现。
+    pub fn tick(&mut self, now: Time, k: usize) -> Vec<FetchRequest> {
+        let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
+        self.sampler.sync(&current);
+
+        let _ = now;
+        let picked = self.sampler.draw(k, &mut self.rng);
+        let mut out = Vec::with_capacity(picked.len());
+        for idx in picked {
+            if let Some(key) = self.accounts.key_of(idx) {
+                self.stat_requests += 1;
+                out.push(FetchRequest { idx, key });
+            }
+        }
+        out
+    }
+
+    /// 强制开始新一轮（用于「启动时快速同步」）。
+    pub fn restart_round(&mut self) {
+        let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
+        self.sampler.sync(&current);
+        self.sampler.reset(&current);
+    }
+
+    /// 本轮还剩多少个没抽。
+    pub fn round_remaining(&self) -> usize {
+        self.sampler.remaining()
+    }
+
+    // ---------- 收到观点 ----------
+
+    /// 应用层成功取到对方观点后调用。
+    pub fn on_view(&mut self, owner: AccountIdx, view: CompressedView, published_at: Time, now: Time) {
+        let noise = view.noise_floor(1000, noise_seed(owner));
+        self.stat_hits += 1;
+        self.views.insert(
+            owner,
+            StoredView { view, published_at, last_check: now, noise },
+        );
+        self.ratings.touch(owner, now);
+    }
+
+    /// 应用层取观点失败时调用：什么都不做（时间戳不更新，衰减自然发生）。
+    pub fn on_view_failed(&mut self, _owner: AccountIdx, _now: Time) {}
+
+    // ---------- 计算 ----------
+
+    /// 查某个账户在自己眼中的声望。
+    pub fn query(&self, target: AccountIdx, now: Time) -> Score {
+        let personal = self.ratings.get(target).unwrap_or(0.0);
+
+        let target_key = match self.accounts.key_of(target) {
+            Some(k) => k,
+            None => return combine(self.cfg.beta, personal, None),
+        };
+
+        let mut items: Vec<(f32, f32)> = Vec::with_capacity(self.views.len());
+        for (owner, stored) in &self.views {
+            let w_rating = match self.ratings.get(*owner) {
+                Some(s) => s,
+                None => continue,
+            };
+            let dt = now.saturating_sub(stored.last_check);
+            let w = w_rating * decay(dt, self.cfg.half_life);
+            if w <= 0.0 {
+                continue;
+            }
+            let mut v = stored.view.query(&target_key);
+            // Count Sketch 的估值可能为负或超过 1，先夹紧到合法区间
+            v = v.clamp(0.0, 1.0);
+            // 低于噪声底的读数视为「没表态」
+            let floor = (stored.noise.median * self.cfg.noise_multiplier).max(0.0);
+            if v < floor {
+                v = 0.0;
+            }
+            items.push((w, v));
+        }
+
+        let group = aggregate(&items, self.cfg.agg_mode);
+        combine(self.cfg.beta, personal, group)
+    }
+
+    // ---------- banlist 审查 ----------
+
+    pub fn ban(&mut self, idx: AccountIdx) {
+        self.banlist.insert(idx);
+    }
+    pub fn unban(&mut self, idx: AccountIdx) {
+        self.banlist.remove(&idx);
+    }
+    pub fn banlist_len(&self) -> usize {
+        self.banlist.len()
+    }
+
+    /// 某来源的观点里「我的黑名单成员」占多大比例。
+    /// 比例越高，说明它越可能在抬举攻击我的人。
+    pub fn banlist_coverage(&self, owner: AccountIdx, _now: Time) -> Option<f32> {
+        let stored = self.views.get(&owner)?;
+        if self.banlist.is_empty() {
+            return Some(0.0);
+        }
+        let floor = stored.noise.median * self.cfg.noise_multiplier;
+        let mut hit = 0usize;
+        let mut seen = 0usize;
+        for &b in &self.banlist {
+            if let Some(k) = self.accounts.key_of(b) {
+                seen += 1;
+                if stored.view.query(&k) > floor {
+                    hit += 1;
+                }
+            }
+        }
+        if seen == 0 {
+            None
+        } else {
+            Some(hit as f32 / seen as f32)
+        }
+    }
+
+    // ---------- 统计 ----------
+
+    pub fn stats(&self) -> (u64, u64, usize, usize) {
+        (self.stat_requests, self.stat_hits, self.views.len(), self.ratings.len())
+    }
+}
+
+fn noise_seed(idx: AccountIdx) -> u64 {
+    (idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xDEAD_BEEF_CAFE_BABE
+}
+
+#[cfg(test)]
+mod smoke {
+    use super::*;
+    use tm_view::ViewParams;
+
+    fn key(n: u8) -> AccountKey {
+        let mut k = [0u8; 32];
+        k[0] = n;
+        k
+    }
+
+    fn eng() -> Engine {
+        Engine::with_seed(EngineConfig { beta: 0.3, half_life: 72, ..Default::default() }, 42)
+    }
+
+    /// S1：给某人打满分，没人在场时声望 = β × 个人项
+    #[test]
+    fn s1_personal_only() {
+        let mut e = eng();
+        let b = e.intern(key(2));
+        let c = e.intern(key(3));
+        e.rate(b, 1.0, 0);
+        assert!((e.query(b, 0) - 0.3).abs() < 1e-6, "应为 β×1.0=0.3");
+        assert!(e.query(c, 0).abs() < 1e-6, "没评过应为 0");
+    }
+
+    /// S2：完全不存在的账户查询为 0
+    #[test]
+    fn s2_unknown_is_zero() {
+        let e = eng();
+        assert!(e.query(12345, 0).abs() < 1e-6);
+    }
+
+    /// S3：抽样 → 回调 → 声望上升；群体项 = 朋友的判断
+    #[test]
+    fn s3_full_flow() {
+        let mut e = eng();
+        let friend = e.intern(key(1));
+        let target = e.intern(key(9));
+        e.rate(friend, 1.0, 0);
+
+        let reqs = e.tick(0, 10);
+        assert!(reqs.iter().any(|r| r.idx == friend), "应当抽到朋友");
+
+        let params = ViewParams::default();
+        let v = CompressedView::from_pairs(params.clone(), &[(key(9), 1.0)]);
+        e.on_view(friend, v, 0, 0);
+
+        let q = e.query(target, 0);
+        assert!((q - 0.7).abs() < 1e-4, "应为 0.3×0 + 0.7×1.0 = 0.7，实际 {q}");
+    }
+
+    /// S4：衰减是"相对"的——同样陈旧的来源之间，谁也不会被削弱
+    ///
+    /// 这是一个必须记住的性质：群体项是加权平均（除以权重和），
+    /// 所有来源一起变旧时分子分母同比例缩小，结果**完全不变**。
+    #[test]
+    fn s4_uniform_decay_is_invariant() {
+        let mut e = eng();
+        let f1 = e.intern(key(1));
+        let f2 = e.intern(key(2));
+        let target = e.intern(key(9));
+        e.rate(f1, 1.0, 0);
+        e.rate(f2, 1.0, 0);
+        e.tick(0, 10);
+        e.on_view(f1, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 1.0)]), 0, 0);
+        e.on_view(f2, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 0.0)]), 0, 0);
+
+        let at0 = e.query(target, 0);
+        let at500 = e.query(target, 500);
+        let at100000 = e.query(target, 100_000);
+        assert!((at0 - at500).abs() < 1e-6, "全部陈旧时结果不变: {at0} vs {at500}");
+        assert!((at0 - at100000).abs() < 1e-6, "再久也不变: {at0} vs {at100000}");
+        assert!((at0 - 0.35).abs() < 1e-4, "0.3×0 + 0.7×0.5 = 0.35，实际 {at0}");
+    }
+
+    /// S4b：真正起作用的是"新鲜度差"——新鲜来源会压过陈旧来源
+    #[test]
+    fn s4b_relative_freshness_dominates() {
+        let mut e = eng();
+        let stale = e.intern(key(1));
+        let fresh = e.intern(key(2));
+        let target = e.intern(key(9));
+        e.rate(stale, 1.0, 0);
+        e.rate(fresh, 1.0, 0);
+        e.tick(0, 10);
+        // 两人都在 0 时刻给了观点，但 stale 只给 1.0，fresh 给 0.0
+        e.on_view(stale, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 1.0)]), 0, 0);
+        e.on_view(fresh, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 0.0)]), 0, 0);
+        let both_fresh = e.query(target, 0);
+
+        // 只刷新 fresh：它权重变 1.0，stale 降到 0.5（一个半衰期）
+        e.on_view(fresh, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 0.0)]), 72, 72);
+        let fresh_wins = e.query(target, 72);
+
+        assert!(fresh_wins < both_fresh, "新鲜的低分来源应压过陈旧的高分来源: {both_fresh} -> {fresh_wins}");
+        // group = (0.5×1.0 + 1.0×0.0)/(1.5) = 0.3333
+        assert!((fresh_wins - 0.3 + 0.7 * (1.0 / 3.0) - 0.3).abs() < 1e-4 || (fresh_wins - (0.7 * (1.0 / 3.0))).abs() < 1e-4,
+            "应为 0.7×(1/3)=0.2333，实际 {fresh_wins}");
+    }
+
+    /// S5：全部离线很久，分数只降不崩，且非负
+    #[test]
+    fn s5_all_stale_never_negative() {
+        let mut e = eng();
+        let friend = e.intern(key(1));
+        let target = e.intern(key(9));
+        e.rate(friend, 1.0, 0);
+        e.tick(0, 10);
+        e.on_view(friend, CompressedView::from_pairs(ViewParams::default(), &[(key(9), 1.0)]), 0, 0);
+        for t in [0u64, 100, 1_000, 100_000, 10_000_000] {
+            let q = e.query(target, t);
+            assert!(q >= 0.0 && q <= 1.0, "t={t} 时越界: {q}");
+        }
+    }
+
+    /// S6：抽完一轮自动重置
+    #[test]
+    fn s6_round_reset() {
+        let mut e = eng();
+        let mut idxs = vec![];
+        for i in 0..5u8 {
+            let i = e.intern(key(i + 1));
+            e.rate(i, 0.5, 0);
+            idxs.push(i);
+        }
+        let first = e.tick(0, 5);
+        assert_eq!(first.len(), 5);
+        assert_eq!(e.round_remaining(), 0);
+        let second = e.tick(1, 5);
+        assert_eq!(second.len(), 5, "应自动开启新一轮");
+    }
+
+    /// S7：banlist 覆盖率
+    #[test]
+    fn s7_banlist_coverage() {
+        let mut e = eng();
+        let friend = e.intern(key(1));
+        let bad = e.intern(key(66));
+        e.rate(friend, 1.0, 0);
+        e.ban(bad);
+        let v = CompressedView::from_pairs(ViewParams::default(), &[(key(66), 1.0), (key(9), 0.5)]);
+        e.on_view(friend, v, 0, 0);
+        let cov = e.banlist_coverage(friend, 0).unwrap_or(0.0);
+        assert!((cov - 1.0).abs() < 1e-6, "覆盖率应为 1.0，实际 {cov}");
+    }
+}

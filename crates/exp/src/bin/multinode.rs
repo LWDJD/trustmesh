@@ -1,4 +1,4 @@
-//! 多节点仿真：每个账户一个真正的 tm_engine::Engine。
+//! 真实多节点运行时 × 最终归一化：每节点一个 Engine，输出总和恒为 1 的信任分布。
 use tm_agg::AggMode;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, SimConfig};
@@ -30,7 +30,6 @@ fn run(kind: AttackKind, name: &str) {
         view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
         agg_mode: AggMode::Mean, noise_multiplier: 1.0,
     };
-
     let mut nodes: Vec<Option<Engine>> = (0..n).map(|_| None).collect();
     for &a in &alive {
         let mut e = Engine::new(ecfg.clone());
@@ -54,26 +53,33 @@ fn run(kind: AttackKind, name: &str) {
         }
     }
 
-    let (mut hs, mut hc, mut as_, mut ac) = (0.0f64, 0usize, 0.0f64, 0usize);
+    // 用最终归一化分布统计
+    let now = rounds as u64;
+    let (mut hs, mut hc, mut asum, mut ac) = (0.0f64, 0usize, 0.0f64, 0usize);
+    let mut sums_ok = 0usize; let mut obs_cnt = 0usize;
     for &obs in &alive {
         if is_att[obs] { continue; }
         let e = nodes[obs].as_ref().unwrap();
-        for &t in &alive {
-            let v = e.query(t as u32, rounds as u64) as f64;
-            if is_att[t] { as_ += v; ac += 1; } else { hs += v; hc += 1; }
+        let dist = e.trust_distribution(now);
+        let total: f32 = dist.iter().map(|(_, v)| *v).sum();
+        obs_cnt += 1;
+        if dist.is_empty() || (total - 1.0).abs() < 1e-3 { sums_ok += 1; }
+        for (idx, v) in dist {
+            if is_att[idx as usize] { asum += v as f64; ac += 1; } else { hs += v as f64; hc += 1; }
         }
     }
     let h = if hc > 0 { hs / hc as f64 } else { 0.0 };
-    let at = if ac > 0 { as_ / ac as f64 } else { 0.0 };
-    println!("{:<14} 诚实 {:.5}  攻击者 {:.5}  比值 {:.3}  (账户 {} 存活 {})",
-        name, h, at, if h > 0.0 { at / h } else { 0.0 }, n, alive.len());
+    let at = if ac > 0 { asum / ac as f64 } else { 0.0 };
+    println!("{:<12} 诚实 {:.6}  攻击 {:.6}  比值 {:>6.3}  ｜ 总和=1 的观察者 {}/{}",
+        name, h, at, if h > 0.0 { at / h } else { 0.0 }, sums_ok, obs_cnt);
 }
 
 fn main() {
     let sw = std::time::Instant::now();
-    println!("真实多节点运行时（每节点一个 Engine，4 轮交换）\n");
+    println!("真实多节点运行时（每节点一个 Engine，4 轮交换，最终归一化）\n");
     run(AttackKind::None, "基线");
     run(AttackKind::Sybil { cluster: 3 }, "女巫 x3");
+    run(AttackKind::Sleeper { normal_until: 50 }, "潜伏 50h");
     run(AttackKind::Infiltrator, "渗透");
     run(AttackKind::Endorser { ratio: 0.2 }, "背书 20%");
     run(AttackKind::Spammer, "垃圾");

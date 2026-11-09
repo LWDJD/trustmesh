@@ -195,6 +195,42 @@ impl SimConfig {
         self
     }
 
+    /// 「离线-回归」场景：大批账户前期活跃、随后长期休眠，只剩少数节点一直在网。
+    ///
+    /// 这是潜伏（sleeper）实验的底座：大部分账户在仿真前段就断线，之后长期不回来，
+    /// 于是「一直在线」的少数节点承担了几乎全部的信息流转。
+    ///
+    /// 参数取法（全部落在已有开关上，不引入新概念）：
+    /// - `dormancy_rate` 与步数成反比：整段仿真里平均每个账户遇到约 1 次休眠判定
+    ///   （实际概率还要乘以「不活跃」倍率 1~2.5），于是不论跑 100 步还是 1000 步，
+    ///   都有八成以上的账户在仿真里睡过，且多数在前 1/3 的时长内睡去；
+    /// - `sleep_hours` 下限取总步数的一半、上限取 1.5 倍步数：睡着之后基本覆盖
+    ///   剩余的全部仿真时长，模拟「长期不回来」；
+    /// - `return_rate = 0.03`（≤ 0.05）：休眠结束时几乎都判定为流失；
+    /// - `join_rate = 0`、`leave_rate = 0`：人口固定，离线只来自休眠，便于归因；
+    /// - `enable_rhythm = false`：在线与否只由休眠决定，不被昼夜节律混淆；
+    /// - 攻击类型是 `Sleeper { normal_until: steps / 5 }`：潜伏者在前 1/5 步完全正常。
+    pub fn sleeper_scenario(n: usize, steps: usize, seed: u64) -> Self {
+        let steps = steps.max(1);
+        let mut cfg = SimConfig::small(n, steps);
+        cfg.seed = seed;
+        cfg.enable_rhythm = false;
+        cfg.join_rate = 0.0;
+        cfg.leave_rate = 0.0;
+        // 1.0 / steps：平均每个账户在整段仿真里遇到约 1 次休眠判定
+        cfg.dormancy_rate = (1.0 / steps as f64).clamp(1e-6, 0.2);
+        // 睡眠时长覆盖「大半仿真时长」：最短也有总步数的一半
+        let lo = (steps as u64 / 2).max(24);
+        let hi = ((steps as u64) * 3 / 2).max(lo + 24);
+        cfg.sleep_hours = (lo, hi);
+        cfg.return_rate = 0.03;
+        cfg.attack_ratio = 0.1;
+        cfg.attack_kind = AttackKind::Sleeper {
+            normal_until: (steps as u64 / 5).max(1),
+        };
+        cfg
+    }
+
     /// 夹紧所有越界参数，返回可安全运行的配置。
     ///
     /// 规则：
@@ -424,6 +460,27 @@ mod tests {
         }
         .validated();
         assert_eq!(c.attack_kind, AttackKind::Endorser { ratio: 1.0 });
+    }
+
+    #[test]
+    fn sleeper_scenario_参数符合语义() {
+        let c = SimConfig::sleeper_scenario(200, 200, 9).validated();
+        assert_eq!(c.n_initial, 200);
+        assert_eq!(c.steps, 200);
+        assert_eq!(c.seed, 9);
+        assert_eq!(c.attack_kind, AttackKind::Sleeper { normal_until: 40 });
+        assert!(c.return_rate <= 0.05, "回归概率必须足够低");
+        assert!(c.sleep_hours.0 >= 100, "睡眠时长应覆盖大半仿真时长");
+        assert!(c.sleep_hours.0 <= c.sleep_hours.1);
+        assert!(c.dormancy_rate > 0.0, "没有休眠就没有离线轨迹");
+        assert_eq!(c.join_rate, 0.0);
+        assert_eq!(c.leave_rate, 0.0);
+        assert!(!c.enable_rhythm, "在线与否只由休眠决定");
+        // 步数退化到 0 时也不能造出非法配置
+        let c = SimConfig::sleeper_scenario(10, 0, 1).validated();
+        assert!(c.sleep_hours.0 >= 1);
+        assert!(c.sleep_hours.0 <= c.sleep_hours.1);
+        assert_eq!(c.attack_kind, AttackKind::Sleeper { normal_until: 1 });
     }
 
     #[test]

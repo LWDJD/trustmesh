@@ -19,9 +19,10 @@
 //! 2. 评分只落在「已关注且在线」的账户上；
 //! 3. 评分值 ∈ (0,1]，0 表示没表态、不写入；
 //! 4. 关注数 ≤ `max_follows`，账户数 ≤ `max_accounts`，因此内存有上界；
-//! 5. 女巫账户只关注同集群成员，绝不对外打分。
+//! 5. 女巫账户只关注同集群成员，绝不对外打分；
+//! 6. `life_traces` 与 `accounts` 同下标同长度，生命周期变更只经 `set_life` 写入。
 
-use crate::account::{Account, Kind, Life};
+use crate::account::{Account, Kind, Life, LifeTrace};
 use crate::attack::AttackPlan;
 use crate::behavior;
 use crate::community::{cross_community_share, Communities};
@@ -54,6 +55,8 @@ pub struct World {
     pub rng: Rng,
     /// 账户表，内部编号 = 下标，永不回收
     pub accounts: Vec<Account>,
+    /// 生命周期轨迹，与 `accounts` 同下标、同长度（在线历史就是靠它回放的）
+    pub life_traces: Vec<LifeTrace>,
     /// 社团
     pub communities: Communities,
     /// 已推进的步数（= 小时数）
@@ -87,6 +90,7 @@ impl World {
             cfg,
             rng,
             accounts: Vec::new(),
+            life_traces: Vec::new(),
             communities,
             step: 0,
             time: 0,
@@ -188,6 +192,116 @@ impl World {
             .count()
     }
 
+    // ════════════════════════ 在线历史（只读） ════════════════════════
+
+    /// 账户 `idx` 在时刻 `t` 是否在线。
+    ///
+    /// 与 [`Account::is_online`] 同义，但回答的是**历史**：按 `life_traces` 里记录的
+    /// 生命周期变更重建 `t` 时刻的状态，再叠上活跃时段的判定。因此它对任意 `t` 都成立：
+    /// 早于加入时刻一律 `false`；超过当前时刻时按「最后一次已知状态延续」推断
+    /// （休眠不会自己醒来，离开不会复活，活跃账户继续按活跃时段上下线）。
+    /// `idx` 越界返回 `false`，不 panic。
+    pub fn was_online_at(&self, idx: usize, t: u64) -> bool {
+        let account = match self.accounts.get(idx) {
+            Some(a) => a,
+            None => return false,
+        };
+        let trace = match self.life_traces.get(idx) {
+            Some(x) => x,
+            None => return false,
+        };
+        match trace.state_at(t) {
+            Some(Life::Active) => account.in_active_window(t, self.cfg.enable_rhythm),
+            _ => false,
+        }
+    }
+
+    /// 账户最后一次在线的时间。
+    ///
+    /// - 还在网络里：当前时刻之前（含）最后一个在线时刻；一次都没在线过
+    ///   （比如刚加入就落在昼夜节律的离线窗口里）时返回加入时刻；
+    /// - 已离开：在线状态在离开时刻终结，返回离开时刻——与 [`World::offline_duration`]
+    ///   的起点保持一致；
+    /// - `idx` 越界返回 0。
+    pub fn last_active_at(&self, idx: usize) -> u64 {
+        let account = match self.accounts.get(idx) {
+            Some(a) => a,
+            None => return 0,
+        };
+        if let Life::Left { at } = account.life {
+            return at;
+        }
+        self.last_online_at_or_before(idx, self.time)
+            .unwrap_or(account.joined_at)
+    }
+
+    /// 账户在 `t` 时刻已经离线多久（小时）；在线则返回 0。
+    ///
+    /// 口径：
+    /// - 在线 → 0；
+    /// - 尚未加入（`t < joined_at`）或 `idx` 越界 → 0（这时还谈不上「离线」）；
+    /// - 休眠 / 活跃时段的离线窗口 → `t − 最后一次在线时刻`；
+    /// - 已离开 → `t − 离开时刻`：离开之后视为永久离线，且离线时长从离开时刻起算。
+    pub fn offline_duration(&self, idx: usize, t: u64) -> u64 {
+        let account = match self.accounts.get(idx) {
+            Some(a) => a,
+            None => return 0,
+        };
+        if t < account.joined_at {
+            return 0;
+        }
+        if let Some(Life::Left { at }) = self.life_at(idx, t) {
+            if t >= at {
+                return t - at;
+            }
+        }
+        if self.was_online_at(idx, t) {
+            return 0;
+        }
+        let since = self
+            .last_online_at_or_before(idx, t)
+            .unwrap_or(account.joined_at);
+        t.saturating_sub(since)
+    }
+
+    /// `t` 时刻生效的生命周期状态（编号越界或早于加入时刻返回 `None`）。
+    fn life_at(&self, idx: usize, t: u64) -> Option<Life> {
+        self.life_traces.get(idx).and_then(|x| x.state_at(t))
+    }
+
+    /// `t` 之前（含）最后一个在线时刻；从未在线过返回 `None`。
+    ///
+    /// 逐段回放轨迹：只有 `Active` 段里才可能在线，段内再用活跃时段取最后一个时刻。
+    fn last_online_at_or_before(&self, idx: usize, t: u64) -> Option<u64> {
+        let account = self.accounts.get(idx)?;
+        if t < account.joined_at {
+            return None;
+        }
+        let trace = self.life_traces.get(idx)?;
+        let events = trace.events();
+        let rhythm = self.cfg.enable_rhythm;
+        for (i, &(start, life)) in events.iter().enumerate().rev() {
+            if start > t {
+                continue;
+            }
+            // 本段状态的结束时刻：下一条变更的前一小时；最后一段延续到 t
+            let end = match events.get(i + 1) {
+                Some(&(next, _)) => next.saturating_sub(1),
+                None => t,
+            };
+            let hi = end.min(t);
+            if hi < start {
+                continue;
+            }
+            if matches!(life, Life::Active) {
+                if let Some(x) = account.last_in_window(start, hi, rhythm) {
+                    return Some(x);
+                }
+            }
+        }
+        None
+    }
+
     /// 评分边总数。
     pub fn rating_count(&self) -> usize {
         self.accounts.iter().map(|a| a.ratings.len()).sum()
@@ -217,9 +331,9 @@ impl World {
                 continue;
             }
             if self.rng.chance(self.cfg.return_rate) {
-                self.accounts[i].life = Life::Active;
+                self.set_life(i, Life::Active);
             } else {
-                self.accounts[i].life = Life::Left { at: time };
+                self.set_life(i, Life::Left { at: time });
                 self.leaves += 1;
             }
         }
@@ -236,7 +350,8 @@ impl World {
                 if self.rng.chance(p) {
                     let (lo, hi) = self.cfg.sleep_hours;
                     let hours = self.rng.range_inclusive(lo as usize, hi as usize) as u64;
-                    self.accounts[i].life = Life::Dormant { until: time + hours };
+                    let until = time + hours;
+                    self.set_life(i, Life::Dormant { until });
                     self.dormancy_events += 1;
                 }
             }
@@ -252,7 +367,7 @@ impl World {
                 let idle = 1.0 - (act / 4.0).min(1.0);
                 let p = self.cfg.leave_rate * (1.0 + 3.0 * idle);
                 if self.rng.chance(p) {
-                    self.accounts[i].life = Life::Left { at: time };
+                    self.set_life(i, Life::Left { at: time });
                     self.leaves += 1;
                 }
             }
@@ -513,6 +628,19 @@ impl World {
 
     // ════════════════════════════ 人口与关系的基础操作 ════════════════════════════
 
+    /// 修改生命周期状态，并同步记进轨迹。
+    ///
+    /// 这是全世界**唯一**允许改 `life` 的入口：在线历史（`was_online_at` 等）
+    /// 直接由轨迹回放得到，绕开它写 `life` 会让历史和现状对不上。
+    fn set_life(&mut self, idx: usize, life: Life) {
+        if let Some(account) = self.accounts.get_mut(idx) {
+            account.life = life;
+        }
+        if let Some(trace) = self.life_traces.get_mut(idx) {
+            trace.record(self.time, life);
+        }
+    }
+
     /// 创建一个账户并登记进社团，返回内部编号。
     fn spawn(&mut self, kind: Kind) -> usize {
         let idx = self.accounts.len();
@@ -554,6 +682,8 @@ impl World {
             ratings: Vec::new(),
         };
         self.accounts.push(account);
+        // 轨迹与账户表同下标：新账户从「加入即活跃」开始记
+        self.life_traces.push(LifeTrace::new(time));
         self.communities.add_member(community, idx);
         idx
     }

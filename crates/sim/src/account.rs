@@ -155,9 +155,14 @@ impl Account {
     /// - 关闭昼夜节律：只要活着就一直在线
     /// - 打开节律：落在 `[active_start, active_start + active_span)`（对 24 取模）里
     pub fn is_online(&self, time: u64, rhythm: bool) -> bool {
-        if !matches!(self.life, Life::Active) {
-            return false;
-        }
+        matches!(self.life, Life::Active) && self.in_active_window(time, rhythm)
+    }
+
+    /// 只看昼夜节律：`time` 是否落在活跃时段内（不看生命周期状态）。
+    ///
+    /// 这是 `is_online` 里与「人本身」无关的那一半，历史回放也复用它，
+    /// 保证「当时在线」与「现在的判定规则」永远一致。
+    pub fn in_active_window(&self, time: u64, rhythm: bool) -> bool {
         if !rhythm {
             return true;
         }
@@ -168,6 +173,34 @@ impl Account {
             return true;
         }
         ((hour + 24 - start) % 24) < span
+    }
+
+    /// 闭区间 `[lo, hi]` 里最后一个落在活跃时段内的时刻；区间内没有则返回 `None`。
+    ///
+    /// 关闭节律时任何时刻都算在线，直接给区间右端；
+    /// 打开节律时按 24 小时周期从 `hi` 往回找最近的窗口内时刻——
+    /// 如果 `hi` 恰好落在窗口外，只需后退 `offset - span + 1` 小时。
+    pub fn last_in_window(&self, lo: u64, hi: u64, rhythm: bool) -> Option<u64> {
+        if lo > hi {
+            return None;
+        }
+        if !rhythm {
+            return Some(hi);
+        }
+        let span = (self.active_span as u32).clamp(1, 24);
+        if span >= 24 {
+            return Some(hi);
+        }
+        let start = self.active_start as u32 % 24;
+        // hi 当天的时刻距离「开窗」多少小时（0..24）
+        let offset = ((hi % 24) as u32 + 24 - start) % 24;
+        if offset < span {
+            return Some(hi);
+        }
+        // 往回退到本窗口的最后一刻：offset 变成 span - 1
+        let back = (offset - span) as u64 + 1;
+        let x = hi.checked_sub(back)?;
+        (x >= lo).then_some(x)
     }
 
     /// 账户年龄（小时）。
@@ -195,6 +228,72 @@ impl Account {
             .iter()
             .find(|(t, _)| *t == target)
             .map(|(_, s)| *s)
+    }
+}
+
+/// 一个账户的生命周期轨迹。
+///
+/// 记录形如 `(生效时刻, 新状态)` 的变更序列，按时间升序。
+/// 世界每步只在「生命周期」阶段结束后观察一次状态，所以同一时刻的多次变更
+/// 只有最后一次可见——`record` 对同一时刻的重复写入直接覆盖，不追加。
+///
+/// 有了它，`World::was_online_at` 才能回答「过去某一小时这个人是否在线」；
+/// 这正是潜伏场景需要的输入：谁在什么时候断线、断了多久、回来没有。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LifeTrace {
+    events: Vec<(u64, Life)>,
+}
+
+impl LifeTrace {
+    /// 从「加入即活跃」开始记一条轨迹。
+    pub fn new(joined_at: u64) -> Self {
+        Self {
+            events: vec![(joined_at, Life::Active)],
+        }
+    }
+
+    /// 记一次状态变更；同一时刻只保留最后一次。
+    ///
+    /// `at` 早于已有记录时按时间插入（正常流程里不会发生，这里只是防御性处理），
+    /// 保证 `events` 始终按时间升序，二分查找才有意义。
+    pub fn record(&mut self, at: u64, life: Life) {
+        match self.events.last_mut() {
+            Some(last) if last.0 == at => last.1 = life,
+            Some(last) if last.0 > at => {
+                let pos = self.events.partition_point(|&(t, _)| t <= at);
+                if pos > 0 && self.events[pos - 1].0 == at {
+                    self.events[pos - 1].1 = life;
+                } else {
+                    self.events.insert(pos, (at, life));
+                }
+            }
+            _ => self.events.push((at, life)),
+        }
+    }
+
+    /// `t` 时刻生效的生命周期状态；早于加入时刻返回 `None`。
+    pub fn state_at(&self, t: u64) -> Option<Life> {
+        let pos = self.events.partition_point(|&(at, _)| at <= t);
+        if pos == 0 {
+            None
+        } else {
+            Some(self.events[pos - 1].1)
+        }
+    }
+
+    /// 变更记录（按时间升序）。
+    pub fn events(&self) -> &[(u64, Life)] {
+        &self.events
+    }
+
+    /// 变更次数。
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// 是否一条记录都没有（只有手工构造的空轨迹才会出现）。
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
     }
 }
 
@@ -306,5 +405,69 @@ mod tests {
         assert!(!a.follows(2));
         assert_eq!(a.age(25), 15);
         assert_eq!(a.age(3), 0);
+    }
+
+    #[test]
+    fn 活跃时段内最后一个在线时刻() {
+        let mut a = 造账户(4);
+        a.active_start = 8;
+        a.active_span = 8; // 窗口 [8, 16)
+        assert_eq!(a.last_in_window(0, 20, true), Some(15));
+        assert_eq!(a.last_in_window(8, 9, true), Some(9));
+        // 整段区间都在窗口之外
+        assert_eq!(a.last_in_window(0, 7, true), None);
+        assert_eq!(a.last_in_window(16, 23, true), None);
+        // 空区间与倒置区间
+        assert_eq!(a.last_in_window(5, 4, true), None);
+        // 关闭节律：任何时刻都算在线
+        assert_eq!(a.last_in_window(0, 23, false), Some(23));
+        assert_eq!(a.last_in_window(7, 7, false), Some(7));
+        // 全天在线
+        a.active_span = 24;
+        assert_eq!(a.last_in_window(0, 23, true), Some(23));
+        // 跨零点的窗口：22,23,0..5
+        a.active_start = 22;
+        a.active_span = 8;
+        assert_eq!(a.last_in_window(0, 20, true), Some(5));
+        assert_eq!(a.last_in_window(0, 4, true), Some(4));
+    }
+
+    #[test]
+    fn 轨迹按时刻回放() {
+        let mut t = LifeTrace::new(3);
+        assert_eq!(t.state_at(2), None, "加入之前没有状态");
+        assert_eq!(t.state_at(3), Some(Life::Active));
+        t.record(10, Life::Dormant { until: 20 });
+        assert_eq!(t.state_at(9), Some(Life::Active));
+        assert_eq!(t.state_at(10), Some(Life::Dormant { until: 20 }));
+        assert_eq!(t.state_at(19), Some(Life::Dormant { until: 20 }));
+        // 回归之前，外面的查询只看到「还在睡」
+        assert_eq!(t.state_at(20), Some(Life::Dormant { until: 20 }));
+        t.record(20, Life::Active);
+        assert_eq!(t.state_at(20), Some(Life::Active));
+        assert_eq!(t.state_at(u64::MAX), Some(Life::Active));
+        assert_eq!(t.len(), 3);
+        assert_eq!(t.events()[2], (20, Life::Active));
+    }
+
+    #[test]
+    fn 轨迹同刻覆盖且保持升序() {
+        let mut t = LifeTrace::new(0);
+        t.record(5, Life::Active);
+        assert_eq!(t.len(), 2);
+        t.record(5, Life::Left { at: 5 });
+        assert_eq!(t.len(), 2, "同一时刻只保留最后一次");
+        assert_eq!(t.state_at(5), Some(Life::Left { at: 5 }));
+        // 乱序写入：插到正确位置，仍然升序
+        t.record(3, Life::Dormant { until: 9 });
+        assert_eq!(t.events()[0], (0, Life::Active));
+        assert_eq!(t.events()[1], (3, Life::Dormant { until: 9 }));
+        assert_eq!(t.events()[2], (5, Life::Left { at: 5 }));
+        assert_eq!(t.state_at(4), Some(Life::Dormant { until: 9 }));
+        // 空轨迹不崩
+        let empty = LifeTrace::default();
+        assert!(empty.is_empty());
+        assert_eq!(empty.state_at(0), None);
+        assert_eq!(empty.events(), &[]);
     }
 }

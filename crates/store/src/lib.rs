@@ -9,8 +9,10 @@
 //!   编号从 0 连续递增、永不复用；压缩后的观点（Count Sketch）用编号定位槽位。
 //! * [PositiveList]：本地维护的「正分清单」。只保存 score > 0 的条目，
 //!   每条同时记录「上次成功取到对方观点的时间戳」，供上层计算指数衰减因子。
-//! * [RoundSampler]：轮次抽样器。从正分清单中等概率、**不放回**地抽取，
-//!   一轮内不重复，抽完自动开启新一轮。
+//! * [RoundSampler]：轮次抽样器。从正分清单中**不放回**地抽取，一轮内不重复，
+//!   抽完自动开启新一轮。另提供按 1/2^连败 加权的退避抽样
+//!   （[RoundSampler::draw_backoff]）与不看退避的兜底探测
+//!   （[RoundSampler::draw_all]），对应设计规格 4.9.4。
 //!
 //! 另外提供 [Rng]：一个基于 xorshift64 的确定性伪随机数发生器，
 //! 满足「不引入任何外部 crate」的工程约束。
@@ -19,10 +21,15 @@
 //!
 //! 1. 评分只有 (0, 1] 的正数，0 表示「没表态」；没有负分。
 //! 2. 抽样只从「正分清单」里等概率抽取，**不按评分加权**。
-//! 3. 抽样失败是正常路径，存储层不参与重试、不阻塞、也不更新时间戳
-//!    （是否刷新由上层决定，存储层只提供 [PositiveList::touch]）。
+//! 3. 抽样失败是正常路径，存储层不参与重试、不阻塞、也不更新时间戳。
+//!    它只把「连续失败了几次」记下来（[PositiveList::record_failure]），
+//!    供上层做退避；连败只在**成功**时清零并刷新时间
+//!    （[PositiveList::record_success]）。
 //! 4. 编号只增不减、永不回收——同一个 key 多次 intern 必然返回同一编号。
 //! 5. 全部实现只依赖 std。
+//! 6. 退避只改**抽样概率**（1/2^连败），不改评分、不改上次检查时间、
+//!    也不改轮次语义；兜底探测（[RoundSampler::draw_all]）完全不看退避。
+//!    参数默认值见设计规格 4.9.5（H_source = 72h、T_remove = 168h、T_probe = 24h）。
 //!
 //! ## 快速上手
 //!
@@ -53,6 +60,13 @@
 //! list.touch(alice, 172);
 //! assert_eq!(list.last_check(alice), Some(172));
 //! assert_eq!(list.get(alice), Some(0.8)); // 分数不变
+//!
+//! // 5. 连败计数：失败累加、成功清零；退避只读它，不动 last_check
+//! assert_eq!(list.record_failure(bob), 1);
+//! assert_eq!(list.fail_streak(bob), 1);
+//! list.record_success(bob, 172);
+//! assert_eq!(list.fail_streak(bob), 0);
+//! assert_eq!(list.last_check(bob), Some(172));
 //! ~~~
 
 #![forbid(unsafe_code)]
@@ -183,6 +197,11 @@ struct Entry {
     score: Score,
     /// 上次**成功**取到对方观点的时间；失败不刷新
     last_check: Time,
+    /// 连续抽样失败的次数。成功清零、失败 +1、[PositiveList::set] 改分不动它。
+    ///
+    /// 它只被 [RoundSampler::draw_backoff] 读来做退避，不参与任何计算，
+    /// 也不影响 [PositiveList::share] 之类的份额。
+    fail_streak: u32,
 }
 
 /// 本地维护的「我给谁打过正分」清单。
@@ -196,6 +215,10 @@ struct Entry {
 /// * set 无论新增还是修改，都会把 last_check 刷新为传入的 now。
 /// * [PositiveList::touch] 只刷新时间、不改分数，用于「成功取到观点」；
 ///   「抽样失败」时上层不应调用它（失败不更新时间戳）。
+/// * 每个条目另记一个**连败计数**（[PositiveList::fail_streak]）：
+///   失败 +1（[PositiveList::record_failure]）、成功清零
+///   （[PositiveList::record_success]）。它与评分、last_check 相互独立——
+///   失败不改时间，改分也不清零连败（设计规格 4.9.6 不变量 4）。
 /// * 遍历顺序按编号升序，结果不受哈希随机化影响，便于复现与测试。
 ///
 /// 用 BTreeMap 而不是 HashMap 是为了给 [PositiveList::iter] 一个
@@ -236,6 +259,10 @@ impl PositiveList {
     /// score <= 0（含负数、NaN）表示「没表态」，等价于删除该条目：
     /// 若条目本来就不存在则什么也不做。
     /// score > 1.0 会被截断为 [MAX_SCORE]。
+    ///
+    /// 新增条目从连败计数 0 开始；**已存在的条目会保留原有连败计数**——
+    /// 改分是「我的判断变了」，不是「我刚取到了它的观点」，
+    /// 能清零连败的只有 [PositiveList::record_success]。
     pub fn set(&mut self, idx: AccountIdx, score: Score, now: Time) {
         // 注意：NaN 与任何数比较都是 false，所以 score <= 0.0 对 NaN 不成立，
         // 这里必须显式判 NaN，否则 NaN 会被当成「正分」存进去，污染后续加权。
@@ -245,13 +272,24 @@ impl PositiveList {
         }
         // 允许任意正数（应用层给的 0~n 原始数值），只挡住无穷大/超大值。
         let score = if score.is_finite() { score.min(MAX_SCORE) } else { MAX_SCORE };
-        self.entries.insert(
-            idx,
-            Entry {
-                score,
-                last_check: now,
-            },
-        );
+        match self.entries.get_mut(&idx) {
+            // 已有条目：只更新分数与时间，连败计数原样保留。
+            Some(entry) => {
+                entry.score = score;
+                entry.last_check = now;
+            }
+            // 新条目：没有历史，连败计数从 0 开始。
+            None => {
+                self.entries.insert(
+                    idx,
+                    Entry {
+                        score,
+                        last_check: now,
+                        fail_streak: 0,
+                    },
+                );
+            }
+        }
     }
 
     /// 取原始评分（不做衰减）；未表态返回 None。
@@ -309,6 +347,113 @@ impl PositiveList {
         self.entries.get(&idx).map(|e| e.last_check)
     }
 
+    // ---------------- 连败计数与可达性（设计规格 4.9.3 / 4.9.4） ----------------
+
+    /// 记录一次抽样失败，返回新的连续失败次数。
+    ///
+    /// * 只把连败计数加一，**不改** [PositiveList::last_check]、**不改**评分：
+    ///   失败不刷新时间，`age` 才会自然增长——这正是让不可达来源
+    ///   退出 live 集合（[PositiveList::is_live]）的依据。
+    /// * 计数用饱和加法：连续失败到 `u32::MAX` 后停在上限，不会回绕到 0。
+    /// * 条目不存在时什么也不做，返回 0：没有这条关系，也就无所谓连败。
+    ///
+    /// 它是 [RoundSampler::draw_backoff] 的输入：连败 n 次的来源权重降为 1/2^n。
+    ///
+    /// # 例子
+    ///
+    /// ~~~rust
+    /// use tm_store::PositiveList;
+    ///
+    /// let mut list = PositiveList::new();
+    /// list.set(7, 0.5, 1000);
+    /// assert_eq!(list.fail_streak(7), 0);
+    /// assert_eq!(list.record_failure(7), 1);
+    /// assert_eq!(list.record_failure(7), 2);
+    /// assert_eq!(list.last_check(7), Some(1000), "失败不刷新时间");
+    /// assert_eq!(list.get(7), Some(0.5), "失败不改评分");
+    /// ~~~
+    pub fn record_failure(&mut self, idx: AccountIdx) -> u32 {
+        match self.entries.get_mut(&idx) {
+            Some(entry) => {
+                entry.fail_streak = entry.fail_streak.saturating_add(1);
+                entry.fail_streak
+            }
+            None => 0,
+        }
+    }
+
+    /// 记录一次成功刷新：连败计数清零，并把 last_check 刷新为 now。
+    ///
+    /// * 这是**唯一**会清零连败计数的入口（[PositiveList::set] 改分不重置退避）。
+    /// * 同时等价于一次 [PositiveList::touch]：时间戳前移，评分不变。
+    /// * 条目不存在时是空操作：不会凭空创建条目，也不会留下连败记录。
+    ///
+    /// # 例子
+    ///
+    /// ~~~rust
+    /// use tm_store::PositiveList;
+    ///
+    /// let mut list = PositiveList::new();
+    /// list.set(7, 0.5, 1000);
+    /// list.record_failure(7);
+    /// list.record_failure(7);
+    /// assert_eq!(list.fail_streak(7), 2);
+    ///
+    /// list.record_success(7, 1072);       // 成功：清零 + 刷新时间
+    /// assert_eq!(list.fail_streak(7), 0);
+    /// assert_eq!(list.last_check(7), Some(1072));
+    /// assert_eq!(list.get(7), Some(0.5)); // 分数不变
+    /// ~~~
+    pub fn record_success(&mut self, idx: AccountIdx, now: Time) {
+        if let Some(entry) = self.entries.get_mut(&idx) {
+            entry.fail_streak = 0;
+            entry.last_check = now;
+        }
+    }
+
+    /// 当前连续失败次数；无此条目返回 0。
+    ///
+    /// 「无此条目」与「有条目但从未失败」的返回值相同（都是 0），
+    /// 因为退避只关心次数：没有关系，就没有可退避的对象。
+    pub fn fail_streak(&self, idx: AccountIdx) -> u32 {
+        self.entries.get(&idx).map_or(0, |e| e.fail_streak)
+    }
+
+    /// 是否仍在 live 集合：存在该条目且 `now - last_check < max_age`。
+    ///
+    /// 判定式与设计规格 4.9.3 完全一致（`age[v] < T_remove`，**严格小于**）：
+    ///
+    /// * 条目不存在返回 `false`——没有个人评分，就谈不上「还在我的群体项里」；
+    /// * `max_age == 0` 恒为 `false`（`age < 0` 不可能成立），这是合法的
+    ///   「全部剔除」配置，不会 panic；
+    /// * 时间回拨（now < last_check）按 `age = 0` 处理（`saturating_sub`），
+    ///   因此仍算 live——存储层不假设时间单调。
+    ///
+    /// `max_age` 由上层按规格给：默认 `T_remove = 168h`（7 天）。
+    /// 判定是纯读取，不修改任何状态；退出 live 之后一次
+    /// [PositiveList::record_success] 就能让它立刻回来（剔除不是黑名单）。
+    ///
+    /// # 例子
+    ///
+    /// ~~~rust
+    /// use tm_store::PositiveList;
+    ///
+    /// let mut list = PositiveList::new();
+    /// list.set(7, 0.5, 1000);
+    ///
+    /// assert!(list.is_live(7, 1000, 168));        // 刚刷新过
+    /// assert!(!list.is_live(7, 1168, 168));       // age == 168，不算 live
+    /// assert!(list.is_live(7, 1167, 168));        // age == 167，仍算 live
+    ///
+    /// assert!(!list.is_live(8, 1000, 168));       // 没有这个条目
+    /// assert!(!list.is_live(7, 1000, 0));         // max_age = 0：全部剔除
+    /// ~~~
+    pub fn is_live(&self, idx: AccountIdx, now: Time, max_age: Time) -> bool {
+        self.entries
+            .get(&idx)
+            .is_some_and(|entry| now.saturating_sub(entry.last_check) < max_age)
+    }
+
     /// 正分条目的数量。
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -352,12 +497,20 @@ impl PositiveList {
 /// * [RoundSampler::sync] 只做两件事：保留「还没抽中且仍在清单里」的元素、
 ///   丢弃「已从清单里删除」的元素。它**不会**把中途新增的账户塞进当前这一轮，
 ///   新增账户要等下一次重置（即下轮开始）才会参与。
+/// * [RoundSampler::draw_backoff] 在**同样的轮次语义**上再叠一层退避：
+///   本轮剩余候选里，连败 n 次的来源按 1/2^n 的权重被抽中，其余不变
+///   （不重复、抽完重置、k 大于剩余只给剩余的）。连败全部相同时
+///   权重全部相同，它退化为 [RoundSampler::draw]，同一 seed 结果逐个相同。
+/// * [RoundSampler::draw_all] 一次取走本轮剩下的**全部**候选，不看退避，
+///   供「每 T_probe 强制扫一遍」的兜底探测使用（设计规格 4.9.4）。
 ///
 /// # 实现
 ///
 /// 待抽集合是一个数组；每次抽一个随机下标 j，把 pending[j] 与末尾元素交换
 /// 后 pop 掉（即 swap_remove），因此单次抽取是 O(1)，
-/// 且不依赖任何重试/拒绝式的「抽到重复就重抽」。
+/// 且不依赖任何重试/拒绝式的「抽到重复就重抽」。退避抽样把「取下标」换成
+/// 按权重取（见 pick_weighted），交换弹出这一步完全复用，所以
+/// 「一轮内不重复」的保证不依赖权重是否正确。
 ///
 /// # 例子
 ///
@@ -424,12 +577,8 @@ impl RoundSampler {
         if k == 0 {
             return Vec::new();
         }
-        if self.pending.is_empty() {
-            if self.members.is_empty() {
-                return Vec::new();
-            }
-            // 本轮已抽空：自动重置为全量，再抽。
-            self.start_new_round();
+        if !self.ensure_round() {
+            return Vec::new();
         }
         let take = k.min(self.pending.len());
         let mut out = Vec::with_capacity(take);
@@ -439,6 +588,139 @@ impl RoundSampler {
             // 与末尾交换后弹出：O(1) 且天然保证不放回。
             out.push(self.pending.swap_remove(j));
         }
+        out
+    }
+
+    /// 带退避的抽样：按 1/2^连败 的**相对权重**不放回地抽 k 个。
+    ///
+    /// 连败 0 次的来源权重 1，1 次 1/2，2 次 1/4……权重小不等于抽不到，
+    /// 只是更少被排在前面；单个候选被选中的概率是 `w[i] / Σw`。
+    ///
+    /// # 语义
+    ///
+    /// * 轮次位图语义与 [RoundSampler::draw] **完全一致**：k == 0 直接返回空且
+    ///   不动状态；k > 0 时本轮已抽空会自动用全量清单重开一轮；
+    ///   k 大于本轮剩余时只返回剩余的（不跨轮重复）。
+    /// * 权重是**相对**的：同乘一个系数不改变概率，所以实现里以本轮候选的
+    ///   最小连败次数为基准归一化，绝对权重 2^-800 这种在 f64 里早已下溢的值
+    ///   也能正确比较。指数差另外截断在 BACKOFF_MAX_EXPONENT（64）以内，
+    ///   权重下限是精确的 2^-64 > 0，因此**权重再小也抽得满 k 个**，
+    ///   绝不会因为「全 0」而少抽。
+    /// * 全部候选的连败次数相同时，权重全部相等 → 退化为均匀抽样，
+    ///   走的正是 [RoundSampler::draw] 的那条路径（同一次 next_below），
+    ///   所以**同一 seed、同一状态下两者的返回值逐个相同**。
+    ///   连败次数全为 0 就是这一特例，旧行为因此完全不受影响。
+    /// * 退避只读清单：不改 last_check、不改评分、不改连败计数，
+    ///   也不改轮次以外的任何状态（list 是只读引用）。
+    /// * 清单里查不到的编号按连败 0 次处理。调用方应当先 [RoundSampler::sync]
+    ///   把已删除的账户剔出本轮，这与 [RoundSampler::draw] 对 pending 的约定一致。
+    ///
+    /// # 复杂度
+    ///
+    /// 最坏 O(k·n)，n = 本轮剩余候选数：每抽一个都要在剩余候选上求一次权重和。
+    /// 批大小 k 由应用层决定，通常远小于 n。
+    ///
+    /// # 例子
+    ///
+    /// ~~~rust
+    /// use tm_store::{PositiveList, RoundSampler, Rng};
+    ///
+    /// let mut list = PositiveList::new();
+    /// list.set(1, 0.5, 0);
+    /// list.set(2, 0.5, 0);
+    /// list.set(3, 0.5, 0);
+    ///
+    /// // 2 号连续失败两次 -> 权重降为 1/4，但仍在候选里，只是更少被抽中。
+    /// list.record_failure(2);
+    /// list.record_failure(2);
+    /// assert_eq!(list.fail_streak(2), 2);
+    /// assert_eq!(list.last_check(2), Some(0), "退避不动 last_check");
+    ///
+    /// let mut sampler = RoundSampler::new();
+    /// sampler.reset(&list.indices());
+    /// let mut rng = Rng::new(7);
+    ///
+    /// let picked = sampler.draw_backoff(&list, 2, &mut rng);
+    /// assert_eq!(picked.len(), 2);
+    /// assert_ne!(picked[0], picked[1], "一轮内不重复");
+    /// assert_eq!(sampler.remaining(), 1);
+    /// ~~~
+    pub fn draw_backoff(
+        &mut self,
+        list: &PositiveList,
+        k: usize,
+        rng: &mut Rng,
+    ) -> Vec<AccountIdx> {
+        if k == 0 {
+            return Vec::new();
+        }
+        if !self.ensure_round() {
+            return Vec::new();
+        }
+        let take = k.min(self.pending.len());
+        // 连败计数只读一次，之后与 pending 同步 swap_remove，两者始终一一对应。
+        let mut streaks: Vec<u32> = self
+            .pending
+            .iter()
+            .map(|&idx| list.fail_streak(idx))
+            .collect();
+        let mut out = Vec::with_capacity(take);
+        for _ in 0..take {
+            let j = pick_weighted(&streaks, rng);
+            // 与 draw 相同的交换弹出：不放回由结构保证，与权重无关。
+            out.push(self.pending.swap_remove(j));
+            streaks.swap_remove(j);
+        }
+        out
+    }
+
+    /// 兜底探测：返回本轮**全部**尚未抽过的条目，完全不看退避。
+    ///
+    /// 设计规格 4.9.4 要求每 T_probe（默认 24h）强制完整扫一遍正分清单，
+    /// 否则退避会让长期离线的来源永远抽不到，它也就永远回不到 live 集合。
+    /// 探测本身不看连败计数，也不消耗随机数。
+    ///
+    /// * 结果按编号**升序**，完全确定、可复现；
+    /// * 返回后这些条目即算「本轮已抽过」，本轮剩余清零；
+    /// * 本轮已抽空时与 [RoundSampler::draw] 一样**自动开启新一轮**
+    ///   （用最近一次同步到的全量清单），因此只要清单非空，
+    ///   一次探测必然覆盖一整轮，不会出现「这次探测什么也没问」；
+    /// * 全量清单为空（从未同步过成员）时返回空数组；
+    /// * 连败计数不影响结果：fail_streak 再大，只要本轮没抽过就会被返回。
+    ///
+    /// 探测请求**不走退避**，但它的结果照常计入成功/失败：成功了就调用
+    /// [PositiveList::record_success]，连败清零、age 归零、重回 live 集合。
+    ///
+    /// # 例子
+    ///
+    /// ~~~rust
+    /// use tm_store::{PositiveList, RoundSampler, Rng};
+    ///
+    /// let mut list = PositiveList::new();
+    /// for idx in 0..4u32 {
+    ///     list.set(idx, 0.5, 0);
+    /// }
+    /// let mut sampler = RoundSampler::new();
+    /// sampler.reset(&list.indices());
+    ///
+    /// let mut rng = Rng::new(1);
+    /// assert_eq!(sampler.draw_backoff(&list, 1, &mut rng).len(), 1);
+    /// assert_eq!(sampler.remaining(), 3);
+    ///
+    /// let probe = sampler.draw_all(&list);   // 兜底：把本轮剩下的全问一遍
+    /// assert_eq!(probe.len(), 3);
+    /// assert_eq!(sampler.remaining(), 0);
+    /// ~~~
+    pub fn draw_all(&mut self, list: &PositiveList) -> Vec<AccountIdx> {
+        // 兜底探测不看清单内容（不看退避、也不看评分），参数是为与
+        // draw_backoff 保持同一调用形状而保留的，应用层可以在两条路径之间直接切换。
+        let _ = list;
+        if !self.ensure_round() {
+            return Vec::new();
+        }
+        let mut out = std::mem::take(&mut self.pending);
+        // 固定升序：不消耗随机数，结果可复现，便于断言与日志比对。
+        out.sort_unstable();
         out
     }
 
@@ -456,6 +738,21 @@ impl RoundSampler {
     pub fn reset(&mut self, current: &[AccountIdx]) {
         self.members = normalize(current);
         self.start_new_round();
+    }
+
+    /// 保证本轮还有候选；返回 false 表示全量清单为空、抽不出东西。
+    ///
+    /// draw / draw_backoff / draw_all 共用这一段，让「本轮已空则自动开新一轮」
+    /// 的语义只有一处实现。
+    fn ensure_round(&mut self) -> bool {
+        if self.pending.is_empty() {
+            if self.members.is_empty() {
+                return false;
+            }
+            // 本轮已抽空：自动重置为全量，再抽。
+            self.start_new_round();
+        }
+        true
     }
 
     /// 把待抽集合恢复成全部成员。
@@ -476,7 +773,104 @@ fn normalize(current: &[AccountIdx]) -> Vec<AccountIdx> {
 }
 
 // ===========================================================================
-// 4. Rng —— xorshift64
+// 4. 退避抽样用到的内部工具（设计规格 4.9.4）
+// ===========================================================================
+
+/// 退避权重的指数上限。
+///
+/// 连败次数的差值再大，权重也只压到 2^-64（约 5.4e-20）：再往下压既没有
+/// 统计意义，又会让 1/2^n 在 f64 里下溢成 0，逼出「全部权重都是 0」这种
+/// 需要额外分支的退化情形。64 还保证 2^-64 是 f64 的**精确值**。
+const BACKOFF_MAX_EXPONENT: u32 = 64;
+
+/// 2^-k 的精确值（k <= BACKOFF_MAX_EXPONENT）。
+///
+/// 直接拼 IEEE-754 位模式：指数域 = 1023 - k、尾数域全 0。
+/// 不经过任何浮点幂运算，因此没有舍入、也没有平台差异。
+fn pow2_neg(k: u32) -> f64 {
+    debug_assert!(k <= BACKOFF_MAX_EXPONENT, "2^-{k} 超出退避权重的取值范围");
+    f64::from_bits(((1023 - k) as u64) << 52)
+}
+
+/// 退避权重：连败 streak 次、本轮候选里最小的连败次数为 min_streak 时的
+/// **相对**权重。
+///
+/// 结果等于 2^-(streak - min_streak)，指数差截断在 BACKOFF_MAX_EXPONENT。
+/// 用相对指数而不是绝对权重 2^-streak，是因为后者在 streak 很大时会在
+/// f64 里下溢成 0；而相对权重与绝对权重只差一个公共因子，
+/// 归一化之后每个候选被选中的概率完全相同。
+fn backoff_weight(streak: u32, min_streak: u32) -> f64 {
+    let diff = streak.saturating_sub(min_streak).min(BACKOFF_MAX_EXPONENT);
+    pow2_neg(diff)
+}
+
+/// 产生 [0, 1) 内的均匀浮点数（53 位精度）。
+///
+/// 取 64 位输出的高 53 位再除以 2^53：被除数不超过 2^53-1、除数与除法都是
+/// 2 的幂，所以每一步都能被 f64 精确表示，结果没有舍入，且 2^53 个可表示值
+/// 等概率出现。
+fn next_unit(rng: &mut Rng) -> f64 {
+    // 2^53：f64 能精确表示 [0, 2^53] 内的全部整数。
+    const SCALE: f64 = 9_007_199_254_740_992.0;
+    (rng.next_u64() >> 11) as f64 / SCALE
+}
+
+/// 在给定的连败计数上，按 1/2^连败 的相对权重挑一个下标。
+///
+/// * 全部连败次数相同 → 权重全部相等 → 直接 next_below(len)，
+///   与均匀抽样**逐位一致**（消费同一次随机数、给出同一个下标）；
+/// * 否则按累积权重取一个，概率严格等于 `w[i] / Σw`；
+/// * 权重和异常（理论上不可达：下限是 2^-64）时退回均匀抽取，
+///   保证「权重太小导致抽不满」永远不会发生。
+///
+/// 调用方保证候选非空。
+fn pick_weighted(streaks: &[u32], rng: &mut Rng) -> usize {
+    debug_assert!(!streaks.is_empty(), "没有候选就不该调用 pick_weighted");
+
+    let mut min = u32::MAX;
+    let mut max = 0u32;
+    for &s in streaks {
+        min = min.min(s);
+        max = max.max(s);
+    }
+    if min == max {
+        // 权重全相等：退化为均匀抽样，与 RoundSampler::draw 走同一条路径。
+        return rng.next_below(streaks.len());
+    }
+
+    // 第一遍：求权重和。权重都是精确的 2 的幂，求和只有一次舍入。
+    let total: f64 = streaks.iter().map(|&s| backoff_weight(s, min)).sum();
+    if total <= 0.0 || !total.is_finite() {
+        // 理论不可达；仍然给出定义：在剩余候选里均匀补一个，绝不少抽。
+        return rng.next_below(streaks.len());
+    }
+
+    // 第二遍：在 [0, total) 里落一个点，取第一个让累积和超过它的候选。
+    let target = next_unit(rng) * total;
+    let mut acc = 0.0;
+    let mut last_positive = 0usize;
+    let mut seen_positive = false;
+    for (i, &s) in streaks.iter().enumerate() {
+        let w = backoff_weight(s, min);
+        if w > 0.0 {
+            last_positive = i;
+            seen_positive = true;
+        }
+        acc += w;
+        if target < acc {
+            return i;
+        }
+    }
+    // 浮点累加的舍入可能让 target 略大于总和：退回最后一个正权重候选。
+    if seen_positive {
+        last_positive
+    } else {
+        rng.next_below(streaks.len())
+    }
+}
+
+// ===========================================================================
+// 5. Rng —— xorshift64
 // ===========================================================================
 
 /// 基于 xorshift64 的确定性伪随机数发生器。
@@ -1399,5 +1793,87 @@ mod tests {
                 "桶 {i} 偏差过大：{c}"
             );
         }
+    }
+
+    // ------------------------------------------------------------------
+    // E1：连败计数与退避抽样的内部实现
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn pow2_neg_is_exact_for_every_supported_exponent() {
+        // 位模式拼出来的 2^-k 必须与逐个乘 0.5 完全相等（不能有舍入）。
+        let mut expected = 1.0f64;
+        for k in 0..=BACKOFF_MAX_EXPONENT {
+            assert_eq!(pow2_neg(k), expected, "2^-{k} 不是精确值");
+            expected *= 0.5;
+        }
+    }
+
+    #[test]
+    fn backoff_weight_is_relative_and_never_zero() {
+        // 权重只由「与最小连败的差」决定，公共偏移不影响结果。
+        assert_eq!(backoff_weight(7, 7), 1.0);
+        assert_eq!(backoff_weight(8, 7), 0.5);
+        assert_eq!(backoff_weight(9, 7), 0.25);
+        assert_eq!(
+            backoff_weight(8, 7),
+            backoff_weight(108, 107),
+            "只与差值有关"
+        );
+        // 差值为负（正常不会出现）按 0 处理。
+        assert_eq!(backoff_weight(3, 7), 1.0);
+        // 极端差值被截断，但**永远大于 0**：这正是「不会少抽」的前提。
+        let floor = pow2_neg(BACKOFF_MAX_EXPONENT);
+        assert_eq!(backoff_weight(u32::MAX, 0), floor);
+        assert!(floor > 0.0);
+    }
+
+    #[test]
+    fn next_unit_is_in_range_and_well_spread() {
+        let mut rng = Rng::new(0x1234_5678_9ABC_DEF0);
+        let mut buckets = [0usize; 10];
+        for _ in 0..100_000 {
+            let v = next_unit(&mut rng);
+            assert!((0.0..1.0).contains(&v), "越界：{v}");
+            buckets[(v * 10.0) as usize] += 1;
+        }
+        // 10 个桶各 1 万，允许 5% 偏差（约 5.3 个标准差）。
+        for (i, &c) in buckets.iter().enumerate() {
+            assert!((c as f64 - 10_000.0).abs() < 500.0, "桶 {i} 偏了：{c}");
+        }
+    }
+
+    #[test]
+    fn pick_weighted_uses_uniform_path_when_weights_are_equal() {
+        // 连败全相同 -> 必须与 draw 一样消费一次 next_below(len)。
+        let mut a = Rng::new(0x5EED);
+        let mut b = Rng::new(0x5EED);
+        for len in 1..=16usize {
+            let streaks = vec![3u32; len];
+            assert_eq!(pick_weighted(&streaks, &mut a), b.next_below(len));
+        }
+    }
+
+    #[test]
+    fn record_failure_saturates_instead_of_wrapping() {
+        let mut list = PositiveList::new();
+        list.set(1, 0.5, 0);
+        list.entries.get_mut(&1).unwrap().fail_streak = u32::MAX;
+        assert_eq!(list.record_failure(1), u32::MAX, "饱和，不得回绕到 0");
+        assert_eq!(list.fail_streak(1), u32::MAX);
+    }
+
+    #[test]
+    fn set_preserves_fail_streak_of_existing_entry() {
+        let mut list = PositiveList::new();
+        list.set(2, 0.4, 10);
+        assert_eq!(list.record_failure(2), 1);
+        list.set(2, 0.9, 20);
+        assert_eq!(list.fail_streak(2), 1, "改分不是成功的证据");
+        assert_eq!(list.last_check(2), Some(20), "set 仍会刷新时间");
+        // 删掉再加回来才是一条新关系，连败清零。
+        list.set(2, 0.0, 30);
+        list.set(2, 0.9, 40);
+        assert_eq!(list.fail_streak(2), 0);
     }
 }

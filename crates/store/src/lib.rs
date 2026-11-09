@@ -76,7 +76,12 @@ pub type Score = f32;
 pub type Time = u64;
 
 /// 评分的上界。传入超过它的分数会被截断到该值。
-pub const MAX_SCORE: Score = 1.0;
+/// 存储层的合理性上界（**不是语义上限**）。
+///
+/// 应用层给的是 0~n 的原始数值（互动次数、点赞数……），库只负责把它换算成占比，
+/// 所以这里不能按 1.0 截断。这个值只用来挡住 +∞ / NaN / 荒谬的大数，防止
+/// 后续求和溢出。
+pub const MAX_SCORE: Score = 1.0e9;
 
 // ===========================================================================
 // 1. AccountTable —— 账户表
@@ -238,8 +243,8 @@ impl PositiveList {
             self.entries.remove(&idx);
             return;
         }
-        // f32::min 对 +∞ 返回 1.0，对正常值无副作用。
-        let score = score.min(MAX_SCORE);
+        // 允许任意正数（应用层给的 0~n 原始数值），只挡住无穷大/超大值。
+        let score = if score.is_finite() { score.min(MAX_SCORE) } else { MAX_SCORE };
         self.entries.insert(
             idx,
             Entry {
@@ -252,6 +257,37 @@ impl PositiveList {
     /// 取原始评分（不做衰减）；未表态返回 None。
     pub fn get(&self, idx: AccountIdx) -> Option<Score> {
         self.entries.get(&idx).map(|e| e.score)
+    }
+
+    /// 全部评分的总和（影响力预算的分母）。
+    pub fn total(&self) -> Score {
+        self.entries.values().map(|e| e.score).sum()
+    }
+
+    /// 归一化后的份额：该账户占我总配额的比值，所有份额之和恒为 1。
+    ///
+    /// 这是「切蛋糕」的最终结果：应用层给 0~n 的原始数值，
+    /// 这里把它换算成占比。没表过态返回 None。
+    pub fn share(&self, idx: AccountIdx) -> Option<Score> {
+        let s = self.entries.get(&idx)?.score;
+        let total = self.total();
+        if total > 0.0 {
+            Some(s / total)
+        } else {
+            None
+        }
+    }
+
+    /// 完整份额表，总和恒为 1（无条目时为空）。按编号升序。
+    pub fn shares(&self) -> Vec<(AccountIdx, Score)> {
+        let total = self.total();
+        if total <= 0.0 {
+            return Vec::new();
+        }
+        self.entries
+            .iter()
+            .map(|(k, e)| (*k, e.score / total))
+            .collect()
     }
 
     /// 该账户是否打过正分。
@@ -685,7 +721,9 @@ mod tests {
         l.set(0, f32::MIN_POSITIVE, 1); // 最小正数仍是正分
         assert_eq!(l.get(0), Some(f32::MIN_POSITIVE));
         l.set(1, MAX_SCORE, 1);
-        assert_eq!(l.get(1), Some(1.0));
+        assert_eq!(l.get(1), Some(MAX_SCORE), "上界本身可以存");
+        l.set(2, 1.0, 1);
+        assert_eq!(l.get(2), Some(1.0), "1.0 只是一个普通数值，不再是上限");
     }
 
     #[test]
@@ -739,10 +777,11 @@ mod tests {
     #[test]
     fn set_score_above_max_is_clamped() {
         let mut l = PositiveList::new();
+        // 应用层给的是 0~n 的原始数值，2.5 必须原样保留，不能被截成 1.0
         l.set(1, 2.5, 0);
-        assert_eq!(l.get(1), Some(MAX_SCORE), "评分不变量：存储值 ∈ (0, 1]");
+        assert_eq!(l.get(1), Some(2.5), "0~n 的原始数值不得被截断");
         l.set(2, f32::INFINITY, 0);
-        assert_eq!(l.get(2), Some(MAX_SCORE));
+        assert_eq!(l.get(2), Some(MAX_SCORE), "无穷大收敛到上界");
     }
 
     #[test]

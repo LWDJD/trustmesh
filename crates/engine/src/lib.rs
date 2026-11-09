@@ -135,9 +135,26 @@ impl Engine {
 
     // ---------- 评分 ----------
 
-    /// 记录一次评分。score <= 0 表示撤销。
+    /// 记录一次评分。score 是应用层给的 **0~n 原始数值**，库里会自动归一化。
+    /// score <= 0 表示撤销。
     pub fn rate(&mut self, idx: AccountIdx, score: Score, now: Time) {
         self.ratings.set(idx, score, now);
+    }
+
+    /// 累加式互动计数：又互动了 `times` 次。权重 = 次数 ÷ 总次数。
+    pub fn record(&mut self, idx: AccountIdx, now: Time, times: u32) {
+        let cur = self.ratings.get(idx).unwrap_or(0.0);
+        self.ratings.set(idx, cur + times as Score, now);
+    }
+
+    /// 我对某个账户的**份额**（0~1，全部份额之和恒为 1）。没表过态返回 None。
+    pub fn share_of(&self, idx: AccountIdx) -> Option<Score> {
+        self.ratings.share(idx)
+    }
+
+    /// 我的全部份额（总和 = 1）。
+    pub fn shares(&self) -> Vec<(AccountIdx, Score)> {
+        self.ratings.shares()
     }
 
     pub fn rating_of(&self, idx: AccountIdx) -> Option<Score> {
@@ -205,6 +222,29 @@ impl Engine {
 
     /// 应用层取观点失败时调用：什么都不做（时间戳不更新，衰减自然发生）。
     pub fn on_view_failed(&mut self, _owner: AccountIdx, _now: Time) {}
+
+    /// 完整的信任分布：所有账户分到的比值，**总和恒为 1**。
+    ///
+    /// 这是对外的最终结果。每一个数值就是"我把多少比例的信任交给了它"，
+    /// 乘以 100 即为置信度百分比。
+    pub fn trust_distribution(&self, now: Time) -> Vec<(AccountIdx, Score)> {
+        let n = self.accounts.len() as u32;
+        let mut vals: Vec<(AccountIdx, Score)> = Vec::with_capacity(n as usize);
+        let mut sum = 0.0f32;
+        for i in 0..n {
+            let v = self.query(i, now);
+            if v > 0.0 {
+                sum += v;
+                vals.push((i, v));
+            }
+        }
+        if sum > 0.0 {
+            for x in vals.iter_mut() {
+                x.1 /= sum;
+            }
+        }
+        vals
+    }
 
     /// 把自己当前的声望向量压缩成一份观点文件（发布用）。
     ///

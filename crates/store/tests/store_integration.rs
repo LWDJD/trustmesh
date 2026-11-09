@@ -12,6 +12,8 @@
 use std::collections::BTreeSet;
 
 use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler};
+#[allow(unused_imports)]
+use tm_store::MAX_SCORE;
 
 /// 构造互不相同的测试公钥（只动前 4 字节，其余留 0）。
 fn key(n: u32) -> AccountKey {
@@ -102,8 +104,9 @@ fn only_positive_scores_are_stored() {
 }
 
 #[test]
-fn scores_stay_within_unit_interval() {
-    // 存储层在边界上守住「评分属于 (0, 1]」这一不变量。
+fn scores_stay_within_positive_bounded() {
+    // 应用层给的是 0~n 的原始数值（互动次数、点赞数……），库负责换算成占比。
+    // 存储层只守两条：必须是有限正数，且不超过合理性上界。
     let mut list = PositiveList::new();
     list.set(1, 0.000_001, 0);
     list.set(2, 1.0, 0);
@@ -111,10 +114,13 @@ fn scores_stay_within_unit_interval() {
     list.set(4, f32::INFINITY, 0);
     for idx in 1..=4 {
         let s = list.get(idx).unwrap();
-        assert!(s > 0.0 && s <= 1.0, "评分越界：{idx} -> {s}");
+        assert!(s > 0.0 && s <= MAX_SCORE, "评分越界：{idx} -> {s}");
+        assert!(s.is_finite(), "存储值必须有限：{idx} -> {s}");
     }
     assert!(list.get(1).unwrap() > 0.0);
     assert_eq!(list.get(2), Some(1.0));
+    assert_eq!(list.get(3), Some(7.5), "0~n 的原始数值不得被截断");
+    assert_eq!(list.get(4), Some(MAX_SCORE), "无穷大收敛到上界");
 }
 
 #[test]

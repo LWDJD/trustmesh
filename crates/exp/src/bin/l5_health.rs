@@ -280,6 +280,8 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
         view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
+        decay_enabled: true,
+        decay_floor: 0.0,
     };
 
     let mut nodes: Vec<Option<Engine>> = (0..n).map(|_| None).collect();

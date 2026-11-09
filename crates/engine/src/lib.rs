@@ -42,6 +42,11 @@ pub struct EngineConfig {
     pub agg_mode: AggMode,
     /// 低于多少的查询结果视为「没表态」
     pub noise_multiplier: Score,
+    /// 是否启用时间衰减。`false` 表示不衰减（factor 恒为 1）。
+    pub decay_enabled: bool,
+    /// 衰减因子下限。0.0 表示无下限；0.5 表示「最多衰减一半」。
+    /// 实际 factor = max(0.5^(Δt/H), decay_floor)。
+    pub decay_floor: Score,
 }
 
 impl Default for EngineConfig {
@@ -52,6 +57,8 @@ impl Default for EngineConfig {
             view_params: ViewParams::default(),
             agg_mode: AggMode::Mean,
             noise_multiplier: 1.0,
+            decay_enabled: true,
+            decay_floor: 0.0,
         }
     }
 }
@@ -347,6 +354,23 @@ impl Engine {
         before - self.views.len()
     }
 
+    /// 时间衰减因子的实际取值（三个模式都走这里）。
+    ///
+    /// - `decay_enabled = false`  → 恒为 1（不衰减）
+    /// - `decay_floor > 0`        → `max(0.5^(Δt/H), floor)`（有下限，例如最多衰减一半）
+    /// - 其它                      → `0.5^(Δt/H)`（原行为）
+    pub fn decay_factor(&self, dt: Time) -> Score {
+        if !self.cfg.decay_enabled {
+            return 1.0;
+        }
+        let f = decay(dt, self.cfg.half_life);
+        if self.cfg.decay_floor > 0.0 {
+            f.max(self.cfg.decay_floor)
+        } else {
+            f
+        }
+    }
+
     // ---------- 计算 ----------
 
     /// 查某个账户在自己眼中的声望。
@@ -371,7 +395,7 @@ impl Engine {
             // 而不是 published_at（对方自己声明的发布时间，可以随意伪造）。
             // 时间回拨时 dt 按 0 算（saturating_sub），不会产生负数或回绕。
             let dt = elapsed(stored.last_check, now);
-            let w = w_rating * decay(dt, self.cfg.half_life);
+            let w = w_rating * self.decay_factor(dt);
             if w <= 0.0 {
                 continue;
             }

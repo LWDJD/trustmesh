@@ -65,6 +65,8 @@ fn ecfg() -> EngineConfig {
         view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
+        decay_enabled: true,
+        decay_floor: 0.0,
     }
 }
 

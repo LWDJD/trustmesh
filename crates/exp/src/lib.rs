@@ -44,11 +44,13 @@ pub struct PropConfig {
     pub ban_exclude: f32,
     /// 指数降权强度 λ：倍数 = exp(−λ × 该来源给攻击者的平均分)。0 表示关闭
     pub ban_lambda: f32,
+    /// 影响力预算：把来源发布的观点归一化到总量 1（打的人越多每份越轻）
+    pub normalize_view: bool,
 }
 
 impl Default for PropConfig {
     fn default() -> Self {
-        Self { beta: 0.3, samples: 8, rounds: 4, mode: AggMode::Mean, use_noise_floor: true, exclude_zero: false, banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0, ban_lambda: 0.0 }
+        Self { beta: 0.3, samples: 8, rounds: 4, mode: AggMode::Mean, use_noise_floor: true, exclude_zero: false, banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0, ban_lambda: 0.0, normalize_view: false }
     }
 }
 
@@ -116,10 +118,15 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
 
     // 初始观点 = 自身评分的压缩
     let keys: Vec<[u8; 32]> = (0..n).map(key_of).collect();
-    let mut views: Vec<CompressedView> = positive.iter().map(|list| {
-        let pairs: Vec<([u8; 32], f32)> = list.iter().map(|(t, s)| (keys[*t], *s)).collect();
+    let mk = |list: &[(usize, f32)]| -> CompressedView {
+        let total: f32 = list.iter().map(|(_, s)| *s).sum();
+        let pairs: Vec<([u8; 32], f32)> = list.iter().map(|(t, s)| {
+            let v = if pc.normalize_view && total > 0.0 { *s / total } else { *s };
+            (keys[*t], v)
+        }).collect();
         CompressedView::from_pairs(view_params(), &pairs)
-    }).collect();
+    };
+    let mut views: Vec<CompressedView> = positive.iter().map(|l| mk(l)).collect();
 
     let mut rng = R(0x1234_5678_9ABC_DEF1);
     let mut rep: Vec<Vec<f32>> = vec![vec![0.0; n]; n];
@@ -169,7 +176,11 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
                 let group = aggregate(&items, pc.mode.clone());
                 row[u] = combine(pc.beta, personal, group);
             }
-            let pairs: Vec<([u8; 32], f32)> = (0..n).filter(|u| row[*u] > 0.0).map(|u| (keys[u], row[u])).collect();
+            let total: f32 = row.iter().sum();
+            let pairs: Vec<([u8; 32], f32)> = (0..n).filter(|u| row[*u] > 0.0).map(|u| {
+                let v = if pc.normalize_view && total > 0.0 { row[u] / total } else { row[u] };
+                (keys[u], v)
+            }).collect();
             next_views.push(CompressedView::from_pairs(view_params(), &pairs));
             next_rep[i] = row;
         }

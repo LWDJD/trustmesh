@@ -25,6 +25,8 @@ pub struct StoredView {
     pub last_check: Time,
     /// 该观点的噪声底
     pub noise: NoiseStats,
+    /// 这份观点文件的总质量（接收方自己估计，用于影响力预算）
+    pub total_mass: f32,
 }
 
 /// 引擎参数。
@@ -166,10 +168,18 @@ impl Engine {
     /// 应用层成功取到对方观点后调用。
     pub fn on_view(&mut self, owner: AccountIdx, view: CompressedView, published_at: Time, now: Time) {
         let noise = view.noise_floor(1000, noise_seed(owner));
+        // 接收方自己估计总质量：对已知账户求和。发布方无法伪造这个估计。
+        let mut total_mass = 0.0f32;
+        for i in 0..self.accounts.len() as u32 {
+            if let Some(k) = self.accounts.key_of(i) {
+                total_mass += view.query(&k).clamp(0.0, 1.0);
+            }
+        }
+        let total_mass = total_mass.max(1e-6);
         self.stat_hits += 1;
         self.views.insert(
             owner,
-            StoredView { view, published_at, last_check: now, noise },
+            StoredView { view, published_at, last_check: now, noise, total_mass },
         );
         self.ratings.touch(owner, now);
     }
@@ -181,7 +191,10 @@ impl Engine {
 
     /// 查某个账户在自己眼中的声望。
     pub fn query(&self, target: AccountIdx, now: Time) -> Score {
-        let personal = self.ratings.get(target).unwrap_or(0.0);
+        // 影响力预算：自己的评分也要归一化，总配额恒为 1
+        let total_rating: f32 = self.ratings.iter().map(|(_, s, _)| s).sum();
+        let raw_personal = self.ratings.get(target).unwrap_or(0.0);
+        let personal = if total_rating > 0.0 { raw_personal / total_rating } else { 0.0 };
 
         let target_key = match self.accounts.key_of(target) {
             Some(k) => k,
@@ -199,7 +212,7 @@ impl Engine {
             if w <= 0.0 {
                 continue;
             }
-            let mut v = stored.view.query(&target_key);
+            let mut v = stored.view.query(&target_key) / stored.total_mass;
             // Count Sketch 的估值可能为负或超过 1，先夹紧到合法区间
             v = v.clamp(0.0, 1.0);
             // 低于噪声底的读数视为「没表态」
@@ -407,5 +420,30 @@ mod smoke {
         e.on_view(friend, v, 0, 0);
         let cov = e.banlist_coverage(friend, 0).unwrap_or(0.0);
         assert!((cov - 1.0).abs() < 1e-6, "覆盖率应为 1.0，实际 {cov}");
+    }
+    /// S8：影响力预算——打的人越多，每个人分到的份额越少
+    #[test]
+    fn s8_influence_budget() {
+        let mut e = eng();
+        // 给 10 个人各打 0.5
+        let mut idxs = vec![];
+        for i in 0..10u8 {
+            let x = e.intern(key(i + 10));
+            e.rate(x, 0.5, 0);
+            idxs.push(x);
+        }
+        // 每个人的份额应当都是 1/10
+        let q = e.query(idxs[0], 0);
+        assert!((q - 0.3 * 0.1).abs() < 1e-5, "份额应为 0.1，声望 0.03，实际 {q}");
+        // 打到 100 个人，份额降到 1/100
+        let mut e2 = eng();
+        let mut first = 0;
+        for i in 0..100u32 {
+            let x = e2.intern(key((i % 250) as u8));
+            if i == 0 { first = x; }
+            e2.rate(x, 0.5, 0);
+        }
+        let q2 = e2.query(first, 0);
+        assert!(q2 < q, "打 100 人后单人份额应更小: {q2} vs {q}");
     }
 }

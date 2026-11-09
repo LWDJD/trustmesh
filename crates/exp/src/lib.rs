@@ -81,10 +81,18 @@ impl R {
 
 /// 跑一次完整的「仿真 → 传播」流程。
 pub fn run_case(cfg: SimConfig, pc: &PropConfig) -> Outcome {
+    run_case_inject(cfg, pc, &[], &[])
+}
+
+/// 可注入额外评分与额外账户的版本。
+/// inject: (评分者, 被评者, 分数)；extra_accounts 只用于抬大 n。
+pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f32)], extra_accounts: &[usize]) -> Outcome {
     let mut world = World::new(cfg);
     world.run();
-    let ratings = world.ratings();
-    let n = ratings.iter().map(|(o, t, _)| (*o).max(*t)).max().unwrap_or(0) + 1;
+    let mut ratings = world.ratings();
+    ratings.extend_from_slice(inject);
+    let mut n = ratings.iter().map(|(o, t, _)| (*o).max(*t)).max().unwrap_or(0) + 1;
+    for e in extra_accounts { if *e + 1 > n { n = *e + 1; } }
 
     // 正分清单
     let mut positive: Vec<Vec<(usize, f32)>> = vec![Vec::new(); n];

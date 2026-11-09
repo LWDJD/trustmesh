@@ -16,6 +16,7 @@ struct Out {
     ret_att: f64,
     ret_hon: f64,
     ret_n: usize,
+    ret_ac: usize,
     sleeper_fresh: usize,
     honest_fresh: usize,
 }
@@ -79,13 +80,14 @@ fn run(cfg: SimConfig, rounds: u64, samples: usize) -> Out {
     let mut hsum = 0.0f64; let mut hcnt = 0usize;
     let mut asum = 0.0f64; let mut acnt = 0usize;
     let mut ratt = 0.0f64; let mut rhon = 0.0f64; let mut rn = 0usize;
+    let mut rac = 0usize;   // 回归者眼中的「攻击目标」计数，与 ratt 同源
     for &obs in &alive {
         if is_att[obs] || !online[obs][rounds as usize] { continue; }
         let e = nodes[obs].as_ref().unwrap();
         let returning = was_offline[obs];
         for &t in &alive {
             let v = e.query(t as u32, now) as f64;
-            if is_att[t] { asum += v; acnt += 1; if returning { ratt += v; } }
+            if is_att[t] { asum += v; acnt += 1; if returning { ratt += v; rac += 1; } }
             else { hsum += v; hcnt += 1; if returning { rhon += v; rn += 1; } }
         }
     }
@@ -102,16 +104,11 @@ fn run(cfg: SimConfig, rounds: u64, samples: usize) -> Out {
     Out {
         honest: if hcnt > 0 { hsum / hcnt as f64 } else { 0.0 },
         attacker: if acnt > 0 { asum / acnt as f64 } else { 0.0 },
-        // FIXME(分母错误，未修): ret_att 用 rn 做分母，但 rn 只在上面「诚实目标」
-        // 分支自增（第 89 行），ratt 却在「攻击目标」分支累加（第 88 行）。
-        // 结果是攻击者声望被除以诚实账户计数，攻击比例 10% 时低估约 9 倍。
-        // 影响范围：只有本 bin 输出的「回归看攻击」这一列；
-        //   「诚实/攻击」两列用 hcnt/acnt，正确；
-        //   ret_hon 用 rhon/rn，同源，正确。
-        // 其他 runtime 级仿真（multinode / grid）用的是分开的计数器，没有此问题。
-        ret_att: if rn > 0 { ratt / (rn as f64) } else { 0.0 },
+        // 已修：rantt 与 rac 同源（都只统计「攻击目标」），不再误用 rn。
+        ret_att: if rac > 0 { ratt / (rac as f64) } else { 0.0 },
         ret_hon: if rn > 0 { rhon / (rn as f64) } else { 0.0 },
         ret_n: rn,
+        ret_ac: rac,
         sleeper_fresh: sf,
         honest_fresh: hf,
     }

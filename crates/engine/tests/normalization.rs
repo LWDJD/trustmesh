@@ -20,6 +20,12 @@ fn eng() -> Engine {
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
+        // 两级衰减的新机制显式关闭（默认值已经全是关闭态）：本文件只验归一化。
+        group_half_life: 0,
+        coverage_exponent: 1.0,
+        unreachable_after: 0,
+        remove_when_coverage: 0.0,
+        min_group_sources: 0,
     })
 }
 
@@ -128,7 +134,8 @@ fn stage3_mixed_result_is_renormalized() {
 fn stage4_distribution_sums_to_one() {
     let mut e = eng();
     let f = e.intern(key(1));
-    let t = e.intern(key(9));
+    // target 必须登记，查询才走「已知账户」那条路径（这里只关心分布总和）。
+    let _t = e.intern(key(9));
     e.rate(f, 1.0, 0);
     let v = CompressedView::from_pairs(
         ViewParams { buckets: 512, hashers: 5, seed: 7 },

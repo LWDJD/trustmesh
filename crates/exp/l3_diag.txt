@@ -1,0 +1,31 @@
+﻿l3_sybil.exe :   calibrate d=0.30005 -> offline=0.999
+所在位置 行:1 字符: 129
++ ... ding]::new($false); & ./target/release/l3_sybil.exe diag 2>&1 | Out-F ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  calibrate d=0.30005 -> offline=0.999:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  calibrate d=0.15007 -> offline=0.995
+  calibrate d=0.07509 -> offline=0.990
+  calibrate d=0.03759 -> offline=0.976
+  calibrate d=0.01885 -> offline=0.972
+  calibrate d=0.00947 -> offline=0.943
+  calibrate d=0.00479 -> offline=0.875
+  calibrate d=0.00244 -> offline=0.694
+  calibrate d=0.00127 -> offline=0.467
+  calibrate d=0.00186 -> offline=0.596
+  calibrate best d=0.00186 -> offline=0.5962
+# 标定 dormancy_rate = 0.001858
+  s  seed  n_tot    存活    收益方idx      活着      在线      休眠       被打分      收到均分        质量      潜伏在线/活      认识潜者
+  1    11    302   255       301       是       是       否         8     0.262     0.135         1/1      2/92
+  1    23    302   254       301       是       否       是         2     0.566     0.115         0/1     6/105
+  1    37    302   262       301       是       否       是         9     0.119     0.137         0/1    10/116
+  3    11    304   273       303       是       否       是         6     0.537     0.069         3/3    13/114
+  3    23    304   259       303       是       是       否         9     0.288     0.080         0/3     17/98
+  3    37    304   260       303       是       否       是         8     0.409     0.069         0/3    16/105
+ 10    11    311   270       310       是       是       否        16     0.543     0.099         6/8     23/99
+ 10    23    311   265       310       是       否       是        13     0.590     0.124         4/9    31/104
+ 10    37    311   256       310       是       是       否        17     0.475     0.121         1/9     24/96
+ 30    11    331   289       330       是       否       是        32     0.763     0.063       14/26    67/100
+ 30    23    331   283       330       是       是       否        35     0.714     0.109       13/25    81/111
+ 30    37    331   292       330       否       否       否        32     0.124     0.141       11/27    61/102

@@ -1,0 +1,22 @@
+[package]
+name = "tm_sim"
+version = "0.1.0"
+edition = "2021"
+description = "trustmesh 社会仿真框架：人口动态、兴趣同质性、社团结构、活跃度与攻击者建模"
+license = "MIT"
+publish = false
+
+# 纯 std，无任何外部依赖（离线环境拉不到 crate）
+[dependencies]
+
+[lib]
+name = "tm_sim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sim_report"
+path = "src/bin/sim_report.rs"
+
+[profile.release]
+opt-level = 3
+lto = true

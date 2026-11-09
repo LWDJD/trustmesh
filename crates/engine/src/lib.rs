@@ -187,6 +187,35 @@ impl Engine {
     /// 应用层取观点失败时调用：什么都不做（时间戳不更新，衰减自然发生）。
     pub fn on_view_failed(&mut self, _owner: AccountIdx, _now: Time) {}
 
+    /// 把自己当前的声望向量压缩成一份观点文件（发布用）。
+    ///
+    /// 归一化到总量 1：这就是影响力预算的"发布侧"实现。
+    pub fn export_view(&self, now: Time) -> CompressedView {
+        let n = self.accounts.len() as u32;
+        let mut vals: Vec<([u8; 32], Score)> = Vec::with_capacity(n as usize);
+        let mut sum = 0.0f32;
+        for i in 0..n {
+            if let Some(k) = self.accounts.key_of(i) {
+                let v = self.query(i, now);
+                if v > 0.0 {
+                    sum += v;
+                    vals.push((k, v));
+                }
+            }
+        }
+        if sum > 0.0 {
+            for x in vals.iter_mut() {
+                x.1 /= sum;
+            }
+        }
+        CompressedView::from_pairs(self.cfg.view_params.clone(), &vals)
+    }
+
+    /// 已知账户的编号列表（实验与调试用）。
+    pub fn known_accounts(&self) -> Vec<AccountIdx> {
+        (0..self.accounts.len() as u32).collect()
+    }
+
     // ---------- 计算 ----------
 
     /// 查某个账户在自己眼中的声望。

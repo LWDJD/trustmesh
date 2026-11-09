@@ -12,6 +12,7 @@ tm_sim   = { path = "../sim" }
 tm_view  = { path = "../view" }
 tm_agg   = { path = "../agg" }
 tm_store = { path = "../store" }
+tm_engine = { path = "../engine" }
 
 [profile.release]
 opt-level = 3

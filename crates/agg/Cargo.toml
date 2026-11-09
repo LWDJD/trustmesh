@@ -1,0 +1,10 @@
+[package]
+name = "tm_agg"
+version = "0.1.0"
+edition = "2021"
+description = "trustmesh 的衰减与聚合：指数衰减、四种聚合口径与 β 合成"
+license = "MIT"
+publish = false
+
+# 刻意不声明任何依赖：离线环境只用 std。
+[dependencies]

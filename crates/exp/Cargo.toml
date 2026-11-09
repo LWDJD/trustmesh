@@ -1,0 +1,18 @@
+[package]
+name = "tm_exp"
+version = "0.1.0"
+edition = "2021"
+description = "端到端实验：社会仿真 × 信任引擎"
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+tm_sim   = { path = "../sim" }
+tm_view  = { path = "../view" }
+tm_agg   = { path = "../agg" }
+tm_store = { path = "../store" }
+tm_engine = { path = "../engine" }
+
+[profile.release]
+opt-level = 3

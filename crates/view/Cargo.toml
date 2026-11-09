@@ -1,0 +1,14 @@
+[package]
+name = "tm_view"
+version = "0.1.0"
+edition = "2021"
+description = "Count Sketch 压缩观点：定长、可合并、可实测噪声底"
+license = "MIT"
+readme = "README.md"
+
+# 无任何外部依赖：只有 std
+[dependencies]
+
+# 显式声明空 workspace：本 crate 独立构建，避免被上层仓库的 Cargo.toml 牵连，
+# 也避免 cargo 向上寻找 workspace 根时报错。
+[workspace]

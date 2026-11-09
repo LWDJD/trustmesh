@@ -1,0 +1,18 @@
+[package]
+name = "tm_engine"
+version = "0.1.0"
+edition = "2021"
+description = "trustmesh 引擎：把存储层、压缩观点、衰减聚合拼成完整运行时"
+license = "MIT"
+
+# 独立 workspace 根，避免被上层目录误判
+[workspace]
+
+[dependencies]
+tm_store = { path = "../store" }
+tm_view  = { path = "../view" }
+tm_agg   = { path = "../agg" }
+
+[profile.release]
+opt-level = 3
+lto = true

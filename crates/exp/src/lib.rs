@@ -42,11 +42,13 @@ pub struct PropConfig {
     pub ban_floor: f32,
     /// 硬排除阈值：覆盖率超过它的来源**直接剔除**（0 表示不启用）
     pub ban_exclude: f32,
+    /// 指数降权强度 λ：倍数 = exp(−λ × 该来源给攻击者的平均分)。0 表示关闭
+    pub ban_lambda: f32,
 }
 
 impl Default for PropConfig {
     fn default() -> Self {
-        Self { beta: 0.3, samples: 8, rounds: 4, mode: AggMode::Mean, use_noise_floor: true, exclude_zero: false, banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0 }
+        Self { beta: 0.3, samples: 8, rounds: 4, mode: AggMode::Mean, use_noise_floor: true, exclude_zero: false, banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0, ban_lambda: 0.0 }
     }
 }
 
@@ -166,8 +168,31 @@ pub fn run_case(cfg: SimConfig, pc: &PropConfig) -> Outcome {
         views = next_views;
         rep = next_rep;
 
-        // banlist 审查：来源若抬举我屏蔽的账户，就调低我对它的评分
-        if pc.banlist && !others.is_empty() {
+        // banlist 审查（指数降权）：对每个来源，看它给攻击者的平均分，
+        // 倍数 = exp(−λ × 平均分)。给得越高，降得越狠；给 0 的不受影响。
+        if pc.ban_lambda > 0.0 && !others.is_empty() {
+            let mut peer_mul = vec![1.0f32; n];
+            for s in 0..n {
+                if positive[s].is_empty() { peer_mul[s] = 0.0; continue; }
+                let mut acc = 0.0f32;
+                let mut cnt = 0usize;
+                for &b in &others {
+                    let v = views[s].query(&keys[b]).clamp(0.0, 1.0);
+                    if v > 0.05 { acc += v; cnt += 1; }
+                }
+                // 没表过态 → 不受罚；表过态则按它给的平均分降权
+                let mean = if cnt > 0 { acc / cnt as f32 } else { 0.0 };
+                peer_mul[s] = (-pc.ban_lambda * mean).exp();
+            }
+            for i in 0..n {
+                for (s, _) in positive[i].iter() {
+                    mul[i][*s] = peer_mul[*s];
+                }
+            }
+        }
+
+        // 旧的覆盖率式软降权（保留以便对照）
+        if pc.banlist && !others.is_empty() && pc.ban_lambda == 0.0 {
             for i in 0..n {
                 for (s, _) in positive[i].iter() {
                     let mut hit = 0usize;

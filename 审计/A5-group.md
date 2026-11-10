@@ -387,8 +387,10 @@ cargo run --release --bin a5_group -- s1 > ..\..\审计\a5_data\v5_s1_sybil.txt
 cargo run --release --bin a5_group -- s3 --kind infiltrator > ..\..\审计\a5_data\v5_s3_infiltrator.txt
 cargo run --release --bin a5_group -- s3 --kind endorser   > ..\..\审计\a5_data\v5_s3_endorser.txt
 
-# 5) 分母塌缩微基准（秒级）
+# 5) 分母塌缩微基准（秒级；删除后仍可用，只是只剩 Off 与「权重精确分母」两行）
 cargo run --release --bin a5_group -- micro
+#    注意：micro 是删除后（HEAD）补的子命令；a432d29 的 a5_group 没有它，
+#    所以不要「取回 a432d29 的引擎 + HEAD 的 a5_group」混用。
 
 # 6) 汇总成报告里的表
 cd ..\..\审计\a5_data; node agg.mjs

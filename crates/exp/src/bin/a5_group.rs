@@ -1011,6 +1011,89 @@ fn s1(args: &[String]) {
     }
 }
 
+// ─────────────────────────── 微基准：M 塌缩与空账户（S3/S4） ───────────────────────────
+//
+// 场景：我评了 N=100 个诚实账户 + 1 个目标，只取到其中 M 个来源的观点；
+// 这 M 个来源一致给目标 1.0、给别人 0。
+//
+// 两个口径：
+//   (a) 现成旋钮 s = coverage（计数比）：直接 query(engine)；
+//   (b) 反事实「分母按权重改对」：本文件里自己算
+//         group[u] = Σ_{有观点} share·fs·v[u] ÷ Σ_{全部已评} share·fs
+//       分母包含「评过但没取到观点」的来源（它们只进分母、不进分子）。
+//
+// 注意：份额全部相等时 (a) 与 (b) 数值相同；份额不等时两者会分开。
+
+fn micro(_args: &[String]) {
+    let n: usize = 100;
+    let ms = [1usize, 2, 5, 10, 50, 100];
+    println!("# A5 micro：群体项分母塌缩（N=100 个已评来源，只有 M 个取到观点）");
+    println!("# ratio = share(目标) ÷ 其它已评分诚实账户的平均 share");
+    println!("# uniform = 所有来源份额相等；skew = 这 M 个来源的评分是别人的 20 倍");
+    println!("MHDR,scenario,arm,M,D_target,D_honest,ratio,empty_share,coverage,w_live");
+    for (scen, w_src) in [("uniform", 1.0f32), ("skew", 20.0f32)] {
+        for &arm in &arms_of(false) {
+            for &m in &ms {
+                let mut e = Engine::with_seed(ecfg(arm), 42);
+                let target = e.intern(key(0));
+                let honest: Vec<u32> = (1..=n).map(|i| e.intern(key(i))).collect();
+                let empty: Vec<u32> = (200..220usize).map(|i| e.intern(key(i))).collect();
+                e.rate(target, 1.0, 0);
+                for &h in &honest {
+                    e.rate(h, 1.0, 0);
+                }
+                // 视图副本（供 (b) 用）与 on_view 喂给引擎
+                let mut my_views: Vec<(u32, f32, CompressedView)> = Vec::new();
+                for k in 0..m {
+                    let s = 300 + k; // 与诚实账户编号不重叠
+                    let src = e.intern(key(s));
+                    e.rate(src, w_src, 0);
+                    let view = CompressedView::from_pairs(
+                        ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+                        &[(key(0), 1.0), (key(1), 0.0)],
+                    );
+                    e.on_view(src, view.clone(), 0, 0);
+                    my_views.push((src, 1.0, view));
+                }
+                let dt = e.query(target, 0) as f64;
+                let dh = honest.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / honest.len() as f64;
+                let de = empty.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / empty.len() as f64;
+                // (b) 权重精确分母
+                let shares = e.shares();
+                let mut w_live = 0.0f64;
+                for (src, _fs, _) in &my_views {
+                    w_live += e.share_of(*src).unwrap_or(0.0) as f64;
+                }
+                let denom = 1.0f64; // 全部已评来源的权重和恒为 1（shares 已归一化）
+                let mut num_t = 0.0f64;
+                let mut num_h = 0.0f64;
+                for (src, fs, view) in &my_views {
+                    let sh = e.share_of(*src).unwrap_or(0.0) as f64;
+                    num_t += sh * *fs as f64 * view.query(&key(0)) as f64;
+                    num_h += sh * *fs as f64 * view.query(&key(1)) as f64;
+                }
+                let _ = &shares;
+                let g_t = if denom > 0.0 { num_t / denom } else { 0.0 };
+                let g_h = if denom > 0.0 { num_h / denom } else { 0.0 };
+                let p_t = e.share_of(target).unwrap_or(0.0) as f64;
+                let p_h = e.share_of(honest[0]).unwrap_or(0.0) as f64;
+                let b_t = 0.3 * p_t + 0.7 * g_t;
+                let b_h = 0.3 * p_h + 0.7 * g_h;
+                let ratio_b = if b_h > 0.0 { b_t / b_h } else { 0.0 };
+                let cov = 1.0f64; // §4.9 删除后不再有覆盖率读数
+                println!(
+                    "M,{},denom,{},{:.6},{:.6},{:.2},{:.6},{:.4},{:.4}",
+                    scen, m, b_t, b_h, ratio_b, 0.0, cov, w_live
+                );
+                println!(
+                    "M,{},{},{},{:.6},{:.6},{:.2},{:.6},{:.4},{:.4}",
+                    scen, arm.tag(), m, dt, dh, if dh > 0.0 { dt / dh } else { 0.0 }, de, cov, w_live
+                );
+            }
+        }
+    }
+}
+
 // ─────────────────────────── 参数 ───────────────────────────
 
 fn get_f64(args: &[String], name: &str, default: f64) -> f64 {
@@ -1037,6 +1120,7 @@ fn main() {
         "effect" => effect(&args),
         "s3" => s3(&args),
         "s1" => s1(&args),
-        _ => println!("usage: a5_group diag|effect|s3 [--smoke] [--p 0.5] [--d 216] [--ratio 0.1] [--n 300] [--att-online]"),
+        "micro" => micro(&args),
+        _ => println!("usage: a5_group diag|effect|s1|s3|micro [--smoke] [--p 0.5] [--d 216] [--ratio 0.1] [--n 300] [--att-online]"),
     }
 }

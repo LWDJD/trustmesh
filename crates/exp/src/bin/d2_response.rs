@@ -145,6 +145,11 @@ fn ecfg(m: Mode) -> EngineConfig {
         noise_multiplier: 1.0,
         decay_enabled: m.decay_enabled,
         decay_floor: m.decay_floor,
+        coverage_exponent: 1.0,
+        remove_when_coverage: 0.0,
+        group_half_life: 0,
+        unreachable_after: 0,
+        min_group_sources: 0,
     }
 }
 

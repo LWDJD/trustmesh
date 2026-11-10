@@ -36,35 +36,20 @@ fn key(i: usize) -> [u8; 32] {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Arm {
-    /// 全部关闭：等价于「只有来源级衰减」的当前生产语义
+    /// 生产语义：只有来源级衰减（§4.9 已删除，判决见 审计/A5-group.md）
     Off,
-    /// 只开 live 判定（s 只剩覆盖率项，用于归因）
-    Cov,
-    /// 覆盖率 + 年龄项（θ_remove = 0、N_min = 0）：只有 s，无剔除无门槛
-    Gs,
-    /// 覆盖率 + 年龄项 + 剔除（θ_remove = 0.5、N_min = 0）
-    Gsr,
-    /// 只开年龄项（H_group = 120、T_remove = 0 ⇒ 覆盖率恒为 1）
-    Ga,
-    /// 4.9 推荐参数全开（G + R + N_min；退避在 tick 里恒开，没有独立开关）
-    G,
 }
 
 impl Arm {
     fn tag(self) -> &'static str {
         match self {
             Arm::Off => "off",
-            Arm::Cov => "cov",
-            Arm::Gs => "gs",
-            Arm::Gsr => "gsr",
-            Arm::Ga => "ga",
-            Arm::G => "g",
         }
     }
 }
 
-fn ecfg(arm: Arm) -> EngineConfig {
-    let mut c = EngineConfig {
+fn ecfg(_arm: Arm) -> EngineConfig {
+    EngineConfig {
         beta: 0.3,
         half_life: HALF_LIFE,
         view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
@@ -72,47 +57,11 @@ fn ecfg(arm: Arm) -> EngineConfig {
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
-        group_half_life: 0,
-        coverage_exponent: 1.0,
-        unreachable_after: 0,
-        remove_when_coverage: 0.0,
-        min_group_sources: 0,
-    };
-    match arm {
-        Arm::Off => {}
-        Arm::Cov => {
-            // 只开覆盖率项：θ_remove = 1.0 表示「永不剔除」，于是 s 精确等于 coverage。
-            c.unreachable_after = T_REMOVE;
-            c.remove_when_coverage = 1.0;
-        }
-        Arm::Gs => {
-            c.unreachable_after = T_REMOVE;
-            c.group_half_life = H_GROUP;
-        }
-        Arm::Gsr => {
-            c.unreachable_after = T_REMOVE;
-            c.group_half_life = H_GROUP;
-            c.remove_when_coverage = 0.5;
-        }
-        Arm::Ga => {
-            c.group_half_life = H_GROUP;
-        }
-        Arm::G => {
-            c.unreachable_after = T_REMOVE;
-            c.group_half_life = H_GROUP;
-            c.remove_when_coverage = 0.5;
-            c.min_group_sources = 3;
-        }
     }
-    c
 }
 
-fn arms_of(more: bool) -> Vec<Arm> {
-    if more {
-        vec![Arm::Off, Arm::Gs, Arm::Gsr, Arm::G]
-    } else {
-        vec![Arm::Off, Arm::Cov, Arm::G]
-    }
+fn arms_of(_more: bool) -> Vec<Arm> {
+    vec![Arm::Off]
 }
 
 // ─────────────────────────── 世界与轮 ───────────────────────────
@@ -360,7 +309,7 @@ fn live_stat(e: &Engine, t: u64, is_att: &[bool], is_slp: &[bool]) -> LiveStat {
     }
     ls.avg_age = if w_sum > 0.0 { age_sum / w_sum } else { 0.0 };
     ls.cov = if ls.n_pos > 0 { ls.live as f64 / ls.n_pos as f64 } else { 0.0 };
-    ls.s = e.group_scale(t) as f64;
+    ls.s = 1.0; // §4.9 删除后不存在群体级系数（列位保留，便于与历史数据对齐）
     ls.age_med = median(&mut ages);
     ls
 }
@@ -532,23 +481,9 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
                 rr.ctrl_ratio = if cr.is_empty() { 0.0 } else { cr.iter().sum::<f64>() / cr.len() as f64 };
             }
             let sample_obs = stride_sample(&honest_online, 8);
-            let mut sv = Vec::new();
-            let mut cv = Vec::new();
-            for &o in &sample_obs {
-                if let Some(e) = nodes[o].as_ref() {
-                    sv.push(e.group_scale(t) as f64);
-                    cv.push(e.coverage(t) as f64);
-                }
-            }
-            rr.s_p50 = median(&mut sv);
-            rr.cov_p50 = median(&mut cv);
             {
+                // 对照组每轮快照（live 规模在 §4.9 删除后不再可读，故不再输出）
                 let mut live_v: Vec<f64> = Vec::new();
-                for &o in &ctrl {
-                    if let Some(e) = nodes[o].as_ref() {
-                        live_v.push(e.live_count(t) as f64);
-                    }
-                }
                 println!(
                     "CTRL,{:.2},{},{},{},{},{},{:.4},{:.4},{:.4},{:.3},{:.3},{:.4},{:.4},{:.4}",
                     wc.p, wc.d, wc.seed, arm.tag(), r, rr.ctrl_n, rr.ctrl_pct_s, rr.ctrl_pct_m,
@@ -1015,7 +950,7 @@ fn s3(args: &[String]) {
             continue;
         }
         for &seed in &seeds {
-            for arm in [Arm::Off, Arm::G] {
+            for arm in arms_of(false) {
                 let wc = WorldCfg {
                     p: 0.30, dormancy: 0.000905, d: 216, seed, steps, n_initial: n_init,
                     attack_ratio: ratio, attack: kind, force_att_online: false,
@@ -1052,7 +987,7 @@ fn s1(args: &[String]) {
     println!("# A5 s1：女巫账户在诚实观察者眼里的平均份额（真 Engine）");
     println!("# S1HDR,seed,arm,n_obs,syb_share,hon_mean,ratio");
     for &seed in &seeds {
-        for arm in [Arm::Off, Arm::G] {
+        for arm in arms_of(false) {
             let wc = WorldCfg {
                 p: 0.30, dormancy: 0.000905, d: 216, seed, steps: 400, n_initial: 300,
                 attack_ratio: 0.08,
@@ -1072,92 +1007,6 @@ fn s1(args: &[String]) {
                 "S1,{},{},{},{:.6},{:.5},{:.3}",
                 seed, arm.tag(), rows.len(), mean_sd(&syb).0, mean_sd(&hon).0, mean_sd(&r).0
             );
-        }
-    }
-}
-
-
-// ─────────────────────────── 微基准：M 塌缩与空账户（S3/S4） ───────────────────────────
-//
-// 场景：我评了 N=100 个诚实账户 + 1 个目标，只取到其中 M 个来源的观点；
-// 这 M 个来源一致给目标 1.0、给别人 0（协作簇），或按参数只让第一个来源给 1.0。
-//
-// 两个口径：
-//   (a) 现成旋钮 s = coverage（计数比）：直接 query(engine)；
-//   (b) 反事实「分母按权重改对」：本文件里自己算
-//         group[u] = Σ_{有观点} share·fs·v[u] ÷ Σ_{全部已评} share·fs
-//       分母包含「评过但没取到观点」的来源（它们只进分母、不进分子）。
-//
-// 注意：份额全部相等时 (a) 与 (b) 数值相同；份额不等时两者会分开 —— 这正是要看的。
-
-fn micro(_args: &[String]) {
-    let n: usize = 100;
-    let ms = [1usize, 2, 5, 10, 50, 100];
-    println!("# A5 micro：群体项分母塌缩（N=100 个已评来源，只有 M 个取到观点）");
-    println!("# ratio = share(目标) ÷ 其它已评分诚实账户的平均 share");
-    println!("# uniform = 所有来源份额相等；skew = 这 M 个来源的评分是别人的 20 倍");
-    println!("MHDR,scenario,arm,M,D_target,D_honest,ratio,empty_share,coverage,w_live");
-    for (scen, w_src) in [("uniform", 1.0f32), ("skew", 20.0f32)] {
-        for &arm in &[Arm::Off, Arm::Cov, Arm::G] {
-            for &m in &ms {
-                let mut e = Engine::with_seed(ecfg(arm), 42);
-                let target = e.intern(key(0));
-                let honest: Vec<u32> = (1..=n).map(|i| e.intern(key(i))).collect();
-                let empty: Vec<u32> = (200..220usize).map(|i| e.intern(key(i))).collect();
-                e.rate(target, 1.0, 0);
-                for &h in &honest {
-                    e.rate(h, 1.0, 0);
-                }
-                // 视图副本（供 (b) 用）与 on_view 喂给引擎
-                let mut my_views: Vec<(u32, f32, CompressedView)> = Vec::new();
-                for k in 0..m {
-                    let s = 300 + k; // 与诚实账户编号不重叠
-                    let src = e.intern(key(s));
-                    e.rate(src, w_src, 0);
-                    let view = CompressedView::from_pairs(
-                        ViewParams { buckets: 2048, hashers: 5, seed: 99 },
-                        &[(key(0), 1.0), (key(1), 0.0)],
-                    );
-                    e.on_view(src, view.clone(), 0, 0);
-                    my_views.push((src, 1.0, view));
-                }
-                let dt = e.query(target, 0) as f64;
-                let dh = honest.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / honest.len() as f64;
-                let de = empty.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / empty.len() as f64;
-                // (b) 权重精确分母
-                let shares = e.shares();
-                let total_all: f32 = shares.iter().map(|(_, s)| *s).sum();
-                // 全部已评来源的权重和恒为 1（shares 已归一化）；有观点的部分记作 w_live
-                let mut w_live = 0.0f64;
-                for (src, fs, _) in &my_views {
-                    let _ = fs;
-                    w_live += e.share_of(*src).unwrap_or(0.0) as f64;
-                }
-                let denom = 1.0f64;
-                let mut num_t = 0.0f64;
-                let mut num_h = 0.0f64;
-                for (src, fs, view) in &my_views {
-                    let sh = e.share_of(*src).unwrap_or(0.0) / total_all;
-                    num_t += (sh * fs) as f64 * view.query(&key(0)) as f64;
-                    num_h += (sh * fs) as f64 * view.query(&key(1)) as f64;
-                }
-                let g_t = if denom > 0.0 { num_t / denom } else { 0.0 };
-                let g_h = if denom > 0.0 { num_h / denom } else { 0.0 };
-                let p_t = e.share_of(target).unwrap_or(0.0) as f64;
-                let p_h = e.share_of(honest[0]).unwrap_or(0.0) as f64; // 诚实账户的个人项（份额）
-                let b_t = 0.3 * p_t + 0.7 * g_t;
-                let b_h = 0.3 * p_h + 0.7 * g_h;
-                let ratio_b = if b_h > 0.0 { b_t / b_h } else { 0.0 };
-                let cov = e.coverage(0) as f64;
-                println!(
-                    "M,{},denom,{},{:.6},{:.6},{:.2},{:.6},{:.4},{:.4}",
-                    scen, m, b_t, b_h, ratio_b, 0.0, cov, w_live
-                );
-                println!(
-                    "M,{},{},{},{:.6},{:.6},{:.2},{:.6},{:.4},{:.4}",
-                    scen, arm.tag(), m, dt, dh, if dh > 0.0 { dt / dh } else { 0.0 }, de, cov, w_live
-                );
-            }
         }
     }
 }
@@ -1188,7 +1037,6 @@ fn main() {
         "effect" => effect(&args),
         "s3" => s3(&args),
         "s1" => s1(&args),
-        "micro" => micro(&args),
         _ => println!("usage: a5_group diag|effect|s3 [--smoke] [--p 0.5] [--d 216] [--ratio 0.1] [--n 300] [--att-online]"),
     }
 }

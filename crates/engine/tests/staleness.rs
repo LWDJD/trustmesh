@@ -32,11 +32,6 @@ fn eng() -> Engine {
             half_life: 72,
             // 两级衰减的新机制显式关闭（默认值已经全是关闭态）：
             // 本文件钉的是「来源级衰减 + last_check 基准」这一旧语义。
-            group_half_life: 0,
-            coverage_exponent: 1.0,
-            unreachable_after: 0,
-            remove_when_coverage: 0.0,
-            min_group_sources: 0,
             ..Default::default()
         },
         42,
@@ -560,11 +555,6 @@ fn freshness_stats_treats_zero_half_life_as_one() {
             beta: 0.3,
             half_life: 0,
             // 同上：两级衰减全部关闭。
-            group_half_life: 0,
-            coverage_exponent: 1.0,
-            unreachable_after: 0,
-            remove_when_coverage: 0.0,
-            min_group_sources: 0,
             ..Default::default()
         },
         7,

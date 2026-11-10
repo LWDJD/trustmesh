@@ -21,11 +21,6 @@ fn eng() -> Engine {
         decay_enabled: true,
         decay_floor: 0.0,
         // 两级衰减的新机制显式关闭（默认值已经全是关闭态）：本文件只验归一化。
-        group_half_life: 0,
-        coverage_exponent: 1.0,
-        unreachable_after: 0,
-        remove_when_coverage: 0.0,
-        min_group_sources: 0,
     })
 }
 

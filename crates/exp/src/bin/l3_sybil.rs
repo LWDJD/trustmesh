@@ -217,11 +217,6 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
-        coverage_exponent: 1.0,
-        remove_when_coverage: 0.0,
-        group_half_life: 0,
-        unreachable_after: 0,
-        min_group_sources: 0,
     };
     let mut nodes: Vec<Option<Engine>> = (0..n_total).map(|_| None).collect();
     for &a in &alive {

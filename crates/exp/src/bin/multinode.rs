@@ -31,11 +31,6 @@ fn run(kind: AttackKind, name: &str) {
         agg_mode: AggMode::Mean, noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
-        coverage_exponent: 1.0,
-        remove_when_coverage: 0.0,
-        group_half_life: 0,
-        unreachable_after: 0,
-        min_group_sources: 0,
     };
     let mut nodes: Vec<Option<Engine>> = (0..n).map(|_| None).collect();
     for &a in &alive {

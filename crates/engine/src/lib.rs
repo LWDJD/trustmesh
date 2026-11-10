@@ -39,7 +39,7 @@
 //! * [Engine::probe] 是**不走退避**的兜底探测，保证离线节点上线后还能被想起来。
 //!   引擎不维护定时器，`T_probe`（建议 24h）的节奏由应用层掌握。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use tm_agg::{aggregate, combine, decay, AggMode};
 use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler, Score, Time};
@@ -197,7 +197,6 @@ pub struct Engine {
     views: BTreeMap<AccountIdx, StoredView>,
     cfg: EngineConfig,
     /// 本地屏蔽清单：只用于审查来源，不参与算分
-    banlist: HashSet<AccountIdx>,
     /// 抽样用的随机流（固定种子即可复现）
     rng: Rng,
     /// 统计：累计请求数 / 成功数
@@ -218,7 +217,6 @@ impl Engine {
             sampler: RoundSampler::new(),
             views: BTreeMap::new(),
             cfg,
-            banlist: HashSet::new(),
             rng,
             stat_requests: 0,
             stat_hits: 0,
@@ -848,43 +846,6 @@ impl Engine {
         combine(self.cfg.beta, personal, group.map(|g| g * scale))
     }
 
-    // ---------- banlist 审查 ----------
-
-    pub fn ban(&mut self, idx: AccountIdx) {
-        self.banlist.insert(idx);
-    }
-    pub fn unban(&mut self, idx: AccountIdx) {
-        self.banlist.remove(&idx);
-    }
-    pub fn banlist_len(&self) -> usize {
-        self.banlist.len()
-    }
-
-    /// 某来源的观点里「我的黑名单成员」占多大比例。
-    /// 比例越高，说明它越可能在抬举攻击我的人。
-    pub fn banlist_coverage(&self, owner: AccountIdx, _now: Time) -> Option<f32> {
-        let stored = self.views.get(&owner)?;
-        if self.banlist.is_empty() {
-            return Some(0.0);
-        }
-        let floor = stored.noise.median * self.cfg.noise_multiplier;
-        let mut hit = 0usize;
-        let mut seen = 0usize;
-        for &b in &self.banlist {
-            if let Some(k) = self.accounts.key_of(b) {
-                seen += 1;
-                if stored.view.query(&k) > floor {
-                    hit += 1;
-                }
-            }
-        }
-        if seen == 0 {
-            None
-        } else {
-            Some(hit as f32 / seen as f32)
-        }
-    }
-
     // ---------- 统计 ----------
 
     pub fn stats(&self) -> (u64, u64, usize, usize) {
@@ -1055,19 +1016,6 @@ mod smoke {
         assert_eq!(second.len(), 5, "应自动开启新一轮");
     }
 
-    /// S7：banlist 覆盖率
-    #[test]
-    fn s7_banlist_coverage() {
-        let mut e = eng();
-        let friend = e.intern(key(1));
-        let bad = e.intern(key(66));
-        e.rate(friend, 1.0, 0);
-        e.ban(bad);
-        let v = CompressedView::from_pairs(ViewParams::default(), &[(key(66), 1.0), (key(9), 0.5)]);
-        e.on_view(friend, v, 0, 0);
-        let cov = e.banlist_coverage(friend, 0).unwrap_or(0.0);
-        assert!((cov - 1.0).abs() < 1e-6, "覆盖率应为 1.0，实际 {cov}");
-    }
     /// S8：影响力预算——打的人越多，每个人分到的份额越少
     #[test]
     fn s8_influence_budget() {

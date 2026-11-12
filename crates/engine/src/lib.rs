@@ -1171,6 +1171,9 @@ impl Engine {
             && self.coverage(now) >= self.cfg.remove_when_coverage;
 
         let mut items: Vec<(f32, f32)> = Vec::with_capacity(self.views.len());
+        // 折扣表为空（默认）时完全跳过查表与乘法：热路径零额外开销，
+        // 也从代码上保证「没启用 badlist 就与改造前逐位一致」。
+        let has_discount = !self.discount.is_empty();
         // 顺便数一遍 live 来源：N_min 门槛按 **live 数**判定（不是参与聚合的条目数），
         // 这样「剔除关着、但只剩一个能看到的来源」也会被掐掉群体项。
         let mut live = 0usize;
@@ -1192,8 +1195,8 @@ impl Engine {
             // 时间回拨时 dt 按 0 算（saturating_sub），不会产生负数或回绕。
             let dt = elapsed(stored.last_check, now);
             // badlist 折扣只乘在群体项的来源权重上（个人评分原封不动）。
-            // 折扣表为空时该乘积是 ×1.0，IEEE 恒等，逐位不变。
-            let w = w_rating * self.decay_factor(dt) * self.discount_of(*owner);
+            let w = w_rating * self.decay_factor(dt);
+            let w = if has_discount { w * self.discount_of(*owner) } else { w };
             if w <= 0.0 {
                 continue;
             }

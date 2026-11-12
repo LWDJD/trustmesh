@@ -77,6 +77,7 @@ fn ecfg(m: Mode) -> EngineConfig {
         noise_multiplier: 1.0,
         decay_enabled: m.enabled,
         decay_floor: m.floor,
+        ..Default::default()
     }
 }
 

@@ -20,8 +20,8 @@ fn eng(decay_enabled: bool, decay_floor: f32) -> Engine {
         noise_multiplier: 1.0,
         decay_enabled,
         decay_floor,
-        // 本文件只测来源级衰减的三种模式：两级衰减的新机制显式关闭
-        // （默认值已经全是关闭态），让断言数字与引入 4.9 节之前逐位一致。
+        // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
+        penalty_strength: 1.0,
     })
 }
 

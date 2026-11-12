@@ -456,6 +456,7 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
         noise_multiplier: 1.0,
         decay_enabled: mode.enabled,
         decay_floor: mode.floor,
+        ..Default::default()
     };
 
     // 正分清单（= 抽样池）

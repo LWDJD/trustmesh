@@ -20,7 +20,8 @@ fn eng() -> Engine {
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
-        // 两级衰减的新机制显式关闭（默认值已经全是关闭态）：本文件只验归一化。
+        // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
+        penalty_strength: 1.0,
     })
 }
 

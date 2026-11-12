@@ -55,6 +55,7 @@ fn ecfg() -> EngineConfig {
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
+        ..Default::default()
     }
 }
 

@@ -94,6 +94,7 @@ impl Mode {
             noise_multiplier: 1.0,
             decay_enabled: en,
             decay_floor: fl,
+        ..Default::default()
         }
     }
 }

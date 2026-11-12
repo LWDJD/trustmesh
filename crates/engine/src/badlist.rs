@@ -341,9 +341,9 @@ mod tests {
             );
 
             let mut factors = vec![1.0; n];
-            for i in 0..n {
-                if sol.above[i] {
-                    factors[i] = sol.f;
+            for (f, &above) in factors.iter_mut().zip(sol.above.iter()) {
+                if above {
+                    *f = sol.f;
                 }
             }
             let before = weighted_mean(&weights, &readings, &vec![1.0; n]);

@@ -1,10 +1,11 @@
-//! badlist（受害者反馈）的运行时行为测试。
+//! badlist（受害者反馈）的运行时行为测试（C2 · 一次性事件）。
 //!
-//! 覆盖：闭式解落地、空清单逐位一致、均值以上统一折扣、多攻击者取 min、
-//! 边界与非法输入、确定性/顺序无关、export_view 传播、EMA 恢复、变体 P 对照。
+//! 覆盖：闭式解落地、无报告时逐位一致、均值以上统一折扣、重复报告不复合、
+//! 多次报告取 min、边界与非法输入、确定性/顺序无关、export_view 传播、
+//! 手动撤销、惩罚跨 tick 持久、tick 不自动生效。
 
 use tm_agg::AggMode;
-use tm_engine::{BadlistMode, Engine, EngineConfig};
+use tm_engine::{Engine, EngineConfig};
 use tm_view::{CompressedView, ViewParams};
 
 fn key(i: u32) -> [u8; 32] {
@@ -85,6 +86,13 @@ fn assert_close(a: f32, b: f32, what: &str) {
     assert!((a - b).abs() < 1e-5, "{what}: {a} != {b}");
 }
 
+/// 全表折扣（用于「没有任何惩罚」的断言）。
+fn all_penalties_are_one(e: &Engine, n: u32) {
+    for i in 0..n {
+        assert_eq!(e.penalty_of(i), 1.0, "账户 {i} 不应有折扣");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 1. 闭式解落到引擎：折扣与查询值
 // ---------------------------------------------------------------------------
@@ -94,11 +102,21 @@ fn uniform_scenario_expected_discount_and_query() {
     let (mut e, a, s0) = scenario3();
     assert_close(e.query(a, 0), 0.42, "压前 A 的声望");
 
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
+    // 只有 s0 在 S+（a=1 > ā=1/3），所以恰好压低了 1 个来源。
+    assert_eq!(e.report_bad_account(a), 1, "应压低的来源数");
 
-    assert_close(e.badlist_discount(s0), 1.0 / 3.0, "s0 折扣");
+    assert_close(e.penalty_of(s0), 1.0 / 3.0, "s0 折扣");
+    assert_eq!(e.penalty_of(e.lookup(&key(11)).unwrap()), 1.0, "S− 不动");
+    assert_eq!(e.penalty_of(e.lookup(&key(12)).unwrap()), 1.0, "S− 不动");
     assert_close(e.query(a, 0), 0.7 / 3.0, "压后 A 的声望");
+
+    // 闭式解的目标：压完后的群体项精确等于 ā = 1/3。
+    // A 没有被我自己评分，所以个人项 = 0，群体项 = query / 0.7。
+    let group = e.query(a, 0) / 0.7;
+    assert!(
+        (group - 1.0 / 3.0).abs() < 1e-5,
+        "G_A 应回到 ā: {group}"
+    );
 }
 
 /// 个人评分与份额必须原封不动：badlist 只动群体项权重。
@@ -106,15 +124,14 @@ fn uniform_scenario_expected_discount_and_query() {
 fn personal_ratings_are_untouched() {
     let (mut e, a, s0) = scenario3();
     let shares_before = e.shares();
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
+    e.report_bad_account(a);
     assert_eq!(e.rating_of(s0), Some(3.0));
     assert_eq!(e.shares(), shares_before);
     assert_eq!(e.positive_count(), 3);
 }
 
 // ---------------------------------------------------------------------------
-// 2. 空 badlist 与改造前逐位一致（基线是改造前代码采样的 to_bits）
+// 2. 没人报告时与改造前逐位一致（基线是改造前代码采样的 to_bits）
 // ---------------------------------------------------------------------------
 
 /// 改造前的 key：第 0 字节是编号、第 1 字节固定 0x5A。
@@ -131,7 +148,7 @@ fn baseline_view(pairs: &[(u8, f32)]) -> CompressedView {
 }
 
 #[test]
-fn empty_badlist_is_bit_identical_to_pre_change() {
+fn no_report_is_bit_identical_to_pre_change() {
     let mut e = Engine::with_seed(EngineConfig::default(), 0xBAD1_1234_5678);
     for i in 1..=7u8 {
         e.intern(baseline_key(i));
@@ -212,10 +229,8 @@ fn empty_badlist_is_bit_identical_to_pre_change() {
     assert_eq!(e.query(5, 150).to_bits(), 0);
     assert_eq!(e.query(6, 150).to_bits(), 0);
 
-    assert!(e.badlist().is_empty());
-    for i in 0..7u32 {
-        assert_eq!(e.badlist_discount(i), 1.0);
-    }
+    // 没有报告 = 折扣表为空：每个账户的折扣都是 1.0。
+    all_penalties_are_one(&e, 7);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,16 +249,15 @@ fn unanimous_sources_are_not_punished() {
         srcs.push(s);
     }
     assert_close(e.query(a, 0), 0.7, "全圈一致高分时 A 的声望");
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
+    assert_eq!(e.report_bad_account(a), 0, "S+ 为空应直接退出");
     for s in srcs {
-        assert_eq!(e.badlist_discount(s), 1.0, "态度一致时不应罚任何人");
+        assert_eq!(e.penalty_of(s), 1.0, "态度一致时不应罚任何人");
     }
     assert_close(e.query(a, 0), 0.7, "退出后 A 的声望不变");
 }
 
 // ---------------------------------------------------------------------------
-// 4. 多攻击者取 min（不连乘）
+// 4. 重复报告不复合 / 多账户取 min
 // ---------------------------------------------------------------------------
 
 /// 8 个来源：s0 同时亲近 A/B，s1 只亲近 A，s2 只亲近 B，其余只亲近 filler。
@@ -276,27 +290,40 @@ fn scenario_multi() -> (Engine, u32, u32, Vec<u32>) {
     scenario_multi_with(cfg())
 }
 
-fn discounts(e: &Engine, srcs: &[u32]) -> Vec<f32> {
-    srcs.iter().map(|&s| e.badlist_discount(s)).collect()
+fn penalties(e: &Engine, srcs: &[u32]) -> Vec<f32> {
+    srcs.iter().map(|&s| e.penalty_of(s)).collect()
 }
 
 #[test]
-fn multiple_attackers_take_minimum() {
+fn repeated_report_does_not_compound() {
+    let (mut e, a, s0) = scenario3();
+    assert_eq!(e.report_bad_account(a), 1);
+    let first = e.penalty_of(s0);
+    let first_bits = first.to_bits();
+    let query_bits = e.query(a, 0).to_bits();
+    assert!(first < 0.5);
+
+    // min 语义：第二次算出同样的 f，但没有「更低」，所以不写表、返回 0。
+    assert_eq!(e.report_bad_account(a), 0, "重复报告不应更狠");
+    assert_eq!(e.penalty_of(s0).to_bits(), first_bits, "折扣逐位不变");
+    assert_eq!(e.query(a, 0).to_bits(), query_bits, "查询逐位不变");
+}
+
+#[test]
+fn multiple_reports_take_minimum() {
     let (mut ea, a, _, sa) = scenario_multi();
-    ea.set_badlist(&[a]);
-    ea.recompute_badlist();
+    // s0（0.5）与 s1（1.0）都高于 ā=0.1875，两个都在 S+。
+    assert_eq!(ea.report_bad_account(a), 2);
+    let da = penalties(&ea, &sa);
 
     let (mut eb, _, b, sb) = scenario_multi();
-    eb.set_badlist(&[b]);
-    eb.recompute_badlist();
+    eb.report_bad_account(b);
+    let db = penalties(&eb, &sb);
 
     let (mut eab, _, _, sab) = scenario_multi();
-    eab.set_badlist(&[a, b]);
-    eab.recompute_badlist();
-
-    let da = discounts(&ea, &sa);
-    let db = discounts(&eb, &sb);
-    let dab = discounts(&eab, &sab);
+    eab.report_bad_account(a);
+    eab.report_bad_account(b);
+    let dab = penalties(&eab, &sab);
     for i in 0..sa.len() {
         let want = da[i].min(db[i]);
         assert!(
@@ -307,7 +334,7 @@ fn multiple_attackers_take_minimum() {
             db[i]
         );
     }
-    // 至少要有一个来源同时被两个攻击者罚，且两个折扣不同，否则这条测试没验到 min。
+    // 至少要有一个来源同时被两个账户罚，且两个折扣不同，否则这条测试没验到 min。
     let both =
         (0..sa.len()).find(|&i| da[i] < 0.999 && db[i] < 0.999 && (da[i] - db[i]).abs() > 1e-3);
     assert!(
@@ -317,87 +344,103 @@ fn multiple_attackers_take_minimum() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. 边界：未知账户、强度 λ、EMA 非法值
+// 5. 边界：未知账户、无观点、强度 λ、非法配置
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unknown_or_empty_badlist_does_nothing() {
-    let (mut e, a, s0) = scenario3();
+fn unknown_account_does_nothing() {
+    let (mut e, a, _) = scenario3();
     let q = e.query(a, 0).to_bits();
-    e.set_badlist(&[]);
-    e.recompute_badlist();
-    assert_eq!(e.query(a, 0).to_bits(), q);
-    assert_eq!(e.badlist_discount(s0), 1.0);
-
     // 没 intern 过的账户：读不到任何观点，所有 a_v=0 → ā=0 → S+ 为空。
-    e.set_badlist(&[9999]);
-    e.recompute_badlist();
+    assert_eq!(e.report_bad_account(9999), 0);
+    assert_eq!(e.penalty_of(9999), 1.0);
     assert_eq!(e.query(a, 0).to_bits(), q);
-    assert_eq!(e.badlist_discount(s0), 1.0);
-    assert_eq!(e.badlist_discount(9999), 1.0);
 }
 
 #[test]
-fn strength_zero_disables_and_half_halves() {
-    let mut c = cfg();
-    c.badlist_mu_max = 0.0;
-    let (mut e, a, s0) = scenario3_with(c);
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
-    assert_eq!(e.badlist_discount(s0), 1.0, "λ=0 应完全关闭");
+fn report_is_an_event_using_current_views() {
+    let mut e = eng();
+    let a = e.intern(key(1));
+    let s0 = e.intern(key(10));
+    let s1 = e.intern(key(11));
+    let s2 = e.intern(key(12));
+    e.rate(s0, 3.0, 0);
+    e.rate(s1, 1.0, 0);
+    e.rate(s2, 1.0, 0);
+    // 还没有任何观点：事件算不出读数，什么也不做，而且**不缓存**这次报告。
+    assert_eq!(e.report_bad_account(a), 0, "没有观点时不应写折扣");
+    assert_eq!(e.penalty_of(s0), 1.0);
 
-    let mut c = cfg();
-    c.badlist_mu_max = 0.5;
-    let (mut e, a, s0) = scenario3_with(c);
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
-    assert_close(e.badlist_discount(s0), 2.0 / 3.0, "λ=0.5 折半");
+    e.on_view(s0, full(1), 0, 0);
+    e.on_view(s1, full(2), 0, 0);
+    e.on_view(s2, full(2), 0, 0);
+    // 观点到位后同一事件立刻生效：不需要「重新设置清单」。
+    assert_eq!(e.report_bad_account(a), 1);
+    assert_close(e.penalty_of(s0), 1.0 / 3.0, "后到的观点应参与计算");
 }
 
 #[test]
-fn illegal_config_falls_back_to_no_smoothing_and_full_strength() {
+fn strength_zero_equals_no_call() {
     let mut c = cfg();
-    c.badlist_ema = f32::NAN;
-    c.badlist_mu_max = f32::NAN;
+    c.penalty_strength = 0.0;
     let (mut e, a, s0) = scenario3_with(c);
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
-    assert_close(e.badlist_discount(s0), 1.0 / 3.0, "非法配置回退到 α=1、λ=1");
+    let before = bits(&e, 0);
+    assert_eq!(e.report_bad_account(a), 0, "λ=0 不应写入任何折扣");
+    assert_eq!(e.penalty_of(s0), 1.0);
+    assert_eq!(bits(&e, 0), before, "λ=0 与从未报告逐位一致");
+}
+
+#[test]
+fn strength_half_halves() {
+    let mut c = cfg();
+    c.penalty_strength = 0.5;
+    let (mut e, a, s0) = scenario3_with(c);
+    assert_eq!(e.report_bad_account(a), 1);
+    assert_close(e.penalty_of(s0), 2.0 / 3.0, "λ=0.5 折半");
+}
+
+#[test]
+fn illegal_config_falls_back_to_full_strength() {
+    let mut c = cfg();
+    c.penalty_strength = f32::NAN;
+    let (mut e, a, s0) = scenario3_with(c);
+    assert_eq!(e.report_bad_account(a), 1);
+    assert_close(e.penalty_of(s0), 1.0 / 3.0, "非法配置回退到 λ=1");
 }
 
 // ---------------------------------------------------------------------------
-// 6. 确定性 / 顺序无关
+// 6. 确定性 / 报告顺序无关
 // ---------------------------------------------------------------------------
 
 #[test]
-fn determinism_and_order_independence() {
+fn report_is_deterministic_and_order_independent() {
     let (mut e1, a, b, s1) = scenario_multi();
-    e1.set_badlist(&[a, b]);
-    e1.recompute_badlist();
-    let first = discounts(&e1, &s1);
+    e1.report_bad_account(a);
+    e1.report_bad_account(b);
+    let first = penalties(&e1, &s1);
     let first_bits = bits(&e1, 0);
 
-    // 重复重算（α=1）：逐位相同。
-    e1.recompute_badlist();
-    assert_eq!(discounts(&e1, &s1), first);
+    // 重复报告（min 语义）：逐位相同，且不会再压低。
+    let mut lowered = 0;
+    lowered += e1.report_bad_account(a);
+    lowered += e1.report_bad_account(b);
+    assert_eq!(lowered, 0, "重复报告不应再压低任何来源");
+    assert_eq!(penalties(&e1, &s1), first);
     assert_eq!(bits(&e1, 0), first_bits);
 
-    // 逆序 + 重复 + 追加：结果必须完全一样。
+    // 逆序报告：min 可交换，结果必须完全一样。
     let (mut e2, _, _, s2) = scenario_multi();
-    e2.add_badlist(b);
-    e2.add_badlist(a);
-    e2.add_badlist(b);
-    e2.recompute_badlist();
-    assert_eq!(e2.badlist(), &[a, b][..]);
-    assert_eq!(discounts(&e2, &s2), first);
+    e2.report_bad_account(b);
+    e2.report_bad_account(a);
+    assert_eq!(penalties(&e2, &s2), first);
     assert_eq!(bits(&e2, 0), first_bits);
 
+    // 中间夹一个未知账户：没有观点，不应影响已有结果。
     let (mut e3, _, _, s3) = scenario_multi();
-    e3.set_badlist(&[b, a, b, 9999, a]);
-    e3.recompute_badlist();
-    assert_eq!(e3.badlist(), &[a, b, 9999][..]);
-    // 多出来的 9999 没有观点，不应影响前两个攻击者的结果。
-    assert_eq!(discounts(&e3, &s3), first);
+    e3.report_bad_account(b);
+    assert_eq!(e3.report_bad_account(9999), 0);
+    e3.report_bad_account(a);
+    assert_eq!(penalties(&e3, &s3), first);
     assert_eq!(bits(&e3, 0), first_bits);
 }
 
@@ -412,8 +455,7 @@ fn export_view_propagates_penalty() {
     let before = e.export_view(0);
     let before_a = before.query(&akey);
 
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
+    e.report_bad_account(a);
     let after = e.export_view(0);
     let after_a = after.query(&akey);
 
@@ -450,132 +492,106 @@ fn export_view_propagates_penalty() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. 恢复：α=1 立刻，α<1 逐轮
+// 8. 持久性：没有自动恢复；只有手动 clear_penalties 能撤销
 // ---------------------------------------------------------------------------
 
 #[test]
-fn recovery_alpha_one_is_immediate() {
+fn clear_penalties_is_manual_and_immediate() {
     let (mut e, a, s0) = scenario3();
     let q_before = e.query(a, 0).to_bits();
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
-    assert!(e.badlist_discount(s0) < 0.5);
+    e.report_bad_account(a);
+    assert!(e.penalty_of(s0) < 0.5);
 
-    e.clear_badlist();
-    assert_eq!(e.badlist_discount(s0), 1.0, "α=1 清空后立刻恢复");
-    e.recompute_badlist();
+    e.clear_penalties();
+    assert_eq!(e.penalty_of(s0), 1.0, "手动撤销应立刻恢复");
     assert_eq!(
         e.query(a, 0).to_bits(),
         q_before,
-        "恢复后查询值逐位回到压前"
-    );
-}
-
-#[test]
-fn recovery_alpha_below_one_is_gradual() {
-    let mut c = cfg();
-    c.badlist_ema = 0.5;
-    let (mut e, a, s0) = scenario3_with(c);
-
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
-    let punished = e.badlist_discount(s0);
-    assert!(
-        punished > 1.0 / 3.0 && punished < 1.0,
-        "首次 EMA 应介于 f 与 1 之间: {punished}"
+        "撤销后查询值逐位回到压前"
     );
 
-    e.clear_badlist();
-    let mut prev = e.badlist_discount(s0);
-    assert_eq!(prev, punished, "α<1 时清空本身不应立刻重置");
-    for _ in 0..20 {
-        e.recompute_badlist();
-        let now = e.badlist_discount(s0);
-        assert!(now >= prev - 1e-9, "恢复必须单调: {prev} -> {now}");
-        assert!(now < 1.0 + 1e-9, "折扣不能超过 1: {now}");
-        prev = now;
+    // 撤销后 tick 不会把折扣「重新算回来」。
+    for _ in 0..10 {
+        e.tick(0, 2);
+        assert_eq!(e.penalty_of(s0), 1.0, "tick 不应恢复任何惩罚");
     }
-    assert!(prev > 0.999, "20 轮后应基本恢复: {prev}");
-}
 
-// ---------------------------------------------------------------------------
-// 9. 变体 P 对照：逐条压到均值、会过冲
-// ---------------------------------------------------------------------------
-
-fn scenario_p_with(config: EngineConfig) -> (Engine, u32, Vec<u32>) {
-    let mut e = Engine::with_seed(config, 42);
-    let a = e.intern(key(1));
-    let filler = e.intern(key(2));
-    let s0 = e.intern(key(10));
-    let s1 = e.intern(key(11));
-    let s2 = e.intern(key(12));
-    let s3 = e.intern(key(13));
-    e.rate(s0, 2.0, 0);
-    e.rate(s1, 1.0, 0);
-    e.rate(s2, 1.0, 0);
-    e.rate(s3, 1.0, 0);
-    e.on_view(s0, full(1), 0, 0);
-    e.on_view(s1, mix(1, 0.6, 2), 0, 0);
-    e.on_view(s2, full(2), 0, 0);
-    e.on_view(s3, full(2), 0, 0);
-    let _ = filler;
-    (e, a, vec![s0, s1, s2, s3])
+    // 再次报告会重新写入。
+    assert_eq!(e.report_bad_account(a), 1);
+    assert_close(e.penalty_of(s0), 1.0 / 3.0, "再次报告应重新生效");
 }
 
 #[test]
-fn per_source_variant_penalises_each_and_overshoots() {
-    let (mut eu, au, su) = scenario_p_with(cfg());
-    eu.set_badlist(&[au]);
-    eu.recompute_badlist();
-    let du = discounts(&eu, &su);
-
-    let mut c = cfg();
-    c.badlist_mode = BadlistMode::PerSource;
-    let (mut ep, ap, sp) = scenario_p_with(c);
-    ep.set_badlist(&[ap]);
-    ep.recompute_badlist();
-    let dp = discounts(&ep, &sp);
-
-    // U：所有 S+ 来源共享同一个折扣。
-    assert_close(du[0], du[1], "U 的 s0/s1 应当同折扣");
-    // P：每条各自压到 ā，a 越高压得越狠。
-    assert!(
-        dp[0] < dp[1] - 1e-3,
-        "P 的 s0 应比 s1 罚得更重: {} vs {}",
-        dp[0],
-        dp[1]
-    );
-    assert!(dp[0] < 1.0 && dp[1] < 1.0);
-    // P 会把总加权结果压到 ā 以下（过冲）；U 精确落在 ā。
-    let qu = eu.query(au, 0);
-    let qp = ep.query(ap, 0);
-    assert!(qp < qu - 1e-4, "P 应比 U 过冲得更低: U={qu}, P={qp}");
-}
-
-// ---------------------------------------------------------------------------
-// 10. tick 自动重算；时钟与衰减口径
-// ---------------------------------------------------------------------------
-
-#[test]
-fn tick_recomputes_badlist_at_its_clock() {
+fn penalties_persist_across_ticks() {
     let (mut e, a, s0) = scenario3();
-    e.set_badlist(&[a]);
-    // tick 开头会自动重算，不需要手动调用。
-    let _ = e.tick(0, 1);
-    assert_close(e.badlist_discount(s0), 1.0 / 3.0, "tick 应自动重算");
+    e.report_bad_account(a);
+    let d_bits = e.penalty_of(s0).to_bits();
+    let q_bits = e.query(a, 0).to_bits();
+    assert!(e.penalty_of(s0) < 0.5);
+
+    // 没有自动漂移：1 / 5 / 20 / 100 个 tick 之后，折扣逐位不变。
+    let checkpoints = [1usize, 5, 20, 100];
+    let mut done = 0usize;
+    for target in checkpoints {
+        while done < target {
+            e.tick(0, 2);
+            done += 1;
+        }
+        assert_eq!(
+            e.penalty_of(s0).to_bits(),
+            d_bits,
+            "{target} 个 tick 后折扣不应变化"
+        );
+        assert_eq!(
+            e.query(a, 0).to_bits(),
+            q_bits,
+            "{target} 个 tick 后查询不应变化"
+        );
+    }
 }
 
 #[test]
-fn recompute_uses_decay_of_each_source() {
-    let (mut e, a, s0) = scenario3();
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
-    assert_close(e.badlist_discount(s0), 1.0 / 3.0, "t=0 全新鲜");
+fn tick_does_not_create_penalties() {
+    let (mut e, a, _) = scenario3();
+    let before = bits(&e, 0);
+    for _ in 0..100 {
+        e.tick(0, 2);
+    }
+    // tick 既不自动重算，也不自动报告：折扣表必须仍然为空。
+    all_penalties_are_one(&e, 20);
+    assert_eq!(bits(&e, 0), before, "tick 不应改变任何查询结果");
+    assert_eq!(e.query(a, 0).to_bits(), before[0].1);
+}
 
-    // 只刷新 s1（a=0 的低分来源）：它的权重相对变大 → 分子变大 → f 变大。
+// ---------------------------------------------------------------------------
+// 9. 时间口径：报告用调用时刻的衰减
+// ---------------------------------------------------------------------------
+
+#[test]
+fn report_uses_decay_of_each_source() {
+    let (mut e, a, s0) = scenario3();
+    // 只刷新 s1（a=0 的低分来源）到 t=72：s0/s2 衰减一半，s1 权重相对变大
+    // → 分子变大 → f 变大（惩罚变弱）。
     let s1 = e.lookup(&key(11)).unwrap();
     e.on_view(s1, full(2), 72, 72);
-    e.recompute_badlist();
-    let d = e.badlist_discount(s0);
-    assert!(d > 1.0 / 3.0 + 1e-3, "低分来源变新鲜后惩罚应减弱: {d}");
+    e.report_bad_account(a);
+    let d = e.penalty_of(s0);
+    assert!(
+        d > 1.0 / 3.0 + 1e-3,
+        "低分来源变新鲜后惩罚应减弱（f 变大）: {d}"
+    );
+    assert!(d < 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// 10. 默认配置
+// ---------------------------------------------------------------------------
+
+#[test]
+fn default_config_has_single_penalty_knob() {
+    let c = EngineConfig::default();
+    assert_eq!(c.penalty_strength, 1.0, "默认应为完整惩罚");
+    // 没报告时默认引擎的折扣表为空，且 query 不进入折扣分支。
+    let (e, a, _) = scenario3();
+    assert!((e.query(a, 0) - 0.42).abs() < 1e-6);
 }

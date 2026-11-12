@@ -1,8 +1,9 @@
-//! # badlist —— 受害者反馈机制的核心算法
+//! # badlist —— 受害者反馈机制的核心算法（一次性事件）
 //!
 //! 这是整套设计里**唯一一个有受害者反馈的机制**：其它机制只看「你评了谁」，
-//! 不看「你护了谁」。应用层判断「我正在被谁攻击」，把那些账户（记作 A）交给引擎；
-//! 引擎再看**我信任的来源**是怎么评价 A 的：
+//! 不看「你护了谁」。应用层判断「我正在被谁攻击」，把那个账户（记作 A）
+//! 通过 [crate::Engine::report_bad_account] 报告给引擎；引擎再看
+//! **我信任的来源**是怎么评价 A 的：
 //!
 //! ~~~text
 //! a_v = 来源 v 的观点里对 A 的读数（0~1，与 query 的群体项同口径）
@@ -14,7 +15,7 @@
 //! 拿它当目标线等于「把 A 压到 A 自己」，机制就没有意义了。
 //! ā 的语义是「一个普通来源怎么看 A」。
 //!
-//! ## 变体 U（默认，Uniform）：均值以上统一折扣
+//! ## 唯一变体：均值以上统一折扣
 //!
 //! ~~~text
 //! S+ = { v : a_v > ā }       均值以上
@@ -38,15 +39,20 @@
 //! 越接近均值的人也被同一个 f 处理。分级惩罚会让刚过均值的人几乎不被罚，
 //! 不符合作者要的「一律处理」。
 //!
-//! ## 变体 P（PerSource，对照用）：逐条压到均值
+//! 早期还有一个变体 P（逐条压到 ā，`f_v = ā / a_v`），它没有目标线保证、
+//! 结果会过冲且幅度无上界，已判定不用并删除。
 //!
-//! ~~~text
-//! 对 v ∈ S+：f_v = ā / a_v
-//! ~~~
+//! ## 事件语义（本版的核心）
 //!
-//! 它会把每条**读数**都压到 ā，但权重也一起变了，所以最终加权结果会**过冲到 ā 以下**
-//! （S− 完全不动，压得越狠，低分来源的权重占比反而越大）。变体 P 只用于对照实验，
-//! 默认不启用。
+//! * 引擎**不保存坏账户清单**：`report_bad_account` 是事件，调用时按**当前**观点
+//!   算一次 f，写进折扣表就结束；
+//! * 折扣**不复合**：`discount[v] = min(discount[v], f)`。重复报告同一个账户
+//!   不会越压越狠，多次报告不同账户也只是取各自最严厉的一次；
+//! * **没有自动恢复**：折扣一旦写下就保持不变，直到应用层显式调用
+//!   [crate::Engine::clear_penalties]。作者的决定是「误报的代价是永久的」，
+//!   库不替应用层猜测什么时候该撤销；
+//! * 因此这里也不再有 EMA / 漂移：0 是一个可以停留的终值，
+//!   不再需要「避免 EMA 吸收态」的存储下限。
 //!
 //! ## 自动退出的条件
 //!
@@ -66,12 +72,6 @@
 //! * f 夹到 [0,1]；非有限值一律按 1（不惩罚），绝不污染全表；
 //! * 加权平均本来就不高于 ā（G_A ≤ ā）时，闭式解给出 f ≥ 1，夹紧后就是 1：
 //!   本来没被放大，不用管。
-//!
-//! ## 多个攻击者：取最小值，不连乘
-//!
-//! 每个 A 独立算出一个 f_v^A，最终 `f_v = min_A f_v^A`。
-//! **不能连乘**：连乘会复合放大——两个各罚 50% 就变成 75%，误伤没有上界；
-//! 取 min 让每个来源的惩罚不超过「最严厉的那个攻击者」，有上界、可预测。
 
 use tm_store::AccountIdx;
 
@@ -82,7 +82,7 @@ use tm_store::AccountIdx;
 /// 所以直接判为「不需要处理」。
 pub(crate) const EPS: f64 = 1e-12;
 
-/// 变体 U 的一次求解结果。
+/// 统一折扣的一次求解结果。
 ///
 /// `abar` / `ga` 只用于测试与诊断观测，不参与生产路径。
 #[derive(Clone, Debug)]
@@ -119,7 +119,7 @@ pub(crate) fn sanitize_discount(d: f64) -> f64 {
     }
 }
 
-/// 变体 U：均值以上统一折扣。
+/// 统一折扣：均值以上统一折扣。
 ///
 /// `weights[i]` 是来源 i 的权重 `w_v = 份额 × 衰减`（必须非负）；
 /// `readings[i]` 是它对攻击者 A 的读数（内部会夹到 [0,1]）。
@@ -218,41 +218,11 @@ pub(crate) fn solve_uniform(weights: &[f64], readings: &[f64]) -> UniformSolutio
     UniformSolution { f, above, abar, ga }
 }
 
-/// 变体 P：逐条压到均值 `f_v = ā / a_v`（仅 S+；S− 为 1）。
-///
-/// 返回与输入等长的折扣数组，以及观测用的 ā。
-/// 非有限读数按 0 处理；除法结果一律夹到 [0,1]。
-pub(crate) fn solve_per_source(weights: &[f64], readings: &[f64]) -> (Vec<f64>, f64) {
-    let n = weights.len().min(readings.len());
-    let mut out = vec![1.0f64; n];
-    if n == 0 {
-        return (out, 0.0);
-    }
-    let a: Vec<f64> = readings[..n].iter().map(|&x| sanitize_reading(x)).collect();
-    let abar = a.iter().sum::<f64>() / n as f64;
-    if !abar.is_finite() {
-        return (out, 0.0);
-    }
-    for i in 0..n {
-        // 权重为 0 的来源不参与群体项，给它什么折扣都无所谓；保持 1 更干净。
-        let w_ok = weights[i].is_finite() && weights[i] > 0.0;
-        if !w_ok || a[i] <= abar {
-            continue;
-        }
-        let f = abar / a[i];
-        out[i] = if f.is_finite() {
-            f.clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
-    }
-    (out, abar)
-}
-
 /// 把闭式解给出的原始折扣按「惩罚强度」λ 缩放：`f_eff = 1 − λ·(1 − f)`。
 ///
-/// λ = 1（默认，[crate::EngineConfig::badlist_mu_max]）时原样使用，
-/// 因此变体 U 能精确压到 ā；λ < 1 是刻意留手（例如只允许削掉一半差距）。
+/// λ = 1（默认，[crate::EngineConfig::penalty_strength]）时原样使用，
+/// 因此统一折扣能精确压到 ā；λ < 1 是刻意留手（例如只允许削掉一半差距）；
+/// λ = 0 时 f_eff = 1，等于完全关闭（报告不会写入任何折扣）。
 /// λ 非法（NaN / 负数 / inf）时按 1 处理，f 非法时按 1 处理。
 pub(crate) fn apply_strength(f: f64, lambda: f64) -> f64 {
     let lambda = if lambda.is_finite() {
@@ -264,36 +234,18 @@ pub(crate) fn apply_strength(f: f64, lambda: f64) -> f64 {
     sanitize_discount(1.0 - lambda * (1.0 - f))
 }
 
-/// EMA 平滑：`new = old^(1−α) · f^α`。
+/// 一次报告里，一个来源的快照（引擎内部用）。
 ///
-/// α = 1 时直接返回 f（不平滑）。α 非法时按 1 处理。
-/// 这样 badlist 清空后（f = 1）折扣会从旧值几何式地回到 1.0，误报可自然恢复。
-pub(crate) fn ema(old: f64, f: f64, alpha: f64) -> f64 {
-    let old = sanitize_discount(old);
-    let f = sanitize_discount(f);
-    let alpha = if alpha.is_finite() {
-        alpha.clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-    if alpha >= 1.0 {
-        return f;
-    }
-    if alpha <= 0.0 {
-        return old;
-    }
-    sanitize_discount(old.powf(1.0 - alpha) * f.powf(alpha))
-}
-
-/// 一次扫描里，一个来源的快照（引擎内部用）。
+/// 一次报告只针对一个坏账户，所以每条快照只需要一个读数；
+/// 权重口径与 [crate::Engine::query] 的群体项完全一致（份额 × 衰减，不含折扣）。
 #[derive(Clone, Debug)]
 pub(crate) struct SourceSnapshot {
     /// 来源编号。
     pub idx: AccountIdx,
     /// `份额 × 衰减`（不含折扣）。
     pub weight: f64,
-    /// 对 badlist 里每个攻击者的读数，顺序与 badlist 一致。
-    pub readings: Vec<f64>,
+    /// 对坏账户的读数，已夹到 [0,1] 并过了噪声底。
+    pub reading: f64,
 }
 
 #[cfg(test)]
@@ -450,31 +402,7 @@ mod tests {
         }
     }
 
-    /// 变体 P：每条都压到 ā，结果必然**过冲**到 ā 以下。
-    #[test]
-    fn per_source_overshoots() {
-        let w = [1.0, 1.0, 1.0];
-        let a = [0.2, 0.5, 0.8];
-        let (factors, abar) = solve_per_source(&w, &a);
-        assert!((abar - 0.5).abs() < 1e-12);
-        assert!((factors[0] - 1.0).abs() < 1e-12);
-        assert!((factors[1] - 1.0).abs() < 1e-12);
-        assert!((factors[2] - 0.625).abs() < 1e-12);
-        let after = weighted_mean(&w, &a, &factors);
-        assert!(after < abar - 1e-6, "P 应过冲: after={after}, abar={abar}");
-    }
-
-    /// 变体 P：全相等 → 全 1；非有限读数安全。
-    #[test]
-    fn per_source_guards() {
-        let (f, _) = solve_per_source(&[1.0, 1.0], &[0.3, 0.3]);
-        assert_eq!(f, vec![1.0, 1.0]);
-        let (f, _) = solve_per_source(&[1.0, 1.0], &[f64::NAN, 0.9]);
-        assert!(f.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x)));
-        assert_eq!(solve_per_source(&[], &[]).0.len(), 0);
-    }
-
-    /// 强度 λ：λ=0 完全不罚；λ=0.5 只削一半差距。
+    /// 强度 λ：λ=0 完全不罚；λ=0.5 只削一半差距；非法 λ 按 1。
     #[test]
     fn strength_interpolates() {
         assert_eq!(apply_strength(0.2, 0.0), 1.0);
@@ -482,17 +410,6 @@ mod tests {
         assert!((apply_strength(0.2, 1.0) - 0.2).abs() < 1e-12);
         assert_eq!(apply_strength(f64::NAN, 1.0), 1.0);
         assert!((apply_strength(0.2, f64::NAN) - 0.2).abs() < 1e-12);
-    }
-
-    /// EMA：α=1 直接取新值；α<1 从旧值几何式靠近新值；非法 α 按 1。
-    #[test]
-    fn ema_smooths_and_recovers() {
-        assert!((ema(0.5, 1.0, 1.0) - 1.0).abs() < 1e-12);
-        let x = ema(0.25, 1.0, 0.5);
-        assert!((x - 0.5).abs() < 1e-12, "x={x}");
-        let y = ema(x, 1.0, 0.5);
-        assert!(y > x && y < 1.0, "应单调回到 1: {x} -> {y}");
-        assert!((ema(0.3, 0.8, f64::NAN) - 0.8).abs() < 1e-12);
-        assert!((ema(f64::NAN, 0.8, 1.0) - 0.8).abs() < 1e-12);
+        assert!((apply_strength(0.2, -1.0) - 1.0).abs() < 1e-12);
     }
 }

@@ -39,29 +39,21 @@
 //! * [Engine::probe] 是**不走退避**的兜底探测，保证离线节点上线后还能被想起来。
 //!   引擎不维护定时器，`T_probe`（建议 24h）的节奏由应用层掌握。
 //!
-//! ## 受害者反馈：badlist（C1）
+//! ## 受害者反馈：badlist（C2 · 一次性事件）
 //!
-//! 应用层把「正在攻击我」的账户交给 [Engine::set_badlist]；引擎看**我信任的来源**
-//! 里谁对这些人异常热情，把它们的群体项权重乘上一个折扣
-//! （[Engine::badlist_discount]）。折扣不写入 [PositiveList]：原始评分永远是我
+//! 应用层判断「我正在被谁攻击」，调用 [Engine::report_bad_account] 报告那个账户。
+//! 引擎看**我信任的来源**里谁对它异常热情，把它们的群体项权重乘上一个折扣
+//! （[Engine::penalty_of]）。折扣不写入 [PositiveList]：原始评分永远是我
 //! 自己的表态，badlist 只是「这次先少听它一点」。
 //!
-//! 变体 U（默认）把「均值以上」的来源统一压到未加权平均 ā；
-//! 所有人态度一致时 S+ 为空，机制自动退出。默认 `badlist_mu_max = 1.0`、
-//! `badlist_ema = 1.0`、清单为空，因此不启用时行为与改造前逐位一致。
-//! 算法细节见 `src/badlist.rs`。
+//! 引擎**不保存坏账户清单**：报告是事件，调用时按当前观点算一次折扣；
+//! 折扣取 `min`，不复合，也**没有自动恢复**（[Engine::clear_penalties] 是
+//! 应用层的手动撤销）。默认 `penalty_strength = 1.0`、折扣表为空，
+//! 不调用报告接口时行为与改造前逐位一致。算法细节见 `src/badlist.rs`。
 
 mod badlist;
 
 use std::collections::BTreeMap;
-
-/// 折扣存储下限。
-///
-/// 0 是 EMA 的吸收态（`0^(1−α) = 0`）：一旦把某个来源压到 0，
-/// 即使清空 badlist，α < 1 时它也永远回不到 1，误报无法恢复。
-/// 因此存一个极小正数：效果上等价于完全静音（权重 1e-6），
-/// 但清空后能按 `d^(1−α)` 逐轮爬回 1。
-const MIN_DISCOUNT: Score = 1e-6;
 
 use badlist::SourceSnapshot;
 use tm_agg::{aggregate, combine, decay, AggMode};
@@ -82,22 +74,6 @@ pub struct StoredView {
     pub noise: NoiseStats,
     /// 这份观点文件的总质量（接收方自己估计，用于影响力预算）
     pub total_mass: f32,
-}
-
-/// badlist 折扣的两种计算变体。
-///
-/// 默认 [BadlistMode::Uniform]：均值以上的来源统一乘同一个折扣 f，
-/// 并由闭式解保证压完后的加权结果**精确等于**未加权平均 ā。
-///
-/// [BadlistMode::PerSource] 是**对照变体**：每条读数各自压到 ā（`f_v = ā / a_v`），
-/// 会过冲到 ā 以下，只用于实验比较，不建议生产启用。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum BadlistMode {
-    /// 变体 U：均值以上统一折扣，结果精确落到 ā（默认）。
-    #[default]
-    Uniform,
-    /// 变体 P：逐条压到均值，作为对照；会过冲。
-    PerSource,
 }
 
 /// 引擎参数。
@@ -163,24 +139,15 @@ pub struct EngineConfig {
     ///
     /// `0` 表示跳过这道门槛（有几个来源就用几个）。
     pub min_group_sources: usize,
-    /// badlist 惩罚强度上限 λ ∈ [0, 1]，**默认 1.0（完整惩罚）**。
+    /// badlist 惩罚强度 λ ∈ [0, 1]，**默认 1.0（完整惩罚）**。
     ///
-    /// 变体 U 的闭式解本身已经把折扣夹在 [0,1]；这个旋钮是「刻意留手」：
+    /// 闭式解本身已经把折扣夹在 [0,1]；这个旋钮是「刻意留手」：
     /// `f_eff = 1 − λ·(1 − f)`。λ = 1 时结果精确落到 ā；
-    /// λ = 0.5 时只削掉一半差距；λ = 0 等于关闭惩罚。
-    /// 名字沿用作者定的 `badlist_mu_max`（闭式解里原来的 μ 上限），
-    /// 现在表示「惩罚力度上限」。非法值（NaN / 负数 / inf）按 1.0 处理。
-    pub badlist_mu_max: Score,
-    /// badlist 折扣的 EMA 平滑系数 α ∈ (0, 1]，**默认 1.0（不平滑）**。
+    /// λ = 0.5 时只削掉一半差距；λ = 0 等于关闭惩罚（报告不写入任何折扣）。
+    /// 非法值（NaN / 负数 / inf）按 1.0 处理。
     ///
-    /// α < 1 时每轮按 `discount ← discount^(1−α) · f^α` 更新：
-    /// 惩罚生效更慢，但 badlist 清空后（f = 1）折扣会逐轮几何式回到 1.0，
-    /// 误报可以自然恢复。非法值（0 / 负数 / NaN）按 1.0 处理。
-    pub badlist_ema: Score,
-    /// badlist 折扣的计算变体，**默认 U（统一折扣）**。
-    ///
-    /// 变体 P 只用于对照实验，会过冲到 ā 以下；默认值不改变任何既有行为。
-    pub badlist_mode: BadlistMode,
+    /// 这是 badlist 的**唯一**配置项：没有清单、没有 EMA、没有恢复速率。
+    pub penalty_strength: Score,
 }
 
 impl Default for EngineConfig {
@@ -200,12 +167,10 @@ impl Default for EngineConfig {
             unreachable_after: 0,
             remove_when_coverage: 0.0,
             min_group_sources: 0,
-            // badlist 默认「打开但不生效」：强度 1.0、不平滑、变体 U。
-            // badlist 清单默认为空，折扣表为空，乘 1.0 是 IEEE 恒等变换，
+            // badlist 默认「打开但不生效」：强度 1.0、折扣表为空。
+            // 没人调用 report_bad_account 时 query 完全跳过折扣分支，
             // 因此默认行为与引入本机制之前逐位一致。
-            badlist_mu_max: 1.0,
-            badlist_ema: 1.0,
-            badlist_mode: BadlistMode::Uniform,
+            penalty_strength: 1.0,
         }
     }
 }
@@ -261,21 +226,17 @@ pub struct Engine {
     /// 破坏「同样输入必然得到同样输出」（设计规格 §8 不变量 1）。
     views: BTreeMap<AccountIdx, StoredView>,
     cfg: EngineConfig,
-    /// 受害者反馈清单：应用层判定「正在攻击我」的账户，**升序去重**。
+    /// 来源折扣表：缺省 1.0，只存被压低的条目。
     ///
-    /// 只影响 [Engine::query] 的群体项权重，不改 [PositiveList] 里的原始评分，
-    /// 也不影响抽样、覆盖率、live 判定。
-    badlist: Vec<AccountIdx>,
-    /// 来源折扣表：缺省 1.0，只存非 1 的条目。
-    ///
-    /// `w_v = 份额_v × 衰减_v × discount[v]`，由 [Engine::recompute_badlist] 维护。
+    /// `w_v = 份额_v × 衰减_v × penalty[v]`，由 [Engine::report_bad_account] 写入。
+    /// 折扣是**事件结果**而非清单：表里没有「谁被报告过」，只有「谁的权重被压低」。
+    /// 折扣不会自动恢复，只有 [Engine::clear_penalties] 能清空。
     /// 用 BTreeMap 而不是 HashMap 是为了遍历顺序固定（可复现）。
-    discount: BTreeMap<AccountIdx, Score>,
+    penalties: BTreeMap<AccountIdx, Score>,
     /// 最近一次带时间参数的调用时刻。
     ///
-    /// 公开接口 [Engine::recompute_badlist] 没有 `now` 参数，用它作为时间基准；
-    /// 从未调用过任何带时间的方法时为 0。`tick` 内部走的是带 now 的私有版本，
-    /// 不受这个字段影响。
+    /// 公开接口 [Engine::report_bad_account] 没有 `now` 参数，用它作为时间基准；
+    /// 从未调用过任何带时间的方法时为 0。
     clock: Time,
     /// 抽样用的随机流（固定种子即可复现）
     rng: Rng,
@@ -297,8 +258,7 @@ impl Engine {
             sampler: RoundSampler::new(),
             views: BTreeMap::new(),
             cfg,
-            badlist: Vec::new(),
-            discount: BTreeMap::new(),
+            penalties: BTreeMap::new(),
             clock: 0,
             rng,
             stat_requests: 0,
@@ -367,11 +327,10 @@ impl Engine {
     /// 所以「一条都没失败过」的网络行为完全不受影响。
     /// 退避只管抽样频率：不改评分、不改 `last_check`、也不改观点缓存。
     pub fn tick(&mut self, now: Time, k: usize) -> Vec<FetchRequest> {
-        // 受害者反馈：每轮开头先按**当前**观点与权重重算一次折扣。
-        // badlist 为空时这是一次空操作（只清空空的折扣表），不消耗随机数、
-        // 不改变任何权重，保证与引入本机制之前逐位一致。
+        // badlist 折扣是**事件**，tick 既不重算、也不恢复：这里只更新时间基准，
+        // 供之后应用层调用 report_bad_account / on_view 等接口使用。
+        // 不调用报告接口时折扣表恒为空，随机数序列与引入本机制之前逐位一致。
         self.clock = now;
-        self.recompute_badlist();
 
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);
@@ -515,6 +474,8 @@ impl Engine {
     /// **badlist 折扣会通过 [Engine::query] 自动进入这份观点**：被罚来源对
     /// 攻击者的高读数会被压下去，于是我发布出去的观点里攻击者的份额也变低，
     /// 惩罚由此传播给下游。这是机制的核心目的——不传播的折扣等于没有罚。
+    /// 折扣不会随时间自动恢复，所以一次报告的影响会一直留在后续发布的观点里，
+    /// 直到应用层调用 [Engine::clear_penalties]。
     pub fn export_view(&self, now: Time) -> CompressedView {
         let n = self.accounts.len() as u32;
         let mut vals: Vec<([u8; 32], Score)> = Vec::with_capacity(n as usize);
@@ -873,110 +834,122 @@ impl Engine {
         out
     }
 
-    // ---------- badlist（受害者反馈机制） ----------
+    // ---------- badlist（受害者反馈机制，一次性事件） ----------
 
-    /// 一次性设置 badlist（覆盖原清单），自动排序去重。
+    /// 报告一个「已确认的坏账户」：按**当前**观点，把「对这个账户比平均更亲近的
+    /// 来源」打分压低。返回被**实际**压低的来源数量。
     ///
-    /// `ids` 是应用层判定「正在攻击我」的账户号。库只做信任计算：
-    /// 对每个 A，找出**观点里对 A 的读数高于平均**的来源，把它们对 A 的
-    /// 「额外热情」统一折算成折扣，压到 `f_v`（见 [Engine::badlist_discount]）。
+    /// 这是**一次性事件**，不是清单：
     ///
-    /// * 只改群体项里各来源的权重，**不改** [PositiveList] 里的原始评分，
-    ///   也不改抽样、覆盖率、live 判定；
-    /// * 本方法只改清单，不立刻重算；折扣在下一次 [Engine::recompute_badlist]
-    ///   或 [Engine::tick] 时更新；
-    /// * 传入空切片等价于 [Engine::clear_badlist]；
-    /// * 顺序无关：内部排序去重，`[3,1,3]` 与 `[1,3]` 完全等价。
-    pub fn set_badlist(&mut self, ids: &[AccountIdx]) {
-        self.badlist.clear();
-        self.badlist.extend_from_slice(ids);
-        self.badlist.sort_unstable();
-        self.badlist.dedup();
-        // 空清单 = 没有攻击者：α=1 时折扣应当立刻全部回到 1.0，
-        // 这样「清空之后」的行为与引入本机制之前逐位一致。
-        if self.badlist.is_empty() {
-            self.reset_discount_now();
+    /// * 调用时按当前观点缓存算一次统一折扣 f（算法见 `src/badlist.rs`）；
+    /// * 写入规则是 `penalty[v] = min(penalty[v], f)`，**不复合**：
+    ///   重复报告同一个账户不会越压越狠，报告多个账户也只是各取最严厉的一次；
+    /// * 引擎不保存「谁被报告过」，只保存每个来源的折扣；
+    /// * **没有自动恢复**：[Engine::tick] 不会改动折扣，误报的代价会一直保留，
+    ///   直到应用层调用 [Engine::clear_penalties] 手动撤销；
+    /// * 时间基准是引擎最近一次带时间参数的调用（[Engine::tick] / [Engine::rate] /
+    ///   [Engine::on_view] / [Engine::probe] / [Engine::prune_stale] 的 `now`），
+    ///   一次都没调用过时为 0 —— 这是 `report_bad_account` 没有 `now` 参数的配套约定。
+    ///
+    /// 只影响 [Engine::query] 的群体项权重，**不改** [PositiveList] 里的原始评分，
+    /// 也不影响抽样、覆盖率、live 判定。
+    ///
+    /// # 返回值
+    ///
+    /// 真正被压低的来源数（`[0, 来源总数]`）。以下情况都返回 0 且不写表：
+    /// 坏账户没有 intern 过、没有可参与群体项的来源、S+ 为空（大家态度一致）、
+    /// 闭式解没有可压缩的差距、`penalty_strength = 0`，以及
+    /// **这次算出的 f 不低于已有折扣**（min 语义下重复报告不会更狠）。
+    ///
+    /// # 注意
+    ///
+    /// 应用层必须自己保证「A 确实是坏账户」：本接口没有自动纠错，
+    /// 而折扣一旦写入就会一直生效（只能手动 [Engine::clear_penalties]）。
+    pub fn report_bad_account(&mut self, idx: AccountIdx) -> usize {
+        let key = match self.accounts.key_of(idx) {
+            Some(k) => k,
+            None => return 0,
+        };
+        let total = self.ratings.total();
+        if total <= 0.0 || self.views.is_empty() {
+            return 0;
         }
-    }
-
-    /// 追加一个攻击者；已存在时无操作。
-    ///
-    /// 只改清单，不立刻重算（同 [Engine::set_badlist]）。
-    /// 插入位置由二分查找决定，清单始终保持升序，因此结果与调用顺序无关。
-    pub fn add_badlist(&mut self, id: AccountIdx) {
-        match self.badlist.binary_search(&id) {
-            Ok(_) => {}
-            Err(pos) => self.badlist.insert(pos, id),
-        }
-    }
-
-    /// 清空 badlist。
-    ///
-    /// α = 1（默认）时**立刻**丢弃全部折扣：清单空了，就没有任何理由继续惩罚。
-    /// α < 1 时保留旧折扣，让下一次 [Engine::recompute_badlist] / [Engine::tick]
-    /// 按 EMA 逐轮回到 1.0（误报自然恢复）。
-    pub fn clear_badlist(&mut self) {
-        self.badlist.clear();
-        if self.badlist_alpha() >= 1.0 {
-            self.discount.clear();
-        }
-    }
-
-    /// 当前 badlist（升序、去重）。
-    #[must_use]
-    pub fn badlist(&self) -> &[AccountIdx] {
-        &self.badlist
-    }
-
-    /// 当前对来源 `idx` 的折扣因子，范围 [0, 1]，1 = 未受罚。
-    ///
-    /// 这是**已经乘进群体项权重**的那个值：`w_v = 份额 × 衰减 × discount[v]`。
-    /// 没有折扣记录（或记录损坏）时返回 1.0。
-    ///
-    /// 完全静音时存的是 [MIN_DISCOUNT]（1e-6）而不是 0：0 会让 EMA 永远卡住，
-    /// 清空 badlist 后无法恢复（见常量说明）。
-    #[must_use]
-    pub fn badlist_discount(&self, idx: AccountIdx) -> Score {
-        self.discount_of(idx)
-    }
-
-    /// 立即重算一次折扣。
-    ///
-    /// 时间基准是引擎最近一次带时间参数的调用（[Engine::tick] / [Engine::rate] /
-    /// [Engine::on_view] / [Engine::probe] / [Engine::prune_stale] 的 `now`）；
-    /// 一次都没调用过时为 0。`tick` 内部会在开头自动调用同一套逻辑。
-    ///
-    /// 幂等：同样的清单、同样的观点、同样的时刻，重复调用得到逐位相同的结果
-    /// （α = 1 时尤其明显；α < 1 时每调用一次就是一轮 EMA 衰减）。
-    pub fn recompute_badlist(&mut self) {
+        let lambda = f64::from(self.cfg.penalty_strength);
         let now = self.clock;
-        self.recompute_badlist_at(now);
-    }
 
-    /// α = 1 时空清单的即时恢复（内部用）。
-    fn reset_discount_now(&mut self) {
-        if self.badlist_alpha() >= 1.0 {
-            self.discount.clear();
+        // 一遍扫描：把「参与群体项的来源」及其对 A 的读数固定下来。
+        // 参与条件与 query 完全一致：我给它正分、有观点缓存、权重 > 0。
+        let mut sources: Vec<SourceSnapshot> = Vec::with_capacity(self.views.len());
+        for (owner, stored) in &self.views {
+            let rating = match self.ratings.get(*owner) {
+                Some(s) if s.is_finite() && s > 0.0 => s,
+                _ => continue,
+            };
+            let share = f64::from(rating / total);
+            let decay = f64::from(self.decay_factor(elapsed(stored.last_check, now)));
+            let weight = share * decay;
+            if !weight.is_finite() || weight <= 0.0 {
+                continue;
+            }
+            sources.push(SourceSnapshot {
+                idx: *owner,
+                weight,
+                reading: f64::from(self.reading_of(stored, &key)),
+            });
         }
-    }
-
-    /// 配置里的 EMA 系数，夹到 (0, 1]；非法值按 1（不平滑）。
-    fn badlist_alpha(&self) -> Score {
-        let a = self.cfg.badlist_ema;
-        if a.is_finite() && a > 0.0 {
-            a.min(1.0)
-        } else {
-            1.0
+        if sources.len() < 2 {
+            // 0/1 个来源不可能有「高于平均」的人，闭式解也一定退出；
+            // 提前返回省掉两次 Vec 分配。
+            return 0;
         }
+
+        let weights: Vec<f64> = sources.iter().map(|s| s.weight).collect();
+        let readings: Vec<f64> = sources.iter().map(|s| s.reading).collect();
+        let sol = badlist::solve_uniform(&weights, &readings);
+        let f = badlist::apply_strength(sol.f, lambda);
+        if f >= 1.0 {
+            return 0;
+        }
+
+        // S+ 里所有来源共享同一个 f；已有更低的折扣时 min 保留旧值。
+        // 不连乘、不复合：两个各罚 50% 仍然是 50%，不会变成 75%，
+        // 重复报告同一个坏账户也不会越压越狠。
+        let mut lowered = 0usize;
+        for (i, src) in sources.iter().enumerate() {
+            if !sol.above[i] {
+                continue;
+            }
+            let old = f64::from(self.penalty_of(src.idx));
+            if f < old {
+                // f 已由 apply_strength 夹到 [0,1]，直接转 Score。
+                self.penalties.insert(src.idx, f as Score);
+                lowered += 1;
+            }
+        }
+        lowered
     }
 
-    /// 取折扣；缺省 1.0，非有限值也按 1.0（绝不让 NaN 污染权重）。
-    fn discount_of(&self, idx: AccountIdx) -> Score {
-        match self.discount.get(&idx) {
+    /// 某来源当前的折扣，范围 [0,1]，1 = 未受罚。
+    ///
+    /// 这是**已经乘进群体项权重**的那个值：`w_v = 份额 × 衰减 × penalty[v]`。
+    /// 没有折扣记录（或记录损坏）时返回 1.0。
+    #[must_use]
+    pub fn penalty_of(&self, idx: AccountIdx) -> Score {
+        match self.penalties.get(&idx) {
             Some(&d) if d.is_finite() => d.clamp(0.0, 1.0),
             Some(_) => 1.0,
             None => 1.0,
         }
+    }
+
+    /// 手动清空全部折扣，立刻恢复所有来源的权重。
+    ///
+    /// 这是**应用层显式撤销**（例如发现自己报错了），不是自动恢复：
+    /// 引擎不会在任何 `tick` 里调用它，也不会让折扣随时间漂移回 1。
+    /// 清空后 [Engine::query] 与引入本机制之前逐位一致；之后再次
+    /// [Engine::report_bad_account] 会重新写入新的折扣。
+    pub fn clear_penalties(&mut self) {
+        self.penalties.clear();
     }
 
     /// 某个来源的观点里对 `key` 的读数，**与 [Engine::query] 的群体项同口径**：
@@ -998,128 +971,6 @@ impl Engine {
         v
     }
 
-    /// 重算折扣（带显式时间，供 tick 与公开接口共用）。
-    ///
-    /// 一遍扫描来源、一遍扫描攻击者，全部用 f64 累加；没有任何迭代或二分。
-    fn recompute_badlist_at(&mut self, now: Time) {
-        // 空清单：目标折扣恒为 1。α=1 直接清表；α<1 逐轮向 1 收敛。
-        if self.badlist.is_empty() {
-            self.restore_discounts_toward_one();
-            return;
-        }
-
-        let total = self.ratings.total();
-        if total <= 0.0 || self.views.is_empty() {
-            self.restore_discounts_toward_one();
-            return;
-        }
-
-        // 攻击者对外账户号的快照：没有 intern 过的账户查不到观点，读数按 0。
-        let attackers: Vec<Option<AccountKey>> = self
-            .badlist
-            .iter()
-            .map(|&a| self.accounts.key_of(a))
-            .collect();
-
-        // 一遍扫描：把「参与群体项的来源」及其对每个 A 的读数固定下来。
-        // 参与条件与 query 完全一致：我给它正分、有观点缓存、权重 > 0。
-        let mut sources: Vec<SourceSnapshot> = Vec::with_capacity(self.views.len());
-        for (idx, stored) in &self.views {
-            let rating = match self.ratings.get(*idx) {
-                Some(s) if s.is_finite() && s > 0.0 => s,
-                _ => continue,
-            };
-            let share = f64::from(rating / total);
-            let decay = f64::from(self.decay_factor(elapsed(stored.last_check, now)));
-            let weight = share * decay;
-            if !weight.is_finite() || weight <= 0.0 {
-                continue;
-            }
-            let mut readings = Vec::with_capacity(attackers.len());
-            for key in &attackers {
-                let a = match key {
-                    Some(k) => self.reading_of(stored, k),
-                    None => 0.0,
-                };
-                readings.push(f64::from(a));
-            }
-            sources.push(SourceSnapshot {
-                idx: *idx,
-                weight,
-                readings,
-            });
-        }
-
-        if sources.is_empty() {
-            self.restore_discounts_toward_one();
-            return;
-        }
-
-        let weights: Vec<f64> = sources.iter().map(|s| s.weight).collect();
-        // 每个来源的原始折扣，先初始化为 1（不罚）。
-        let mut factors = vec![1.0f64; sources.len()];
-
-        for j in 0..self.badlist.len() {
-            let readings: Vec<f64> = sources.iter().map(|s| s.readings[j]).collect();
-            match self.cfg.badlist_mode {
-                BadlistMode::Uniform => {
-                    let sol = badlist::solve_uniform(&weights, &readings);
-                    for (i, f) in factors.iter_mut().enumerate() {
-                        if sol.above[i] {
-                            *f = f.min(sol.f);
-                        }
-                    }
-                }
-                BadlistMode::PerSource => {
-                    let (fs, _) = badlist::solve_per_source(&weights, &readings);
-                    for (i, f) in factors.iter_mut().enumerate() {
-                        *f = f.min(fs[i]);
-                    }
-                }
-            }
-        }
-
-        // 多个攻击者：逐来源取**最小值**，不连乘。
-        //
-        // 连乘会复合放大——两个各罚 50% 就变成 75%，三个 87.5%，误伤没有上界；
-        // 取 min 让惩罚不超过「最严厉的那个攻击者」给出的折扣，有上界、可预测。
-        // 这正是「宁可漏罚，不可错杀」的取舍。
-        let lambda = f64::from(self.cfg.badlist_mu_max);
-        let alpha = f64::from(self.badlist_alpha());
-
-        for (i, src) in sources.iter().enumerate() {
-            let f = badlist::apply_strength(factors[i], lambda);
-            let old = f64::from(self.discount_of(src.idx));
-            let new = (badlist::ema(old, f, alpha) as Score).max(MIN_DISCOUNT);
-            // 1.0 不存：表里只留「真的被罚」的条目，空表时零开销。
-            if new >= 1.0 {
-                self.discount.remove(&src.idx);
-            } else {
-                self.discount.insert(src.idx, new);
-            }
-        }
-    }
-
-    /// 没有攻击者（或没有可用的观点）时，让所有折扣向 1.0 收敛。
-    ///
-    /// α = 1：直接清表，立刻恢复；α < 1：按 EMA 逐轮几何式恢复，
-    /// 这正是「误报可以自然恢复」的实现。
-    fn restore_discounts_toward_one(&mut self) {
-        let alpha = f64::from(self.badlist_alpha());
-        if alpha >= 1.0 {
-            self.discount.clear();
-            return;
-        }
-        let old = std::mem::take(&mut self.discount);
-        for (idx, d) in old {
-            // 下限保证「曾被压到 0」的来源也能从吸收态里爬出来。
-            let nd = (badlist::ema(f64::from(d), 1.0, alpha) as Score).max(MIN_DISCOUNT);
-            if nd < 1.0 {
-                self.discount.insert(idx, nd);
-            }
-        }
-    }
-
     // ---------- 计算 ----------
 
     /// 查某个账户在自己眼中的声望。
@@ -1128,12 +979,12 @@ impl Engine {
     ///
     /// ```text
     /// 个人项[u] = 份额[u]                                    // 永不衰减
-    /// 群体项[u] = Σ_参与 份额[v]·fs[v]·discount[v]·观点[v][u]
-    ///            ÷ Σ_参与 份额[v]·fs[v]·discount[v]
+    /// 群体项[u] = Σ_参与 份额[v]·fs[v]·penalty[v]·观点[v][u]
+    ///            ÷ Σ_参与 份额[v]·fs[v]·penalty[v]
     /// 声望[u]   = β·个人项[u] + (1−β)·s·群体项[u]
     /// ```
     ///
-    /// `discount[v]` 是 badlist 折扣（[Engine::badlist_discount]），缺省 1.0。
+    /// `penalty[v]` 是 badlist 折扣（[Engine::penalty_of]），缺省 1.0。
     /// 它只压群体项里对该来源的**话语权**，不改个人评分，也不改 `fs`。
     ///
     /// * `fs` 是来源级衰减（[Engine::decay_factor]），只改来源**之间**的相对权重；
@@ -1172,8 +1023,8 @@ impl Engine {
 
         let mut items: Vec<(f32, f32)> = Vec::with_capacity(self.views.len());
         // 折扣表为空（默认）时完全跳过查表与乘法：热路径零额外开销，
-        // 也从代码上保证「没启用 badlist 就与改造前逐位一致」。
-        let has_discount = !self.discount.is_empty();
+        // 也从代码上保证「没人调用 report_bad_account 就与改造前逐位一致」。
+        let has_penalty = !self.penalties.is_empty();
         // 顺便数一遍 live 来源：N_min 门槛按 **live 数**判定（不是参与聚合的条目数），
         // 这样「剔除关着、但只剩一个能看到的来源」也会被掐掉群体项。
         let mut live = 0usize;
@@ -1196,8 +1047,8 @@ impl Engine {
             let dt = elapsed(stored.last_check, now);
             // badlist 折扣只乘在群体项的来源权重上（个人评分原封不动）。
             let w = w_rating * self.decay_factor(dt);
-            let w = if has_discount {
-                w * self.discount_of(*owner)
+            let w = if has_penalty {
+                w * self.penalty_of(*owner)
             } else {
                 w
             };
@@ -1280,9 +1131,7 @@ mod smoke {
                 unreachable_after: 0,
                 remove_when_coverage: 0.0,
                 min_group_sources: 0,
-                badlist_mu_max: 1.0,
-                badlist_ema: 1.0,
-                badlist_mode: BadlistMode::Uniform,
+                penalty_strength: 1.0,
                 ..Default::default()
             },
             42,

@@ -44,9 +44,8 @@ fn base() -> EngineConfig {
         unreachable_after: 0,
         remove_when_coverage: 0.0,
         min_group_sources: 0,
-        badlist_mu_max: 1.0,
-        badlist_ema: 1.0,
-        badlist_mode: tm_engine::BadlistMode::Uniform,
+        // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
+        penalty_strength: 1.0,
     }
 }
 

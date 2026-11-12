@@ -1196,7 +1196,11 @@ impl Engine {
             let dt = elapsed(stored.last_check, now);
             // badlist 折扣只乘在群体项的来源权重上（个人评分原封不动）。
             let w = w_rating * self.decay_factor(dt);
-            let w = if has_discount { w * self.discount_of(*owner) } else { w };
+            let w = if has_discount {
+                w * self.discount_of(*owner)
+            } else {
+                w
+            };
             if w <= 0.0 {
                 continue;
             }

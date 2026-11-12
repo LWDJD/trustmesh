@@ -371,7 +371,7 @@ impl Engine {
         // badlist 为空时这是一次空操作（只清空空的折扣表），不消耗随机数、
         // 不改变任何权重，保证与引入本机制之前逐位一致。
         self.clock = now;
-        self.recompute_badlist_at(now);
+        self.recompute_badlist();
 
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);

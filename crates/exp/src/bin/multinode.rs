@@ -36,6 +36,7 @@ fn run(kind: AttackKind, name: &str) {
         group_half_life: 0,
         unreachable_after: 0,
         min_group_sources: 0,
+        ..Default::default()
     };
     let mut nodes: Vec<Option<Engine>> = (0..n).map(|_| None).collect();
     for &a in &alive {

@@ -27,6 +27,9 @@ fn eng(decay_enabled: bool, decay_floor: f32) -> Engine {
         unreachable_after: 0,
         remove_when_coverage: 0.0,
         min_group_sources: 0,
+        badlist_mu_max: 1.0,
+        badlist_ema: 1.0,
+        badlist_mode: tm_engine::BadlistMode::Uniform,
     })
 }
 

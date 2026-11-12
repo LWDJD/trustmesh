@@ -45,6 +45,7 @@ fn run(cfg: SimConfig, rounds: u64, samples: usize) -> Out {
         group_half_life: 0,
         unreachable_after: 0,
         min_group_sources: 0,
+        ..Default::default()
     };
     let is_att: Vec<bool> = accs.iter().map(|a| a.kind.is_attacker()).collect();
     let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();

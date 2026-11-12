@@ -461,6 +461,7 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
         group_half_life: 0,
         unreachable_after: 0,
         min_group_sources: 0,
+        ..Default::default()
     };
 
     // 正分清单（= 抽样池）

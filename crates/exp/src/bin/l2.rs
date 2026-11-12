@@ -356,6 +356,7 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
         group_half_life: 0,
         unreachable_after: 0,
         min_group_sources: 0,
+        ..Default::default()
     };
 
     // 正分清单（= 引擎里的抽样池）+ 入度

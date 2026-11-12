@@ -4,6 +4,9 @@
 > 复现：`crates/engine` 下 `cargo test`；`crates/exp` 下
 > `cargo run --release --bin c1_badlist -- --seeds 8 --n 420 --steps 600 --rounds 3 --samples 24`
 > 状态：实现、单元测试、8 seed 仿真、中心对照均已完成。
+>
+> **历史文档**：C2 已把接口改为一次性事件并删除清单/自动恢复，
+> 本报告记录的是 C1 清单版当时的实现与数字；C2 的对比见 `审计/C2-report.md`。
 
 ---
 

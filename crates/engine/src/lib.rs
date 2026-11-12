@@ -55,6 +55,14 @@ mod badlist;
 
 use std::collections::BTreeMap;
 
+/// 折扣存储下限。
+///
+/// 0 是 EMA 的吸收态（`0^(1−α) = 0`）：一旦把某个来源压到 0，
+/// 即使清空 badlist，α < 1 时它也永远回不到 1，误报无法恢复。
+/// 因此存一个极小正数：效果上等价于完全静音（权重 1e-6），
+/// 但清空后能按 `d^(1−α)` 逐轮爬回 1。
+const MIN_DISCOUNT: Score = 1e-6;
+
 use badlist::SourceSnapshot;
 use tm_agg::{aggregate, combine, decay, AggMode};
 use tm_store::{
@@ -924,6 +932,9 @@ impl Engine {
     ///
     /// 这是**已经乘进群体项权重**的那个值：`w_v = 份额 × 衰减 × discount[v]`。
     /// 没有折扣记录（或记录损坏）时返回 1.0。
+    ///
+    /// 完全静音时存的是 [MIN_DISCOUNT]（1e-6）而不是 0：0 会让 EMA 永远卡住，
+    /// 清空 badlist 后无法恢复（见常量说明）。
     #[must_use]
     pub fn badlist_discount(&self, idx: AccountIdx) -> Score {
         self.discount_of(idx)
@@ -1079,7 +1090,7 @@ impl Engine {
         for (i, src) in sources.iter().enumerate() {
             let f = badlist::apply_strength(factors[i], lambda);
             let old = f64::from(self.discount_of(src.idx));
-            let new = badlist::ema(old, f, alpha) as Score;
+            let new = (badlist::ema(old, f, alpha) as Score).max(MIN_DISCOUNT);
             // 1.0 不存：表里只留「真的被罚」的条目，空表时零开销。
             if new >= 1.0 {
                 self.discount.remove(&src.idx);
@@ -1101,7 +1112,8 @@ impl Engine {
         }
         let old = std::mem::take(&mut self.discount);
         for (idx, d) in old {
-            let nd = badlist::ema(f64::from(d), 1.0, alpha) as Score;
+            // 下限保证「曾被压到 0」的来源也能从吸收态里爬出来。
+            let nd = (badlist::ema(f64::from(d), 1.0, alpha) as Score).max(MIN_DISCOUNT);
             if nd < 1.0 {
                 self.discount.insert(idx, nd);
             }

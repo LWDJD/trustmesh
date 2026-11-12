@@ -217,3 +217,49 @@ fn 无攻击组的攻击指标为零() {
     assert_eq!(s.target_ratings, 0);
     assert!(w.attack.target.is_none());
 }
+
+/// 回归测试：**单个**潜伏者也必须有真实的收益方。
+///
+/// 早期实现把 `attack.target` 设成「第一个潜伏者」，单个潜伏者时就指向它自己；
+/// 而 `push_follow` 拒绝自环，于是攻击载荷完全空转——
+/// 测出来的只是它作为普通账户的结构位置，不是攻击效果。
+#[test]
+fn 单个潜伏者也有真实收益方() {
+    // attack_ratio 0.1 × n_initial 200 = 20 个，这里显式压成 1 个
+    let cfg = SimConfig {
+        n_initial: 200,
+        steps: 140,
+        seed: 13,
+        attack_kind: AttackKind::Sleeper { normal_until: 40 },
+        attack_ratio: 1.0 / 200.0,
+        ..SimConfig::default()
+    };
+    let mut w = World::new(cfg);
+
+    let target = w.attack.target.expect("单个潜伏者也必须有收益方");
+    let sleepers: Vec<usize> = w
+        .accounts
+        .iter()
+        .filter(|a| matches!(a.kind, Kind::Sleeper { .. }))
+        .map(|a| a.idx)
+        .collect();
+    assert_eq!(sleepers.len(), 1, "本例应只有 1 个潜伏者");
+    assert_ne!(target, sleepers[0], "收益方绝不能是潜伏者自己");
+    assert!(
+        w.accounts[sleepers[0]].follows(target),
+        "潜伏者必须关注收益方，否则评分写不进去"
+    );
+    assert!(
+        !w.accounts.iter().any(|a| matches!(a.kind, Kind::Promoted) && a.idx != target),
+        "收益方应当就是那个 Promoted 账户"
+    );
+
+    // 突变之后必须真的给目标打满分
+    w.run_steps(120);
+    assert!(w.accounts[sleepers[0]].attack_active, "突变应已生效");
+    assert_eq!(
+        w.accounts[sleepers[0]].rating_of(target),
+        Some(1.0),
+        "突变后必须给收益方打满分"
+    );
+}

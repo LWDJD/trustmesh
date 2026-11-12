@@ -21,6 +21,9 @@ fn eng() -> Engine {
         view_params: ViewParams { buckets: 512, hashers: 5, seed: 7 },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
+        decay_enabled: true,
+        decay_floor: 0.0,
+        ..Default::default()
     })
 }
 

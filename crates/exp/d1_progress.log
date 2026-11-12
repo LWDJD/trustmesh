@@ -1,0 +1,294 @@
+﻿.\target\release\d1_decay.exe : [cal] D=72 seed=181 dorm=0.000284 off=0.0702 alive=114 online=106 ok=false
+所在位置 行:1 字符: 129
++ ... ew($false); .\target\release\d1_decay.exe threads=20 > d1_result.txt  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([cal] D=72 seed...ne=106 ok=false:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[cal] D=72 seed=293 dorm=0.000284 off=0.0619 alive=113 online=106 ok=false
+[cal] D=72 seed=223 dorm=0.000155 off=0.0413 alive=121 online=116 ok=false
+[cal] D=72 seed=53 dorm=0.000522 off=0.0727 alive=110 online=102 ok=false
+[cal] D=72 seed=167 dorm=0.000209 off=0.0536 alive=112 online=106 ok=false
+[cal] D=72 seed=131 dorm=0.000284 off=0.0579 alive=121 online=114 ok=false
+[cal] D=72 seed=149 dorm=0.000385 off=0.0583 alive=103 online=97 ok=false
+[cal] D=72 seed=277 dorm=0.000522 off=0.0917 alive=120 online=109 ok=false
+[cal] D=72 seed=23 dorm=0.000114 off=0.0339 alive=118 online=114 ok=false
+[cal] D=72 seed=211 dorm=0.000385 off=0.0300 alive=100 online=97 ok=false
+[cal] D=72 seed=283 dorm=0.000385 off=0.0769 alive=104 online=96 ok=false
+[cal] D=72 seed=239 dorm=0.000284 off=0.0517 alive=116 online=110 ok=false
+[cal] D=72 seed=251 dorm=0.000155 off=0.0294 alive=102 online=99 ok=false
+[cal] D=72 seed=71 dorm=0.000522 off=0.0467 alive=107 online=102 ok=false
+[cal] D=72 seed=11 dorm=0.000084 off=0.0684 alive=117 online=109 ok=false
+[cal] D=72 seed=37 dorm=0.000385 off=0.0496 alive=121 online=115 ok=false
+[cal] D=72 seed=113 dorm=0.000284 off=0.0517 alive=116 online=110 ok=false
+[cal] D=72 seed=199 dorm=0.000114 off=0.0263 alive=114 online=111 ok=false
+[cal] D=72 seed=263 dorm=0.000522 off=0.0800 alive=100 online=92 ok=false
+[cal] D=72 seed=97 dorm=0.000707 off=0.1100 alive=100 online=89 ok=false
+[cal] D=72 seed=307 dorm=0.000209 off=0.0400 alive=100 online=96 ok=false
+[cal] D=216 seed=53 dorm=0.001299 off=0.4400 alive=100 online=56 ok=false
+[cal] D=72 seed=331 dorm=0.000385 off=0.0598 alive=117 online=110 ok=false
+[cal] D=72 seed=313 dorm=0.000209 off=0.0488 alive=123 online=117 ok=false
+[cal] D=216 seed=23 dorm=0.001761 off=0.5588 alive=102 online=45 ok=true
+[cal] D=216 seed=11 dorm=0.001761 off=0.6373 alive=102 online=37 ok=true
+[cal] D=216 seed=113 dorm=0.001299 off=0.4808 alive=104 online=54 ok=false
+[cal] D=216 seed=97 dorm=0.000958 off=0.3366 alive=101 online=67 ok=false
+[cal] D=216 seed=71 dorm=0.001761 off=0.5098 alive=102 online=50 ok=false
+[cal] D=216 seed=211 dorm=0.000707 off=0.2673 alive=101 online=74 ok=false
+[cal] D=216 seed=37 dorm=0.001299 off=0.4804 alive=102 online=53 ok=false
+[cal] D=216 seed=181 dorm=0.001299 off=0.4854 alive=103 online=53 ok=false
+[cal] D=216 seed=149 dorm=0.000958 off=0.4107 alive=112 online=66 ok=false
+[cal] D=216 seed=167 dorm=0.000958 off=0.3364 alive=107 online=71 ok=false
+[cal] D=72 seed=349 dorm=0.000522 off=0.0583 alive=120 online=113 ok=false
+[cal] D=216 seed=131 dorm=0.001299 off=0.4095 alive=105 online=62 ok=false
+[cal] D=216 seed=199 dorm=0.000958 off=0.4476 alive=105 online=58 ok=false
+[cal] D=216 seed=223 dorm=0.000707 off=0.3540 alive=113 online=73 ok=false
+[cal] D=216 seed=251 dorm=0.000707 off=0.3100 alive=100 online=69 ok=false
+[cal] D=216 seed=239 dorm=0.001299 off=0.5135 alive=111 online=54 ok=false
+[cal] D=216 seed=307 dorm=0.001761 off=0.5926 alive=108 online=44 ok=true
+[cal] D=216 seed=263 dorm=0.001299 off=0.4059 alive=101 online=60 ok=false
+[cal] D=216 seed=293 dorm=0.000707 off=0.2547 alive=106 online=79 ok=false
+[cal] D=216 seed=313 dorm=0.001761 off=0.5500 alive=100 online=45 ok=true
+[cal] D=216 seed=277 dorm=0.001299 off=0.4513 alive=113 online=62 ok=false
+[cal] D=216 seed=331 dorm=0.001299 off=0.5243 alive=103 online=49 ok=false
+[cal] D=216 seed=283 dorm=0.001299 off=0.4495 alive=109 online=60 ok=false
+[cal] D=720 seed=23 dorm=0.000707 off=0.5690 alive=174 online=75 ok=true
+[cal] D=720 seed=11 dorm=0.000707 off=0.5875 alive=160 online=66 ok=true
+[cal] D=720 seed=53 dorm=0.000958 off=0.6205 alive=166 online=63 ok=true
+[cal] D=720 seed=37 dorm=0.000958 off=0.6169 alive=201 online=77 ok=true
+[cal] D=216 seed=349 dorm=0.001761 off=0.5377 alive=106 online=49 ok=false
+[cal] D=720 seed=149 dorm=0.001299 off=0.6440 alive=191 online=68 ok=true
+[cal] D=720 seed=211 dorm=0.000707 off=0.5663 alive=166 online=72 ok=true
+[cal] D=720 seed=71 dorm=0.000958 off=0.6343 alive=175 online=64 ok=true
+[cal] D=720 seed=181 dorm=0.000958 off=0.6141 alive=184 online=71 ok=true
+[cal] D=720 seed=223 dorm=0.000958 off=0.5882 alive=170 online=70 ok=true
+[cal] D=720 seed=239 dorm=0.000958 off=0.6095 alive=169 online=66 ok=true
+[cal] D=720 seed=167 dorm=0.000958 off=0.6278 alive=180 online=67 ok=true
+[cal] D=720 seed=131 dorm=0.000958 off=0.6154 alive=169 online=65 ok=true
+[cal] D=720 seed=251 dorm=0.000958 off=0.6049 alive=162 online=64 ok=true
+[cal] D=720 seed=113 dorm=0.000958 off=0.6279 alive=172 online=64 ok=true
+[cal] D=720 seed=97 dorm=0.000958 off=0.5671 alive=164 online=71 ok=true
+[cal] D=720 seed=199 dorm=0.000707 off=0.5455 alive=165 online=75 ok=false
+[cal] D=720 seed=263 dorm=0.000707 off=0.5813 alive=160 online=67 ok=true
+[cal] D=720 seed=277 dorm=0.000958 off=0.6512 alive=172 online=60 ok=false
+[cal] D=720 seed=307 dorm=0.000958 off=0.6201 alive=179 online=68 ok=true
+[cal] D=720 seed=283 dorm=0.000707 off=0.5491 alive=173 online=78 ok=false
+[cal] D=720 seed=313 dorm=0.000707 off=0.5698 alive=172 online=74 ok=true
+[cal] D=720 seed=293 dorm=0.000707 off=0.5569 alive=167 online=74 ok=true
+[cal] D=720 seed=331 dorm=0.000707 off=0.5549 alive=164 online=73 ok=true
+[cal] D=720 seed=349 dorm=0.000958 off=0.6757 alive=185 online=60 ok=false
+[cell] mode=floor D=72 seed=53 p_ratio=0.084 exp=6/101 landed=6 lev=4.06 (13.5s)
+[cell] mode=std D=72 seed=53 p_ratio=0.084 exp=6/101 landed=6 lev=4.06 (13.7s)
+[cell] mode=floor D=72 seed=97 p_ratio=0.024 exp=0/88 landed=0 lev=NaN (13.9s)
+[cell] mode=std D=72 seed=11 p_ratio=0.265 exp=0/109 landed=0 lev=NaN (16.3s)
+[cell] mode=off D=72 seed=37 p_ratio=0.178 exp=0/114 landed=0 lev=NaN (17.3s)
+[cell] mode=floor D=72 seed=37 p_ratio=0.178 exp=0/114 landed=0 lev=NaN (17.7s)
+[cell] mode=off D=72 seed=97 p_ratio=0.024 exp=0/88 landed=0 lev=NaN (17.9s)
+[cell] mode=off D=72 seed=53 p_ratio=0.084 exp=6/101 landed=6 lev=4.06 (18.1s)
+[cell] mode=std D=72 seed=97 p_ratio=0.024 exp=0/88 landed=0 lev=NaN (18.5s)
+[cell] mode=floor D=72 seed=113 p_ratio=0.087 exp=0/109 landed=0 lev=NaN (18.8s)
+[cell] mode=std D=72 seed=113 p_ratio=0.087 exp=0/109 landed=0 lev=NaN (19.2s)
+[cell] mode=off D=72 seed=71 p_ratio=0.067 exp=0/102 landed=0 lev=NaN (19.3s)
+[cell] mode=floor D=72 seed=71 p_ratio=0.068 exp=0/102 landed=0 lev=NaN (19.5s)
+[cell] mode=std D=72 seed=71 p_ratio=0.068 exp=0/102 landed=0 lev=NaN (19.6s)
+[cell] mode=off D=72 seed=11 p_ratio=0.277 exp=0/109 landed=0 lev=NaN (21.8s)
+[cell] mode=floor D=72 seed=11 p_ratio=0.265 exp=0/109 landed=0 lev=NaN (21.8s)
+[cell] mode=std D=72 seed=23 p_ratio=0.027 exp=0/114 landed=0 lev=NaN (22.6s)
+[cell] mode=off D=72 seed=23 p_ratio=0.027 exp=0/114 landed=0 lev=NaN (22.8s)
+[cell] mode=floor D=72 seed=23 p_ratio=0.027 exp=0/114 landed=0 lev=NaN (23.1s)
+[cell] mode=std D=72 seed=37 p_ratio=0.178 exp=0/114 landed=0 lev=NaN (23.5s)
+[cell] mode=std D=72 seed=149 p_ratio=0.041 exp=7/96 landed=7 lev=2.75 (14.5s)
+[cell] mode=std D=72 seed=131 p_ratio=0.017 exp=0/114 landed=0 lev=NaN (18.2s)
+[cell] mode=floor D=72 seed=149 p_ratio=0.041 exp=7/96 landed=7 lev=2.75 (14.8s)
+[cell] mode=floor D=72 seed=131 p_ratio=0.017 exp=0/114 landed=0 lev=NaN (18.8s)
+[cell] mode=off D=72 seed=113 p_ratio=0.087 exp=0/109 landed=0 lev=NaN (19.9s)
+[cell] mode=off D=72 seed=167 p_ratio=0.250 exp=9/105 landed=9 lev=6.58 (16.2s)
+[cell] mode=std D=72 seed=181 p_ratio=0.157 exp=0/105 landed=0 lev=NaN (15.9s)
+[cell] mode=off D=72 seed=131 p_ratio=0.017 exp=0/114 landed=0 lev=NaN (18.8s)
+[cell] mode=off D=72 seed=149 p_ratio=0.041 exp=7/96 landed=7 lev=2.73 (18.8s)
+[cell] mode=std D=72 seed=211 p_ratio=0.021 exp=8/96 landed=8 lev=15.13 (17.0s)
+[cell] mode=std D=72 seed=167 p_ratio=0.246 exp=9/105 landed=9 lev=6.67 (21.7s)
+[cell] mode=off D=72 seed=211 p_ratio=0.021 exp=8/96 landed=8 lev=15.10 (16.9s)
+[cell] mode=floor D=72 seed=211 p_ratio=0.021 exp=8/96 landed=8 lev=15.13 (17.2s)
+[cell] mode=floor D=72 seed=181 p_ratio=0.157 exp=0/105 landed=0 lev=NaN (21.2s)
+[cell] mode=floor D=72 seed=167 p_ratio=0.246 exp=9/105 landed=9 lev=6.67 (22.0s)
+[cell] mode=off D=72 seed=181 p_ratio=0.156 exp=0/105 landed=0 lev=NaN (21.1s)
+[cell] mode=std D=72 seed=199 p_ratio=0.145 exp=13/109 landed=13 lev=1.55 (24.1s)
+[cell] mode=off D=72 seed=199 p_ratio=0.143 exp=13/109 landed=13 lev=1.58 (23.6s)
+[cell] mode=floor D=72 seed=199 p_ratio=0.144 exp=13/109 landed=13 lev=1.55 (24.1s)
+[cell] mode=std D=72 seed=223 p_ratio=0.043 exp=0/116 landed=0 lev=NaN (25.6s)
+[cell] mode=std D=72 seed=251 p_ratio=0.111 exp=0/99 landed=0 lev=NaN (14.6s)
+[cell] mode=off D=72 seed=251 p_ratio=0.108 exp=0/99 landed=0 lev=NaN (14.7s)
+[cell] mode=std D=72 seed=239 p_ratio=0.101 exp=0/107 landed=0 lev=NaN (17.4s)
+[cell] mode=floor D=72 seed=251 p_ratio=0.111 exp=0/99 landed=0 lev=NaN (14.9s)
+[cell] mode=floor D=72 seed=239 p_ratio=0.101 exp=0/107 landed=0 lev=NaN (17.5s)
+[cell] mode=off D=72 seed=239 p_ratio=0.101 exp=0/107 landed=0 lev=NaN (17.1s)
+[cell] mode=off D=72 seed=223 p_ratio=0.043 exp=0/116 landed=0 lev=NaN (18.7s)
+[cell] mode=floor D=72 seed=223 p_ratio=0.043 exp=0/116 landed=0 lev=NaN (19.1s)
+[cell] mode=std D=72 seed=263 p_ratio=0.110 exp=0/92 landed=0 lev=NaN (18.0s)
+[cell] mode=floor D=72 seed=263 p_ratio=0.109 exp=0/92 landed=0 lev=NaN (18.0s)
+[cell] mode=off D=72 seed=263 p_ratio=0.110 exp=0/92 landed=0 lev=NaN (17.9s)
+[cell] mode=std D=72 seed=283 p_ratio=0.089 exp=12/95 landed=12 lev=2.15 (20.5s)
+[cell] mode=floor D=72 seed=283 p_ratio=0.089 exp=12/95 landed=12 lev=2.15 (20.5s)
+[cell] mode=std D=72 seed=277 p_ratio=0.066 exp=0/109 landed=0 lev=NaN (22.8s)
+[cell] mode=off D=72 seed=277 p_ratio=0.068 exp=0/109 landed=0 lev=NaN (22.6s)
+[cell] mode=floor D=72 seed=277 p_ratio=0.066 exp=0/109 landed=0 lev=NaN (23.1s)
+[cell] mode=off D=72 seed=307 p_ratio=0.169 exp=0/95 landed=0 lev=NaN (13.4s)
+[cell] mode=std D=72 seed=307 p_ratio=0.169 exp=0/95 landed=0 lev=NaN (13.7s)
+[cell] mode=floor D=72 seed=307 p_ratio=0.169 exp=0/95 landed=0 lev=NaN (13.8s)
+[cell] mode=off D=72 seed=283 p_ratio=0.088 exp=12/95 landed=12 lev=2.16 (20.3s)
+[cell] mode=std D=72 seed=293 p_ratio=0.000 exp=0/105 landed=0 lev=NaN (20.4s)
+[cell] mode=floor D=72 seed=293 p_ratio=0.000 exp=0/105 landed=0 lev=NaN (20.4s)
+[cell] mode=std D=72 seed=331 p_ratio=0.046 exp=0/109 landed=0 lev=NaN (16.6s)
+[cell] mode=floor D=72 seed=331 p_ratio=0.046 exp=0/109 landed=0 lev=NaN (16.5s)
+[cell] mode=off D=72 seed=293 p_ratio=0.000 exp=0/105 landed=0 lev=NaN (19.8s)
+[cell] mode=floor D=72 seed=313 p_ratio=0.016 exp=0/117 landed=0 lev=NaN (19.0s)
+[cell] mode=std D=72 seed=313 p_ratio=0.016 exp=0/117 landed=0 lev=NaN (19.3s)
+[cell] mode=off D=72 seed=313 p_ratio=0.016 exp=0/117 landed=0 lev=NaN (18.8s)
+[cell] mode=off D=216 seed=23 p_ratio=0.000 exp=0/45 landed=0 lev=NaN (7.7s)
+[cell] mode=floor D=216 seed=23 p_ratio=0.000 exp=0/45 landed=0 lev=NaN (7.8s)
+[cell] mode=std D=216 seed=11 p_ratio=0.253 exp=0/36 landed=0 lev=NaN (9.9s)
+[cell] mode=floor D=216 seed=11 p_ratio=0.251 exp=0/36 landed=0 lev=NaN (10.0s)
+[cell] mode=std D=216 seed=37 p_ratio=0.006 exp=0/53 landed=0 lev=NaN (9.1s)
+[cell] mode=off D=216 seed=11 p_ratio=0.240 exp=0/36 landed=0 lev=NaN (9.8s)
+[cell] mode=std D=216 seed=23 p_ratio=0.000 exp=0/45 landed=0 lev=NaN (10.1s)
+[cell] mode=off D=216 seed=53 p_ratio=0.036 exp=0/55 landed=0 lev=NaN (8.2s)
+[cell] mode=floor D=216 seed=53 p_ratio=0.040 exp=0/55 landed=0 lev=NaN (8.4s)
+[cell] mode=floor D=216 seed=37 p_ratio=0.005 exp=0/53 landed=0 lev=NaN (11.7s)
+[cell] mode=off D=72 seed=331 p_ratio=0.045 exp=0/109 landed=0 lev=NaN (21.7s)
+[cell] mode=std D=216 seed=53 p_ratio=0.044 exp=0/55 landed=0 lev=NaN (10.6s)
+[cell] mode=off D=216 seed=71 p_ratio=0.227 exp=0/49 landed=0 lev=NaN (7.8s)
+[cell] mode=floor D=216 seed=71 p_ratio=0.221 exp=0/49 landed=0 lev=NaN (8.0s)
+[cell] mode=off D=216 seed=37 p_ratio=0.004 exp=0/53 landed=0 lev=NaN (11.5s)
+[cell] mode=std D=216 seed=71 p_ratio=0.224 exp=0/49 landed=0 lev=NaN (10.3s)
+[cell] mode=std D=216 seed=97 p_ratio=0.009 exp=0/64 landed=0 lev=NaN (11.2s)
+[cell] mode=std D=72 seed=349 p_ratio=0.011 exp=6/112 landed=6 lev=4.21 (22.9s)
+[cell] mode=floor D=72 seed=349 p_ratio=0.011 exp=6/112 landed=6 lev=4.20 (23.0s)
+[cell] mode=floor D=216 seed=97 p_ratio=0.010 exp=0/64 landed=0 lev=NaN (11.1s)
+[cell] mode=off D=216 seed=113 p_ratio=0.000 exp=0/54 landed=0 lev=NaN (9.4s)
+[cell] mode=off D=216 seed=97 p_ratio=0.010 exp=0/64 landed=0 lev=NaN (11.3s)
+[cell] mode=off D=72 seed=349 p_ratio=0.011 exp=6/112 landed=6 lev=4.09 (22.5s)
+[cell] mode=std D=216 seed=113 p_ratio=0.000 exp=0/54 landed=0 lev=NaN (12.6s)
+[cell] mode=floor D=216 seed=113 p_ratio=0.000 exp=0/54 landed=0 lev=NaN (12.3s)
+[cell] mode=off D=216 seed=131 p_ratio=0.062 exp=0/62 landed=0 lev=NaN (11.0s)
+[cell] mode=std D=216 seed=131 p_ratio=0.048 exp=0/62 landed=0 lev=NaN (14.1s)
+[cell] mode=floor D=216 seed=131 p_ratio=0.056 exp=0/62 landed=0 lev=NaN (14.2s)
+[cell] mode=std D=216 seed=149 p_ratio=0.082 exp=0/66 landed=0 lev=NaN (12.3s)
+[cell] mode=floor D=216 seed=167 p_ratio=0.000 exp=0/71 landed=0 lev=NaN (11.8s)
+[cell] mode=off D=216 seed=167 p_ratio=0.000 exp=0/71 landed=0 lev=NaN (11.6s)
+[cell] mode=std D=216 seed=181 p_ratio=0.070 exp=0/53 landed=0 lev=NaN (11.5s)
+[cell] mode=off D=216 seed=181 p_ratio=0.059 exp=0/53 landed=0 lev=NaN (8.8s)
+[cell] mode=floor D=216 seed=181 p_ratio=0.065 exp=0/53 landed=0 lev=NaN (11.5s)
+[cell] mode=off D=216 seed=199 p_ratio=0.106 exp=0/58 landed=0 lev=NaN (9.9s)
+[cell] mode=floor D=216 seed=149 p_ratio=0.089 exp=0/66 landed=0 lev=NaN (16.5s)
+[cell] mode=off D=216 seed=149 p_ratio=0.093 exp=0/66 landed=0 lev=NaN (16.0s)
+[cell] mode=std D=216 seed=167 p_ratio=0.000 exp=0/71 landed=0 lev=NaN (15.9s)
+[cell] mode=std D=216 seed=199 p_ratio=0.108 exp=0/58 landed=0 lev=NaN (13.3s)
+[cell] mode=std D=216 seed=211 p_ratio=0.000 exp=0/74 landed=0 lev=NaN (11.8s)
+[cell] mode=floor D=216 seed=211 p_ratio=0.000 exp=0/74 landed=0 lev=NaN (11.7s)
+[cell] mode=floor D=216 seed=199 p_ratio=0.108 exp=0/58 landed=0 lev=NaN (13.5s)
+[cell] mode=off D=216 seed=223 p_ratio=0.110 exp=0/73 landed=0 lev=NaN (11.2s)
+[cell] mode=std D=216 seed=263 p_ratio=0.035 exp=0/57 landed=0 lev=NaN (8.7s)
+[cell] mode=off D=216 seed=239 p_ratio=0.013 exp=0/54 landed=0 lev=NaN (10.3s)
+[cell] mode=std D=216 seed=223 p_ratio=0.132 exp=0/73 landed=0 lev=NaN (15.0s)
+[cell] mode=off D=216 seed=211 p_ratio=0.000 exp=0/74 landed=0 lev=NaN (15.4s)
+[cell] mode=floor D=216 seed=223 p_ratio=0.121 exp=0/73 landed=0 lev=NaN (14.8s)
+[cell] mode=floor D=216 seed=251 p_ratio=0.078 exp=0/69 landed=0 lev=NaN (11.1s)
+[cell] mode=std D=216 seed=251 p_ratio=0.075 exp=0/69 landed=0 lev=NaN (11.1s)
+[cell] mode=off D=216 seed=263 p_ratio=0.036 exp=0/57 landed=0 lev=NaN (8.6s)
+[cell] mode=std D=216 seed=239 p_ratio=0.014 exp=0/54 landed=0 lev=NaN (13.9s)
+[cell] mode=floor D=216 seed=239 p_ratio=0.013 exp=0/54 landed=0 lev=NaN (14.0s)
+[cell] mode=floor D=216 seed=263 p_ratio=0.036 exp=0/57 landed=0 lev=NaN (11.4s)
+[cell] mode=off D=216 seed=251 p_ratio=0.079 exp=0/69 landed=0 lev=NaN (14.7s)
+[cell] mode=off D=216 seed=283 p_ratio=0.158 exp=0/59 landed=0 lev=NaN (10.1s)
+[cell] mode=floor D=216 seed=283 p_ratio=0.164 exp=0/59 landed=0 lev=NaN (10.3s)
+[cell] mode=off D=216 seed=313 p_ratio=0.487 exp=2/45 landed=2 lev=9.83 (6.5s)
+[cell] mode=std D=216 seed=307 p_ratio=0.277 exp=0/44 landed=0 lev=NaN (8.4s)
+[cell] mode=floor D=216 seed=313 p_ratio=0.442 exp=2/45 landed=2 lev=7.02 (6.6s)
+[cell] mode=floor D=216 seed=277 p_ratio=0.168 exp=1/61 landed=1 lev=2.65 (14.4s)
+[cell] mode=std D=216 seed=277 p_ratio=0.197 exp=1/61 landed=1 lev=2.65 (14.5s)
+[cell] mode=off D=216 seed=277 p_ratio=0.150 exp=1/61 landed=1 lev=2.34 (14.3s)
+[cell] mode=std D=216 seed=283 p_ratio=0.178 exp=0/59 landed=0 lev=NaN (13.5s)
+[cell] mode=std D=216 seed=313 p_ratio=0.318 exp=2/45 landed=2 lev=4.19 (8.6s)
+[cell] mode=floor D=216 seed=307 p_ratio=0.306 exp=0/44 landed=0 lev=NaN (10.6s)
+[cell] mode=off D=216 seed=307 p_ratio=0.314 exp=0/44 landed=0 lev=NaN (10.5s)
+[cell] mode=std D=216 seed=331 p_ratio=0.004 exp=0/49 landed=0 lev=NaN (8.8s)
+[cell] mode=floor D=216 seed=293 p_ratio=0.100 exp=0/78 landed=0 lev=NaN (13.3s)
+[cell] mode=off D=216 seed=293 p_ratio=0.096 exp=0/78 landed=0 lev=NaN (13.3s)
+[cell] mode=std D=216 seed=293 p_ratio=0.102 exp=0/78 landed=0 lev=NaN (17.3s)
+[cell] mode=floor D=216 seed=331 p_ratio=0.005 exp=0/49 landed=0 lev=NaN (11.2s)
+[cell] mode=off D=216 seed=331 p_ratio=0.004 exp=0/49 landed=0 lev=NaN (11.0s)
+[cell] mode=off D=216 seed=349 p_ratio=0.009 exp=0/49 landed=0 lev=NaN (9.0s)
+[cell] mode=std D=216 seed=349 p_ratio=0.008 exp=0/49 landed=0 lev=NaN (12.1s)
+[cell] mode=floor D=216 seed=349 p_ratio=0.009 exp=0/49 landed=0 lev=NaN (12.1s)
+[cell] mode=std D=720 seed=11 p_ratio=0.222 exp=2/64 landed=2 lev=9.63 (14.2s)
+[cell] mode=std D=720 seed=23 p_ratio=0.000 exp=0/75 landed=0 lev=NaN (13.5s)
+[cell] mode=off D=720 seed=11 p_ratio=0.203 exp=2/64 landed=2 lev=6.60 (13.9s)
+[cell] mode=floor D=720 seed=11 p_ratio=0.211 exp=2/64 landed=2 lev=8.00 (14.0s)
+[cell] mode=off D=720 seed=53 p_ratio=0.145 exp=1/63 landed=1 lev=4.14 (11.7s)
+[cell] mode=std D=720 seed=71 p_ratio=0.027 exp=0/64 landed=0 lev=NaN (13.3s)
+[cell] mode=floor D=720 seed=71 p_ratio=0.045 exp=0/64 landed=0 lev=NaN (13.2s)
+[cell] mode=floor D=720 seed=23 p_ratio=0.000 exp=0/75 landed=0 lev=NaN (18.7s)
+[cell] mode=off D=720 seed=23 p_ratio=0.000 exp=0/75 landed=0 lev=NaN (18.7s)
+[cell] mode=floor D=720 seed=53 p_ratio=0.119 exp=1/63 landed=1 lev=3.16 (16.5s)
+[cell] mode=std D=720 seed=53 p_ratio=0.063 exp=1/63 landed=1 lev=1.05 (16.7s)
+[cell] mode=off D=720 seed=97 p_ratio=0.369 exp=5/70 landed=5 lev=13.49 (13.4s)
+[cell] mode=floor D=720 seed=37 p_ratio=0.070 exp=0/76 landed=0 lev=NaN (20.7s)
+[cell] mode=std D=720 seed=37 p_ratio=0.047 exp=0/76 landed=0 lev=NaN (21.0s)
+[cell] mode=off D=720 seed=37 p_ratio=0.083 exp=0/76 landed=0 lev=NaN (20.5s)
+[cell] mode=off D=720 seed=71 p_ratio=0.051 exp=0/64 landed=0 lev=NaN (18.6s)
+[cell] mode=std D=720 seed=97 p_ratio=0.191 exp=5/70 landed=5 lev=6.58 (19.1s)
+[cell] mode=floor D=720 seed=97 p_ratio=0.325 exp=5/70 landed=5 lev=10.75 (18.9s)
+[cell] mode=std D=720 seed=131 p_ratio=1.503 exp=7/64 landed=7 lev=2.81 (13.1s)
+[cell] mode=off D=720 seed=131 p_ratio=0.982 exp=7/64 landed=7 lev=2.24 (12.9s)
+[cell] mode=off D=720 seed=113 p_ratio=0.000 exp=0/64 landed=0 lev=NaN (15.2s)
+[cell] mode=floor D=720 seed=131 p_ratio=1.126 exp=7/64 landed=7 lev=2.58 (13.3s)
+[cell] mode=std D=720 seed=113 p_ratio=0.000 exp=0/64 landed=0 lev=NaN (20.4s)
+[cell] mode=floor D=720 seed=113 p_ratio=0.000 exp=0/64 landed=0 lev=NaN (20.3s)
+[cell] mode=std D=720 seed=149 p_ratio=0.113 exp=4/68 landed=4 lev=2.03 (15.1s)
+[cell] mode=off D=720 seed=149 p_ratio=0.242 exp=4/68 landed=4 lev=7.04 (15.0s)
+[cell] mode=floor D=720 seed=149 p_ratio=0.210 exp=4/68 landed=4 lev=5.58 (15.4s)
+[cell] mode=floor D=720 seed=181 p_ratio=0.077 exp=0/70 landed=0 lev=NaN (14.9s)
+[cell] mode=std D=720 seed=181 p_ratio=0.055 exp=0/70 landed=0 lev=NaN (19.0s)
+[cell] mode=off D=720 seed=223 p_ratio=0.019 exp=3/70 landed=3 lev=3.66 (12.7s)
+[cell] mode=std D=720 seed=223 p_ratio=0.013 exp=3/70 landed=3 lev=1.08 (13.0s)
+[cell] mode=floor D=720 seed=223 p_ratio=0.017 exp=3/70 landed=3 lev=2.64 (13.0s)
+[cell] mode=off D=720 seed=211 p_ratio=0.041 exp=5/71 landed=5 lev=2.92 (13.9s)
+[cell] mode=floor D=720 seed=167 p_ratio=0.000 exp=0/67 landed=0 lev=NaN (21.7s)
+[cell] mode=std D=720 seed=167 p_ratio=0.000 exp=0/67 landed=0 lev=NaN (22.0s)
+[cell] mode=off D=720 seed=167 p_ratio=0.000 exp=0/67 landed=0 lev=NaN (21.7s)
+[cell] mode=off D=720 seed=181 p_ratio=0.086 exp=0/70 landed=0 lev=NaN (19.6s)
+[cell] mode=std D=720 seed=199 p_ratio=0.311 exp=2/73 landed=2 lev=6.38 (21.2s)
+[cell] mode=off D=720 seed=239 p_ratio=0.117 exp=2/66 landed=2 lev=0.81 (13.4s)
+[cell] mode=floor D=720 seed=199 p_ratio=0.301 exp=2/73 landed=2 lev=5.56 (21.5s)
+[cell] mode=std D=720 seed=211 p_ratio=0.027 exp=5/71 landed=5 lev=6.59 (19.7s)
+[cell] mode=floor D=720 seed=211 p_ratio=0.037 exp=5/71 landed=5 lev=4.01 (19.9s)
+[cell] mode=off D=720 seed=199 p_ratio=0.300 exp=2/73 landed=2 lev=4.47 (21.4s)
+[cell] mode=floor D=720 seed=251 p_ratio=0.450 exp=3/63 landed=3 lev=3.46 (12.0s)
+[cell] mode=std D=720 seed=251 p_ratio=0.141 exp=3/63 landed=3 lev=3.19 (12.2s)
+[cell] mode=std D=720 seed=239 p_ratio=0.110 exp=2/66 landed=2 lev=0.68 (18.7s)
+[cell] mode=off D=720 seed=251 p_ratio=0.536 exp=3/63 landed=3 lev=3.73 (12.0s)
+[cell] mode=floor D=720 seed=239 p_ratio=0.119 exp=2/66 landed=2 lev=0.78 (19.2s)
+[cell] mode=std D=720 seed=277 p_ratio=0.169 exp=1/59 landed=1 lev=10.11 (12.7s)
+[cell] mode=floor D=720 seed=277 p_ratio=0.109 exp=1/59 landed=1 lev=5.77 (12.9s)
+[cell] mode=off D=720 seed=263 p_ratio=0.042 exp=0/67 landed=0 lev=NaN (14.1s)
+[cell] mode=floor D=720 seed=263 p_ratio=0.036 exp=0/67 landed=0 lev=NaN (14.4s)
+[cell] mode=off D=720 seed=277 p_ratio=0.102 exp=1/59 landed=1 lev=6.05 (17.4s)
+[cell] mode=std D=720 seed=263 p_ratio=0.012 exp=0/67 landed=0 lev=NaN (19.8s)
+[cell] mode=floor D=720 seed=293 p_ratio=0.239 exp=4/73 landed=4 lev=10.08 (15.8s)
+[cell] mode=std D=720 seed=307 p_ratio=0.063 exp=0/68 landed=0 lev=NaN (17.6s)
+[cell] mode=std D=720 seed=331 p_ratio=0.002 exp=0/73 landed=0 lev=NaN (15.3s)
+[cell] mode=floor D=720 seed=307 p_ratio=0.060 exp=0/68 landed=0 lev=NaN (17.6s)
+[cell] mode=floor D=720 seed=313 p_ratio=0.103 exp=0/74 landed=0 lev=NaN (17.2s)
+[cell] mode=std D=720 seed=313 p_ratio=0.118 exp=0/74 landed=0 lev=NaN (17.5s)
+[cell] mode=off D=720 seed=307 p_ratio=0.059 exp=0/68 landed=0 lev=NaN (18.2s)
+[cell] mode=off D=720 seed=283 p_ratio=0.074 exp=0/78 landed=0 lev=NaN (22.3s)
+[cell] mode=std D=720 seed=283 p_ratio=0.062 exp=0/78 landed=0 lev=NaN (22.9s)
+[cell] mode=off D=720 seed=293 p_ratio=0.210 exp=4/73 landed=4 lev=10.44 (20.4s)
+[cell] mode=std D=720 seed=293 p_ratio=0.292 exp=4/73 landed=4 lev=8.88 (21.6s)
+[cell] mode=floor D=720 seed=283 p_ratio=0.070 exp=0/78 landed=0 lev=NaN (24.2s)
+[cell] mode=std D=720 seed=349 p_ratio=0.257 exp=0/60 landed=0 lev=NaN (13.8s)
+[cell] mode=off D=720 seed=313 p_ratio=0.095 exp=0/74 landed=0 lev=NaN (20.6s)
+[cell] mode=floor D=720 seed=331 p_ratio=0.004 exp=0/73 landed=0 lev=NaN (18.8s)
+[cell] mode=floor D=720 seed=349 p_ratio=0.261 exp=0/60 landed=0 lev=NaN (13.8s)
+[cell] mode=off D=720 seed=331 p_ratio=0.005 exp=0/73 landed=0 lev=NaN (15.5s)
+[cell] mode=off D=720 seed=349 p_ratio=0.264 exp=0/60 landed=0 lev=NaN (14.0s)

@@ -18,6 +18,10 @@ fn eng() -> Engine {
         view_params: ViewParams { buckets: 512, hashers: 5, seed: 7 },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
+        decay_enabled: true,
+        decay_floor: 0.0,
+        // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
+        penalty_strength: 1.0,
     })
 }
 
@@ -126,7 +130,8 @@ fn stage3_mixed_result_is_renormalized() {
 fn stage4_distribution_sums_to_one() {
     let mut e = eng();
     let f = e.intern(key(1));
-    let t = e.intern(key(9));
+    // target 必须登记，查询才走「已知账户」那条路径（这里只关心分布总和）。
+    let _t = e.intern(key(9));
     e.rate(f, 1.0, 0);
     let v = CompressedView::from_pairs(
         ViewParams { buckets: 512, hashers: 5, seed: 7 },

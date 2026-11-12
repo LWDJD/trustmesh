@@ -1,24 +1,29 @@
-//! C1 · badlist（受害者反馈）仿真：真 Engine × Infiltrator 场景。
+//! C1 · badlist 仿真（**已迁移到 C2 的一次性事件 API**）。
 //!
-//! 目的：量化「把攻击收益方放进 badlist」对 S3、排序质量和误伤的影响，
-//! 并对照变体 U（统一折扣，精确压到 ā）与变体 P（逐条压到均值，会过冲）。
+//! 历史背景：C1 用「清单 + 每 tick 重算」实现，原始数字记录在
+//! `crates/exp/c1_result.txt` 与 `审计/C1-badlist.md`。C2 把接口改成事件后，
+//! 本文件保留为**同一场景在新接口下的复现**：
 //!
-//! 世界：400~600 账户、渗透率 10%、攻击者在 t=steps/3 被收买后给收益方打满分。
-//! 每个存活账户都建一个真 Engine（攻击者也建），按世界最终评分同步正分清单，
-//! 再交换若干轮观点。所有交换都在 t=0 完成，避免衰减混淆 badlist 的效应。
+//! * 清单语义由应用层模拟——维护一个 `Vec<u32>`，每个 tick 对其中每个账户
+//!   调用一次 [Engine::report_bad_account]；清单为空时调用
+//!   [Engine::clear_penalties]（对应旧 `clear_badlist` 在 α=1 时的即时恢复）；
+//! * 因为每个 tick 都重新报告、且默认强度 λ=1，静态观点下 `min` 语义与
+//!   旧实现的「覆盖写」等价，所以 U / 错罚 / 半数观察者的结果与 C1 一致；
+//! * 变体 P 已从引擎删除，本文件不再输出 P。
 //!
 //! 用法：
 //! ~~~text
-//! cargo run --release --bin c1_badlist -- --seeds 8 --n 500 --steps 600 --rounds 3 --samples 24
+//! cargo run --release --bin c1_badlist -- --seeds 8 --n 420 --steps 600 --rounds 3 --samples 24
 //! ~~~
 //!
-//! 输出：每个 seed 的明细 + 跨 seed 均值表。报告见 `审计/C1-badlist.md`。
+//! 输出：每个 seed 的明细 + 跨 seed 均值表。C2 的正式对照见
+//! `crates/exp/src/bin/c2_report.rs` 与 `审计/C2-report.md`。
 
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use tm_agg::AggMode;
-use tm_engine::{BadlistMode, Engine, EngineConfig};
+use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, SimConfig, World};
 use tm_view::{CompressedView, ViewParams};
 
@@ -91,7 +96,7 @@ fn view_params() -> ViewParams {
     }
 }
 
-fn engine_cfg(mode: BadlistMode) -> EngineConfig {
+fn engine_cfg() -> EngineConfig {
     EngineConfig {
         beta: 0.3,
         half_life: 72,
@@ -105,9 +110,7 @@ fn engine_cfg(mode: BadlistMode) -> EngineConfig {
         unreachable_after: 0,
         remove_when_coverage: 0.0,
         min_group_sources: 0,
-        badlist_mu_max: 1.0,
-        badlist_ema: 1.0,
-        badlist_mode: mode,
+        penalty_strength: 1.0,
     }
 }
 
@@ -187,7 +190,6 @@ fn dump(w: &World) -> Dump {
 enum Variant {
     None,
     Uniform,
-    PerSource,
     WrongAll,
     Partial,
 }
@@ -197,16 +199,8 @@ impl Variant {
         match self {
             Variant::None => "无 badlist",
             Variant::Uniform => "U 统一折扣",
-            Variant::PerSource => "P 逐条压到均值",
             Variant::WrongAll => "U 错罚购买者",
             Variant::Partial => "U 半数观察者",
-        }
-    }
-
-    fn mode(self) -> BadlistMode {
-        match self {
-            Variant::PerSource => BadlistMode::PerSource,
-            _ => BadlistMode::Uniform,
         }
     }
 }
@@ -225,19 +219,30 @@ fn build_engine(cfg: &EngineConfig, d: &Dump, seed: u64, idx: usize) -> Engine {
     e
 }
 
-fn assign_badlist(e: &mut Engine, variant: Variant, d: &Dump, rank: usize, target: usize) {
-    match variant {
-        Variant::None => {}
-        Variant::Uniform | Variant::PerSource => e.set_badlist(&[target as u32]),
-        Variant::WrongAll => {
-            let ids: Vec<u32> = d.attackers.iter().map(|&x| x as u32).collect();
-            e.set_badlist(&ids);
+/// C1 的「清单」语义在应用层的模拟。
+///
+/// 空清单 = 没有攻击者：立刻清空折扣（旧 `clear_badlist` 在 α=1 时的行为）。
+/// 非空清单：对每个账户报告一次事件。重复报告不会复合（`min` 语义）。
+fn sync_penalties(e: &mut Engine, ids: &[u32]) {
+    if ids.is_empty() {
+        e.clear_penalties();
+    } else {
+        for &id in ids {
+            e.report_bad_account(id);
         }
+    }
+}
+
+fn badlist_ids(variant: Variant, d: &Dump, rank: usize, target: usize) -> Vec<u32> {
+    match variant {
+        Variant::None => Vec::new(),
+        Variant::Uniform => vec![target as u32],
+        Variant::WrongAll => d.attackers.iter().map(|&x| x as u32).collect(),
         Variant::Partial => {
             if rank % 2 == 0 {
-                e.set_badlist(&[target as u32]);
+                vec![target as u32]
             } else {
-                e.set_badlist(&[]);
+                Vec::new()
             }
         }
     }
@@ -251,7 +256,7 @@ fn run(
     a: Args,
     probe: bool,
 ) -> (Vec<Option<Engine>>, Option<BTreeMap<u32, CompressedView>>) {
-    let cfg = engine_cfg(variant.mode());
+    let cfg = engine_cfg();
     let mut nodes: Vec<Option<Engine>> = (0..d.n)
         .map(|i| {
             if d.alive[i] {
@@ -262,10 +267,10 @@ fn run(
         })
         .collect();
 
+    // 每个观察者的「应用层清单」只在开始时确定；之后每轮按它同步事件。
+    let mut lists: Vec<Option<Vec<u32>>> = vec![None; d.n];
     for (rank, &o) in d.honest.iter().enumerate() {
-        if let Some(e) = nodes[o].as_mut() {
-            assign_badlist(e, variant, d, rank, target);
-        }
+        lists[o] = Some(badlist_ids(variant, d, rank, target));
     }
 
     // 探针：选正分清单最长的诚实观察者，记录它实际拿到的观点，用于闭式解抽查。
@@ -286,6 +291,11 @@ fn run(
                 continue;
             }
             let reqs = nodes[i].as_mut().unwrap().tick(0, a.samples);
+            // 旧实现是在 tick 开头按清单重算折扣；事件版在 tick 之后同步，
+            // 两者看到的观点集合相同（都在本轮 on_view 之前）。
+            if let Some(ids) = lists[i].as_deref() {
+                sync_penalties(nodes[i].as_mut().unwrap(), ids);
+            }
             for req in reqs {
                 let src = req.idx as usize;
                 match views.get(src).and_then(|v| v.as_ref()) {
@@ -301,9 +311,11 @@ fn run(
         }
     }
 
-    // 收尾：让最后一批观点也进入折扣（tick 只在开头重算）。
-    for n in nodes.iter_mut().flatten() {
-        n.recompute_badlist();
+    // 收尾：让最后一批观点也进入折扣（旧实现同样在最后手动重算一次）。
+    for i in 0..d.n {
+        if let (Some(e), Some(ids)) = (nodes[i].as_mut(), lists[i].as_deref()) {
+            sync_penalties(e, ids);
+        }
     }
 
     let pv = if probe_idx.is_some() {
@@ -404,7 +416,7 @@ fn collect_discounts(
         if e.view_age(src as u32, 0).is_none() {
             continue;
         }
-        let disc = f64::from(e.badlist_discount(src as u32));
+        let disc = f64::from(e.penalty_of(src as u32));
         if disc < 0.999 {
             pun_sum += disc;
             pun_n += 1;
@@ -514,7 +526,7 @@ fn measure(nodes: &[Option<Engine>], d: &Dump) -> Metrics {
 /// 于是每份观点里 A 的份额都精确等于 0.1，a_v 全相同。
 /// 这不是「A 独占一切」的退化情形，而是「全圈对 A 的态度一模一样」。
 fn central_exact() -> (f64, f64, f64, usize) {
-    let mut e = Engine::with_seed(engine_cfg(BadlistMode::Uniform), 7);
+    let mut e = Engine::with_seed(engine_cfg(), 7);
     let a = e.intern(key(1));
     let mut fillers = Vec::new();
     for i in 0..9usize {
@@ -533,12 +545,11 @@ fn central_exact() -> (f64, f64, f64, usize) {
     }
     let _ = fillers;
     let before = f64::from(e.query(a, 0));
-    e.set_badlist(&[a]);
-    e.recompute_badlist();
+    e.report_bad_account(a);
     let after = f64::from(e.query(a, 0));
     let max_pen = srcs
         .iter()
-        .map(|&s| 1.0 - f64::from(e.badlist_discount(s)))
+        .map(|&s| 1.0 - f64::from(e.penalty_of(s)))
         .fold(0.0f64, f64::max);
     (before, after, max_pen, srcs.len())
 }
@@ -600,7 +611,7 @@ fn central_world(seed: u64, args: Args) -> Option<CentralRow> {
                 if e.view_age(src as u32, 0).is_none() || d.is_attacker[src] || d.is_promoted[src] {
                     continue;
                 }
-                let dd = f64::from(e.badlist_discount(src as u32));
+                let dd = f64::from(e.penalty_of(src as u32));
                 n += 1;
                 sum += dd;
                 max_pen = max_pen.max(1.0 - dd);
@@ -758,7 +769,7 @@ fn main() {
     );
     println!("# badlist = [收益方 A]（单条）；攻击者也建 Engine，但只有诚实观察者会设 badlist\n");
 
-    let variants = [Variant::None, Variant::Uniform, Variant::PerSource];
+    let variants = [Variant::None, Variant::Uniform];
     let mut rows: Vec<(u64, Variant, Metrics)> = Vec::new();
     let mut extra: Vec<(u64, Variant, Metrics)> = Vec::new();
     let mut verify_err: Vec<f64> = Vec::new();
@@ -810,7 +821,7 @@ fn main() {
                     }
                 }
             }
-            if matches!(v, Variant::None | Variant::Uniform | Variant::PerSource) {
+            if matches!(v, Variant::None | Variant::Uniform) {
                 rows.push((seed, v, m));
             } else {
                 extra.push((seed, v, m));

@@ -147,8 +147,12 @@ fn baseline_view(pairs: &[(u8, f32)]) -> CompressedView {
     CompressedView::from_pairs(ViewParams::default(), &ps)
 }
 
-#[test]
-fn no_report_is_bit_identical_to_pre_change() {
+/// badlist 基线场景：7 个账户、4 条评分、3 份观点。
+///
+/// 关键点：**来源 3（编号 3）已评分、但从未取到观点**。
+/// 分母口径修复（P0①）后它不再被排除在群体项之外，所以下面的位模式
+/// 与修复前不同；修复前的位模式见 `old_denominator_baseline_is_recorded`。
+fn baseline_engine() -> Engine {
     let mut e = Engine::with_seed(EngineConfig::default(), 0xBAD1_1234_5678);
     for i in 1..=7u8 {
         e.intern(baseline_key(i));
@@ -191,8 +195,75 @@ fn no_report_is_bit_identical_to_pre_change() {
         140,
         150,
     );
+    e
+}
 
-    // 下面这些 to_bits 是**改造前**的二进制打印出来的，硬编码在这里当回归基准。
+/// 没人报告坏账户时，结果与「分母口径修复后」的基准逐位一致。
+#[test]
+fn no_report_matches_new_denominator_baseline() {
+    let e = baseline_engine();
+
+    // 这些 to_bits 是修复后（分母包含「已评分但无观点」的来源）打印的，
+    // 硬编码在这里当回归基准。
+    assert_eq!(
+        bits(&e, 0),
+        vec![
+            (0, 0x3ea62145),
+            (1, 0x3e4aa3c0),
+            (2, 0x3e664abf),
+            (3, 0x3e81677b)
+        ]
+    );
+    assert_eq!(
+        bits(&e, 37),
+        vec![
+            (0, 0x3eac63df),
+            (1, 0x3e3e7834),
+            (2, 0x3e775246),
+            (3, 0x3e716dc7)
+        ]
+    );
+    assert_eq!(
+        bits(&e, 150),
+        vec![
+            (0, 0x3ee33827),
+            (1, 0x3e2a79c0),
+            (2, 0x3e36045d),
+            (3, 0x3e591197)
+        ]
+    );
+    // 时间再往前走，三条观点一起变旧；但来源 3 是「弃权票」，没有观点就没有
+    // 衰减基准（因子恒为 1），所以「全体变旧 ⇒ 结果不变」在这里不再成立。
+    // 旧口径下来源 3 不进分母，这一条当时是恒等的（见下面 #[ignore] 的对照）。
+    assert_eq!(
+        bits(&e, 1000),
+        vec![
+            (0, 0x3eaabbc2),
+            (1, 0x3e6eda3f),
+            (2, 0x3e089647),
+            (3, 0x3e998bfb)
+        ]
+    );
+    assert_eq!(e.query(0, 150).to_bits(), 0x3e926d90);
+    assert_eq!(e.query(1, 150).to_bits(), 0x3ddbb87e);
+    assert_eq!(e.query(2, 150).to_bits(), 0x3dea989a);
+    assert_eq!(e.query(3, 150).to_bits(), 0x3e0be2f5);
+    assert_eq!(e.query(4, 150).to_bits(), 0);
+    assert_eq!(e.query(5, 150).to_bits(), 0);
+    assert_eq!(e.query(6, 150).to_bits(), 0);
+
+    // 没有报告 = 折扣表为空：每个账户的折扣都是 1.0。
+    all_penalties_are_one(&e, 7);
+}
+
+/// **旧口径对照**（分母只算「已取到观点」的来源）。
+///
+/// 这条会失败，是故意的：它是口径变化的证据。上面那条测试变红、
+/// 这条变绿，就说明分母被改回去了。用 `cargo test -- --ignored` 查看差异。
+#[test]
+#[ignore = "旧口径对照：分母只含有观点的来源，修复后必然失败"]
+fn old_denominator_baseline_is_recorded() {
+    let e = baseline_engine();
     assert_eq!(
         bits(&e, 0),
         vec![
@@ -220,17 +291,7 @@ fn no_report_is_bit_identical_to_pre_change() {
             (3, 0x3e3d27ce)
         ]
     );
-    assert_eq!(bits(&e, 1000), bits(&e, 150), "全部陈旧时衰减不变");
-    assert_eq!(e.query(0, 150).to_bits(), 0x3ef4bbc2);
-    assert_eq!(e.query(1, 150).to_bits(), 0x3e154649);
-    assert_eq!(e.query(2, 150).to_bits(), 0x3e441a65);
-    assert_eq!(e.query(3, 150).to_bits(), 0x3e3d27ce);
-    assert_eq!(e.query(4, 150).to_bits(), 0);
-    assert_eq!(e.query(5, 150).to_bits(), 0);
-    assert_eq!(e.query(6, 150).to_bits(), 0);
-
-    // 没有报告 = 折扣表为空：每个账户的折扣都是 1.0。
-    all_penalties_are_one(&e, 7);
+    assert_eq!(bits(&e, 1000), bits(&e, 150), "旧口径：全部变旧时衰减不变");
 }
 
 // ---------------------------------------------------------------------------

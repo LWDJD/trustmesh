@@ -431,11 +431,15 @@ impl CompressedView {
 }
 
 /// 有序切片的中位数。空切片返回 0，偶数个取中间两个的平均。
+///
+/// 偶数分支必须**先各自乘 0.5 再相加**：`(a + b) * 0.5` 在 a、b 都接近
+/// `f32::MAX` 时会让中间和提前溢出成 inf，即使真实中位数完全可表示。
+/// 这与 tm_agg 里中位数分支的写法保持一致。
 fn median_sorted(sorted: &[Score]) -> Score {
     match sorted.len() {
         0 => 0.0,
         len if len % 2 == 1 => sorted[len / 2],
-        len => (sorted[len / 2 - 1] + sorted[len / 2]) * 0.5,
+        len => sorted[len / 2 - 1] * 0.5 + sorted[len / 2] * 0.5,
     }
 }
 
@@ -469,6 +473,15 @@ mod tests {
         assert_eq!(median_sorted(&[1.0, 3.0]), 2.0);
         assert_eq!(median_sorted(&[1.0, 2.0, 3.0]), 2.0);
         assert_eq!(median_sorted(&[1.0, 2.0, 3.0, 4.0]), 2.5);
+    }
+
+    #[test]
+    fn median_even_large_values_do_not_overflow() {
+        // a + b 会溢出，但真实中位数就是 big 本身。
+        let big = f32::MAX * 0.75;
+        assert!(median_sorted(&[big, big]).is_finite());
+        assert_eq!(median_sorted(&[big, big]), big);
+        assert_eq!(median_sorted(&[f32::MAX, f32::MAX]), f32::MAX);
     }
 
     #[test]

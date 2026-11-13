@@ -157,6 +157,85 @@ fn full_coverage_is_bit_identical() {
 }
 
 // ===========================================================================
+// ② 归一化：分子先夹紧，再除以同口径的分母
+// ===========================================================================
+
+/// 改前：8 条声明各 1000 ⇒ `total_mass` = 8×min(1000,1) = 8，但分子没夹紧，
+/// v = 1000/8 → 夹到 1，每个目标都拿满，Σv = 8（一份来源的预算从 1 变成 8）。
+///
+/// 改后：v = min(1000,1)/8 = 1/8，Σv = 1。
+///
+/// 阈值就是 K（受影响的账户数）：声明值 ≥ K 时旧写法必然饱和，所以 8 也要测。
+#[test]
+fn oversized_claims_cannot_exceed_budget() {
+    for claim in [8.0f32, 1000.0, 1e6] {
+        let mut e = Engine::with_seed(cfg(), 42);
+        let src = e.intern(key(100));
+        let targets: Vec<u32> = (1..=8).map(|i| e.intern(key(i))).collect();
+        e.rate(src, 1.0, 0);
+        let pairs: Vec<(u32, f32)> = (1..=8).map(|i| (i, claim)).collect();
+        e.on_view(src, view(&pairs), 0, 0);
+
+        let vs: Vec<f32> = targets.iter().map(|&t| e.query(t, 0) / 0.7).collect();
+        let sum: f32 = vs.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "声明 {claim}：Σv 应为 1（改前 8），实际 {sum}"
+        );
+        for v in &vs {
+            assert!(
+                (v - 0.125).abs() < 1e-6,
+                "声明 {claim}：每个目标应拿 1/8，实际 {v}"
+            );
+        }
+    }
+}
+
+/// 混合声明（1 条超量 + 7 条合规）也守得住预算：Σv 恒为
+/// `Σ min(c_i,1) / total_mass`，而分母正是同一个和，所以正好是 1。
+#[test]
+fn mixed_claims_still_sum_to_one() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let targets: Vec<u32> = (1..=8).map(|i| e.intern(key(i))).collect();
+    e.rate(src, 1.0, 0);
+    let mut pairs: Vec<(u32, f32)> = (1..=8).map(|i| (i, 0.125)).collect();
+    pairs[0].1 = 1000.0;
+    e.on_view(src, view(&pairs), 0, 0);
+
+    let sum: f32 = targets.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    assert!((sum - 1.0).abs() < 1e-6, "Σv 应为 1，实际 {sum}");
+    let hot = e.query(targets[0], 0) / 0.7;
+    let cold = e.query(targets[1], 0) / 0.7;
+    assert!((hot - 1.0 / 1.875).abs() < 1e-6, "超量声明只拿 min(c,1)/T，实际 {hot}");
+    assert!((cold - 0.125 / 1.875).abs() < 1e-6, "合规声明仍是 c/T，实际 {cold}");
+    assert!(hot > cold, "超量声明最多拿满 1 份，但仍是全场最高");
+}
+
+/// 合规输入没变：8 条各 0.125（全部读数 ≤ 1）时，结果与改前**逐位相同**。
+///
+/// 位模式是改动前打印的（0.7 × 0.125 = 0.0875）。
+#[test]
+fn compliant_claims_are_bit_identical() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let targets: Vec<u32> = (1..=8).map(|i| e.intern(key(i))).collect();
+    e.rate(src, 1.0, 0);
+    let pairs: Vec<(u32, f32)> = (1..=8).map(|i| (i, 0.125)).collect();
+    e.on_view(src, view(&pairs), 0, 0);
+
+    for &t in &targets {
+        assert_eq!(
+            e.query(t, 0).to_bits(),
+            1035154227,
+            "合规视图必须逐位不变（0.0875）"
+        );
+    }
+    let sum: f32 = targets.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    assert!((sum - 1.0).abs() < 1e-6, "合规视图 Σv 仍为 1，实际 {sum}");
+}
+
+// ===========================================================================
 // 附带：total_mass 的覆盖快照（mass_covers）
 // ===========================================================================
 

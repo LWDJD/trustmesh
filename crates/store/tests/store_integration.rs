@@ -168,6 +168,71 @@ fn time_is_opaque_and_not_forced_monotonic() {
 }
 
 #[test]
+fn shares_sum_to_one_with_1000_max_scores() {
+    let mut list = PositiveList::new();
+    for idx in 0..1000u32 {
+        list.set(idx, MAX_SCORE, 0);
+    }
+
+    // 真分母是 1000 × MAX_SCORE = 1e12。f32 在 1e12 附近的最小间距约 6.1e4，
+    // 所以允许出口的一次舍入，但不允许 f32 连加带来的 1e-5 量级漂移。
+    let exact = 1000.0 * f64::from(MAX_SCORE);
+    let total = list.total();
+    let total_err = (f64::from(total) - exact).abs() / exact;
+    assert!(total_err < 1e-6, "total 偏差 {total_err:e}（{total:?}）");
+
+    let shares = list.shares();
+    assert_eq!(shares.len(), 1000);
+    let sum: f64 = shares.iter().map(|(_, s)| f64::from(*s)).sum();
+    let sum_err = (sum - 1.0).abs();
+    assert!(sum_err < 1e-6, "份额和 {sum:.12}，偏差 {sum_err:e}");
+    // 等分时每条都应非常接近 1/1000。
+    for (idx, share) in &shares {
+        assert!(
+            (f64::from(*share) - 1e-3).abs() < 1e-8,
+            "第 {idx} 条份额不等于 0.001: {share:?}"
+        );
+    }
+}
+
+#[test]
+fn random_scores_improve_total_and_share_sum_by_at_least_2x() {
+    // 重尾随机评分（跨 9 个数量级），模拟互动次数这类 0~n 的原始数值。
+    // 对每个 seed 逐项比较：新口径（f64 累加）的误差必须 <= 旧口径（f32 连加）的一半。
+    for seed in 1..=8u64 {
+        let mut rng = Rng::new(seed);
+        let mut list = PositiveList::new();
+        for idx in 0..1000u32 {
+            let unit = (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+            let score = 10f64.powf(9.0 * unit) as f32;
+            list.set(idx, score, 0);
+        }
+
+        let exact: f64 = list.iter().map(|(_, s, _)| f64::from(s)).sum();
+        let old_total: f32 = list.iter().map(|(_, s, _)| s).sum();
+        let new_total = list.total();
+        let old_total_err = (f64::from(old_total) - exact).abs() / exact;
+        let new_total_err = (f64::from(new_total) - exact).abs() / exact;
+        assert!(
+            new_total_err <= old_total_err * 0.5,
+            "seed={seed}: total 误差没有减半，旧 {old_total_err:e} -> 新 {new_total_err:e}"
+        );
+
+        let old_sum: f64 = list
+            .iter()
+            .map(|(_, s, _)| f64::from(s / old_total))
+            .sum();
+        let new_sum: f64 = list.shares().iter().map(|(_, s)| f64::from(*s)).sum();
+        let old_sum_err = (old_sum - 1.0).abs();
+        let new_sum_err = (new_sum - 1.0).abs();
+        assert!(
+            new_sum_err <= old_sum_err * 0.5,
+            "seed={seed}: 份额和误差没有减半，旧 {old_sum_err:e} -> 新 {new_sum_err:e}"
+        );
+    }
+}
+
+#[test]
 fn iter_matches_get_and_is_sorted_by_index() {
     let mut list = PositiveList::new();
     let entries = [(9u32, 0.9f32, 90u64), (2, 0.2, 20), (5, 0.5, 50)];

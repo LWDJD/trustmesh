@@ -298,8 +298,14 @@ impl PositiveList {
     }
 
     /// 全部评分的总和（影响力预算的分母）。
+    ///
+    /// 内部用 f64 累加，只在出口转回 f32：1000 条 [MAX_SCORE] 时 f32 顺序连加
+    /// 会把 1e12 漂到约 1.0000095e12（相对 9.5e-6），分母偏大会让
+    /// [PositiveList::shares] 的总和塌到 0.9999905。改用 f64 中途累加后，
+    /// 只剩出口的一次 f32 舍入（相对约 4e-9）。
     pub fn total(&self) -> Score {
-        self.entries.values().map(|e| e.score).sum()
+        let sum: f64 = self.entries.values().map(|e| f64::from(e.score)).sum();
+        sum as Score
     }
 
     /// 归一化后的份额：该账户占我总配额的比值，所有份额之和恒为 1。

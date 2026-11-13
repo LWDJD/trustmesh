@@ -97,6 +97,15 @@ pub type Time = u64;
 /// 后续求和溢出。
 pub const MAX_SCORE: Score = 1.0e9;
 
+/// 份额的工程下限：任何正分条目的份额都不允许是 0。
+///
+/// 理论份额 = s ÷ total。极端比值（MIN_POSITIVE ÷ MAX_SCORE ≈ 1.2e-47）
+/// 低于 f32 最小次正规数（≈ 1.4e-45），直接转 f32 会变成 0；于是条目仍然
+/// 留在正分清单里被抽样，群体项权重却恒为 0 —— 「正分」与「有影响力」脱钩。
+/// 这里用最小正**正规数**兜底：它足够小（在任何实际分布里都不影响归一化），
+/// 又避免次正规数在部分平台上被 flush-to-zero。只在真实份额下溢为 0 时启用。
+const SHARE_FLOOR: Score = f32::MIN_POSITIVE;
+
 // ===========================================================================
 // 1. AccountTable —— 账户表
 // ===========================================================================
@@ -312,17 +321,23 @@ impl PositiveList {
     ///
     /// 这是「切蛋糕」的最终结果：应用层给 0~n 的原始数值，
     /// 这里把它换算成占比。没表过态返回 None。
+    ///
+    /// 只要评分 > 0，返回的份额就一定 > 0：真实比值若低于 f32 能表示的
+    /// 正数下限，会取 `SHARE_FLOOR`（最小正正规数），而不是悄悄下溢成 0。
     pub fn share(&self, idx: AccountIdx) -> Option<Score> {
         let s = self.entries.get(&idx)?.score;
         let total = self.total();
         if total > 0.0 {
-            Some(s / total)
+            Some(normalized_share(s, total))
         } else {
             None
         }
     }
 
     /// 完整份额表，总和恒为 1（无条目时为空）。按编号升序。
+    ///
+    /// 与 [PositiveList::share] 同口径：每一条正分都保证拿到 > 0 的份额，
+    /// 极端小的条目不会被下溢抹成 0.0。
     pub fn shares(&self) -> Vec<(AccountIdx, Score)> {
         let total = self.total();
         if total <= 0.0 {
@@ -330,7 +345,7 @@ impl PositiveList {
         }
         self.entries
             .iter()
-            .map(|(k, e)| (*k, e.score / total))
+            .map(|(k, e)| (*k, normalized_share(e.score, total)))
             .collect()
     }
 
@@ -765,6 +780,22 @@ impl RoundSampler {
     fn start_new_round(&mut self) {
         self.pending.clear();
         self.pending.extend_from_slice(&self.members);
+    }
+}
+
+/// 把原始评分换算成 f32 份额；只有真实份额下溢为 0 时才抬到 [SHARE_FLOOR]。
+///
+/// 中间的除法用 f64：`MIN_POSITIVE / MAX_SCORE ≈ 1.2e-47` 在 f32 里会直接
+/// 变成 0，而在 f64 里仍是一个可表示的正数。转回 f32 后若仍为 0（真实份额
+/// 低于 f32 最小次正规数），才启用下限——正常份额（例如 1/N）不会被改动。
+fn normalized_share(score: Score, total: Score) -> Score {
+    let share = (f64::from(score) / f64::from(total)) as Score;
+    if share > 0.0 {
+        share
+    } else if score > 0.0 {
+        SHARE_FLOOR
+    } else {
+        0.0
     }
 }
 

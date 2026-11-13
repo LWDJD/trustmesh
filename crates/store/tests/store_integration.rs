@@ -168,6 +168,35 @@ fn time_is_opaque_and_not_forced_monotonic() {
 }
 
 #[test]
+fn tiny_positive_score_never_underflows_to_zero_share() {
+    let mut list = PositiveList::new();
+    list.set(0, f32::MIN_POSITIVE, 0);
+    list.set(1, MAX_SCORE, 0);
+
+    let theoretical = f64::from(f32::MIN_POSITIVE) / f64::from(MAX_SCORE);
+    assert!(
+        theoretical < f64::from(f32::from_bits(1)),
+        "前提不成立：理论份额 {theoretical:e} 没有低于 f32 最小次正规数"
+    );
+
+    let single = list.share(0).expect("有条目就必须有份额");
+    assert!(single > 0.0, "正分条目的份额下溢成了 0");
+    assert!(single >= f32::MIN_POSITIVE, "份额下限应是最小正正规数: {single:e}");
+    assert!(
+        (list.share(1).unwrap() - 1.0).abs() < 1e-6,
+        "大账户的份额不应被下限扰动"
+    );
+
+    let shares = list.shares();
+    let tiny = shares.iter().find(|(idx, _)| *idx == 0).unwrap().1;
+    let big = shares.iter().find(|(idx, _)| *idx == 1).unwrap().1;
+    assert!(tiny > 0.0, "份额表里的正分条目同样不得为 0");
+    assert!((big - 1.0).abs() < 1e-6);
+    let sum: f64 = shares.iter().map(|(_, s)| f64::from(*s)).sum();
+    assert!((sum - 1.0).abs() < 1e-6, "下限不应破坏总和: {sum}");
+}
+
+#[test]
 fn shares_sum_to_one_with_1000_max_scores() {
     let mut list = PositiveList::new();
     for idx in 0..1000u32 {

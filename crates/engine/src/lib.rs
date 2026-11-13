@@ -51,6 +51,17 @@ pub struct StoredView {
     pub noise: NoiseStats,
     /// 这份观点文件的总质量（接收方自己估计，用于影响力预算）
     pub total_mass: f32,
+    /// `total_mass` 覆盖到的账户范围：`on_view` 时刻的已知账户数（编号上界）。
+    ///
+    /// [AccountIdx] 由 `intern` 单调递增分配，所以 `target >= mass_covers`
+    /// 精确等价于「这个账户是在这份观点缓存之后才登记进来的」。它的读数没有进过
+    /// `total_mass`，用这个偏小的分母去归一化只会把它抬到 1.0 —— [Engine::query]
+    /// 因此对这类账户一律按「这份观点没表态」处理。
+    ///
+    /// 不记这个上界的后果：`on_view` 时对未登记账户的声明完全不进 `total_mass`
+    /// （分母只剩 1e-6 的下限），账户一登记，每条声明都饱和成 1.0
+    /// （实测 50 条声明 ⇒ Σv = 50，合规应 ≤ 1）。
+    pub mass_covers: u32,
 }
 
 /// 引擎参数。
@@ -309,6 +320,17 @@ impl Engine {
     // ---------- 收到观点 ----------
 
     /// 应用层成功取到对方观点后调用。
+    ///
+    /// # 参数校验
+    ///
+    /// `view.params()` 必须与 [EngineConfig::view_params] 完全一致
+    /// （`buckets` / `hashers` / `seed`）。不一致的视图**整条丢弃**：
+    /// 不计 [Engine::stats] 的命中、不进缓存、不清退避计数、也不更新时钟 ——
+    /// 对这个引擎来说它是无法解释的字节。
+    ///
+    /// 这是必需的输入校验，不是优化：`hashers` 由对端声明，不校验时 16×4096
+    /// 的视图能把单次 `on_view` 从 0.9 ms 拉到 572 ms（×609），单视图体积
+    /// 上限 2^26 单元 = 256 MiB 也会原样进入缓存。
     pub fn on_view(
         &mut self,
         owner: AccountIdx,
@@ -316,6 +338,10 @@ impl Engine {
         published_at: Time,
         now: Time,
     ) {
+        // 参数（形状 + 种子）是全网约定；不一致的草图桶布局不同，读数没有意义。
+        if view.params() != self.cfg.view_params {
+            return;
+        }
         self.clock = now;
         let noise = view.noise_floor(1000, noise_seed(owner));
         // 接收方自己估计总质量：对已知账户求和。发布方无法伪造这个估计。
@@ -335,6 +361,8 @@ impl Engine {
                 last_check: now,
                 noise,
                 total_mass,
+                // 这份 total_mass 只统计了「此刻已知」的 0..len 号账户。
+                mass_covers: self.accounts.len() as u32,
             },
         );
         // 成功刷新：刷新 last_check（衰减基准）**并清零连败计数**。
@@ -632,12 +660,21 @@ impl Engine {
     }
 
     /// 某个来源的观点里对 `key` 的读数，**与 [Engine::query] 的群体项同口径**：
-    /// 先除以该视图的 `total_mass` 再夹到 [0,1]，低于噪声底视为没表态。
+    /// 分子先夹到 [0,1]，再除以同口径的 `total_mass`，结果再夹一次；
+    /// 低于噪声底视为没表态。
     ///
-    /// 与 query 的唯一区别是非有限值：这里一律当 0（query 的历史路径没有这个兜底，
-    /// 但正常压缩视图不会产生 NaN）。badlist 的所有中间量都必须是有限数。
+    /// 顺序不能反。`total_mass` 是各已知账户的 `min(q,1)` 之和（受影响的账户数
+    /// 记为 K），分子不先夹紧时，一条声明 `c >= K` 会让 `q/T = c/K >= 1`，
+    /// 一个来源的预算就从 1 变成 K——实测 18 个女巫（账户的 4.5%）声明各 1000，
+    /// 拿走 29.37% 的信任。分子先夹紧后，合规视图（全部读数 ≤ 1）下
+    /// `q ≤ 1` 且 `T >= q`，两种写法逐位同值；只有超量声明会被压回预算内。
+    ///
+    /// [Engine::query] 与 badlist 必须走同一份实现，否则两条路径会对同一份字节
+    /// 给出不同的读数。非有限值一律当 0：badlist 的所有中间量都必须是有限数，
+    /// 而 NaN 在协议里就是「没表态」。
     fn reading_of(&self, stored: &StoredView, key: &AccountKey) -> Score {
-        let raw = stored.view.query(key) / stored.total_mass;
+        // 分子先夹紧，与分母（Σ min(q,1)）同一口径。
+        let raw = stored.view.query(key).clamp(0.0, 1.0) / stored.total_mass;
         let mut v = if raw.is_finite() {
             raw.clamp(0.0, 1.0)
         } else {
@@ -658,7 +695,8 @@ impl Engine {
     ///
     /// ```text
     /// 个人项[u] = 份额[u]                                    // 永不衰减
-    /// 群体项[u] = Σ 份额[v]·fs[v]·观点[v][u] ÷ Σ 份额[v]·fs[v]
+    /// 群体项[u] = Σ_v 份额[v]·fs[v]·penalty[v]·观点[v][u]
+    ///             ÷ Σ_v 份额[v]·fs[v]·penalty[v]             // v 遍历「我评过的全部来源」
     /// 声望[u]   = β·个人项[u] + (1−β)·群体项[u]
     /// ```
     ///
@@ -668,8 +706,18 @@ impl Engine {
     /// 它只压群体项里对该来源的**话语权**，不改个人评分，也不改 `fs`。
     ///
     /// * `fs` 是来源级衰减（[Engine::decay_factor]），只改来源**之间**的相对权重；
+    /// * **分母是「我评过的全部来源」**，与有没有取到观点无关：还没有观点的来源
+    ///   照样拿走自己那份份额、投一张 0 票（弃权），而不是从分母里消失。
+    ///   否则覆盖率越低，先到的那一份观点越独占群体项——N=101、只取到 1 份时，
+    ///   被背书账户的声望是「同样评过、但没人背书」的诚实账户的 236.67 倍；
+    ///   分母补齐后正好是 1/β = 3.33 倍。
+    /// * 每个读数按该视图的 `total_mass` 归一化：**分子先夹到 0~1 再除**，
+    ///   与分母 `Σ min(q,1)` 同口径。反过来的话，声明值 ≥ K 时一个来源的预算
+    ///   会从 1 变成 K，合规视图则逐位不变；
+    /// * 观点在 `on_view` 那一刻只统计了前 [StoredView::mass_covers] 个账户；
+    ///   之后才登记的账户没有进过分母，一律按「这份观点没表态」处理；
     /// * 低于噪声底的读数视为「没表态」，该来源的这一票按 0 计；
-    /// * 没有任何观点缓存时群体项为空，结果退化为 β·个人项。
+    /// * 一条观点都没有时群体项为 0，结果退化为 β·个人项。
     pub fn query(&self, target: AccountIdx, now: Time) -> Score {
         // 影响力预算：自己的评分也要归一化，总配额恒为 1
         let total_rating: f32 = self.ratings.iter().map(|(_, s, _)| s).sum();
@@ -685,36 +733,40 @@ impl Engine {
             None => return combine(self.cfg.beta, personal, None),
         };
 
-        let mut items: Vec<(f32, f32)> = Vec::with_capacity(self.views.len());
+        // 遍历的是正分清单（我评过谁），不是观点缓存（我手上有谁的观点）：
+        // 没有观点的来源贡献 (份额, 0.0) —— 权重进分母、值按 0。
+        let mut items: Vec<(f32, f32)> = Vec::with_capacity(self.ratings.len());
         // 折扣表为空（默认）时完全跳过查表与乘法：热路径零额外开销，
         // 也从代码上保证「没人调用 report_bad_account 就与改造前逐位一致」。
         let has_penalty = !self.penalties.is_empty();
-        for (owner, stored) in &self.views {
-            let w_rating = match self.ratings.get(*owner) {
-                Some(s) => s,
-                None => continue,
-            };
-            // 衰减基准是 last_check —— 我上次**成功**取到它观点的时间，
+        for (owner, w_rating, _) in self.ratings.iter() {
+            // 有观点：衰减基准是 last_check —— 我上次**成功**取到它观点的时间，
             // 而不是 published_at（对方自己声明的发布时间，可以随意伪造）。
             // 时间回拨时 dt 按 0 算（saturating_sub），不会产生负数或回绕。
-            let dt = elapsed(stored.last_check, now);
+            // 没有观点：没有衰减基准，因子按 1。
+            let (decay, v) = match self.views.get(&owner) {
+                Some(stored) => {
+                    // 这条观点在 on_view 时只统计了 0..mass_covers 号账户。
+                    // 之后才 intern 的账户没有进过 total_mass，用偏小的分母归一化
+                    // 会把它抬到 1.0，因此按「没表态」处理。
+                    let v = if target < stored.mass_covers {
+                        self.reading_of(stored, &target_key)
+                    } else {
+                        0.0
+                    };
+                    (self.decay_factor(elapsed(stored.last_check, now)), v)
+                }
+                None => (1.0, 0.0),
+            };
             // badlist 折扣只乘在群体项的来源权重上（个人评分原封不动）。
-            let w = w_rating * self.decay_factor(dt);
+            let w = w_rating * decay;
             let w = if has_penalty {
-                w * self.penalty_of(*owner)
+                w * self.penalty_of(owner)
             } else {
                 w
             };
-            if w <= 0.0 {
+            if !w.is_finite() || w <= 0.0 {
                 continue;
-            }
-            let mut v = stored.view.query(&target_key) / stored.total_mass;
-            // Count Sketch 的估值可能为负或超过 1，先夹紧到合法区间
-            v = v.clamp(0.0, 1.0);
-            // 低于噪声底的读数视为「没表态」
-            let floor = (stored.noise.median * self.cfg.noise_multiplier).max(0.0);
-            if v < floor {
-                v = 0.0;
             }
             items.push((w, v));
         }

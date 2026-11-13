@@ -156,6 +156,28 @@ fn stage4_empty_engine_is_safe() {
     assert!(e.shares().is_empty());
 }
 
+/// ④e 有账户、但一条正分都没有：分布未定义 -> 空 Vec、Σ = 0。
+///
+/// 这钉住 ① 的当前语义（报告里的选项 a）：不伪造「每人 1/N」的均匀分布，
+/// 也不返回全 0 的占位条目；调用方必须自己识别空结果。
+#[test]
+fn stage4_empty_positive_list_is_an_undefined_distribution() {
+    let mut e = eng();
+    let _a = e.intern(key(1));
+    let _b = e.intern(key(2));
+    assert_eq!(e.positive_count(), 0);
+
+    let dist = e.trust_distribution(0);
+    assert!(dist.is_empty(), "没有正分时不应伪造任何分布，实际 {dist:?}");
+    let sum: f32 = dist.iter().map(|(_, v)| *v).sum();
+    // 空迭代器求和当前得到 -0.0；符号无所谓，语义要求是「零」。
+    assert!(
+        sum == 0.0,
+        "未定义分布的 Σ 必须是 0，实际 {sum:?}（bits {:#x}）",
+        sum.to_bits()
+    );
+}
+
 /// ④c 单一账户时份额为 1
 #[test]
 fn stage4_single_account_gets_everything() {

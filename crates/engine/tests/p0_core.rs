@@ -236,8 +236,124 @@ fn compliant_claims_are_bit_identical() {
 }
 
 // ===========================================================================
+// ③ on_view 校验观点参数
+// ===========================================================================
+
+/// 参数不符（buckets / hashers / seed 任一不同）的视图整条丢弃：
+/// 不计命中、不进缓存、不清退避、查询逐位不变。
+#[test]
+fn views_with_mismatched_params_are_dropped() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let target = e.intern(key(1));
+    e.rate(src, 1.0, 0);
+    let before = e.query(target, 0).to_bits();
+
+    let bad = [
+        ViewParams::new(256, 5, 7),   // buckets 不同
+        ViewParams::new(512, 6, 7),   // hashers 不同
+        ViewParams::new(512, 5, 8),   // seed 不同
+        ViewParams::new(16, 4096, 7), // 恶意参数：16×4096 = 256 KiB
+    ];
+    for p in bad {
+        let v = CompressedView::from_pairs(p, &[(key(1), 1.0)]);
+        e.on_view(src, v, 0, 0);
+        assert_eq!(e.stats(), (0, 0, 0, 1), "{p:?} 的视图应被整条丢弃");
+        assert_eq!(e.view_age(src, 0), None, "{p:?} 不应进入缓存");
+        assert_eq!(e.fail_streak(src), 0, "丢弃不等于失败，不应计入退避");
+        assert_eq!(e.query(target, 0).to_bits(), before, "{p:?} 不应影响查询");
+    }
+}
+
+/// 合规输入没变：参数完全一致时照常收下 —— 命中 +1、缓存 +1、观点参与查询。
+#[test]
+fn matching_params_are_accepted() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let target = e.intern(key(1));
+    e.rate(src, 1.0, 0);
+
+    e.on_view(src, view(&[(1, 1.0)]), 0, 0);
+    assert_eq!(e.stats(), (0, 1, 1, 1));
+    assert_eq!(e.view_age(src, 0), Some(0));
+    assert!((e.query(target, 0) - 0.7).abs() < 1e-6, "群体项应为 1.0");
+}
+
+// ===========================================================================
 // 附带：total_mass 的覆盖快照（mass_covers）
 // ===========================================================================
+// ===========================================================================
+// 组合：三个 P0 + 附带一起上
+// ===========================================================================
+
+/// 超量声明 + 只取到 1 份观点 + 一半目标在 on_view 之后才登记 + 一份参数不符
+/// 的恶意视图。
+///
+/// 合理范围：每个值 ∈ [0,1]；后登记的账户拿到 0；被背书目标的群体项总量是
+/// `1 份观点 ÷ 21 个已评分来源` 的一部分，而不是「先到的那份独占」。
+#[test]
+fn combined_attack_stays_within_budget() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let sources: Vec<u32> = (0..20).map(|i| e.intern(key(1000 + i))).collect();
+    let honest = e.intern(key(50));
+    let early: Vec<u32> = (0..5).map(|i| e.intern(key(i + 1))).collect();
+    for &s in &sources {
+        e.rate(s, 1.0, 0);
+    }
+    e.rate(honest, 1.0, 0);
+
+    // 唯一一份观点：10 个目标各声明 1000（其中 5 个此刻还没登记）。
+    let pairs: Vec<(u32, f32)> = (1..=10).map(|i| (i, 1000.0)).collect();
+    e.on_view(sources[0], view(&pairs), 0, 0);
+    // 一份参数不符的视图：整条丢弃，连命中都不算。
+    let evil = CompressedView::from_pairs(ViewParams::new(16, 4096, 7), &[(key(1), 1e6)]);
+    e.on_view(sources[1], evil, 0, 0);
+
+    let late: Vec<u32> = (6..=10).map(|i| e.intern(key(i))).collect();
+
+    // on_view 时只有 5 个目标已登记 ⇒ T = 5，超大声明被夹到 1，
+    // 每个早期目标拿到 1/5；群体项再按 21 个已评分来源平均 ⇒ 1/(5×21)。
+    let early_v: Vec<f32> = early.iter().map(|&t| e.query(t, 0) / 0.7).collect();
+    for &v in &early_v {
+        assert!(
+            (v - 0.2 / 21.0).abs() < 1e-6,
+            "早期目标应拿 (1/5)/21，实际 {v}"
+        );
+    }
+    // 后登记的目标没有进过 total_mass ⇒ 按没表态处理。
+    for &t in &late {
+        assert!(
+            e.query(t, 0).abs() < 1e-9,
+            "后登记的目标不该被背书，实际 {}",
+            e.query(t, 0)
+        );
+    }
+
+    // 预算：总和远小于 1，且每个值都在 [0,1]。
+    let total: f32 = early_v.iter().sum();
+    assert!(total <= 1.0 + 1e-6, "群体项总量越界：{total}");
+    assert!(total > 0.0, "合规的那 5 条声明应当生效");
+    for &t in early.iter().chain(late.iter()) {
+        let q = e.query(t, 0);
+        assert!((0.0..=1.0).contains(&q), "查询值越界：{q}");
+    }
+
+    // 参数不符的那份视图没有进缓存；只剩 1 份观点、21 条评分。
+    assert_eq!(e.stats(), (0, 1, 1, 21));
+
+    // 全局归一化仍然成立。
+    let dist_sum: f32 = e.trust_distribution(0).iter().map(|(_, v)| *v).sum();
+    assert!((dist_sum - 1.0).abs() < 1e-4, "分布总和应为 1，实际 {dist_sum}");
+
+    // 被背书的目标没有压过「我亲自评分、没人背书」的账户。
+    let endorsed = e.query(early[0], 0);
+    let personal_only = e.query(honest, 0);
+    assert!(
+        endorsed < personal_only,
+        "背书不该压过个人评分：{endorsed} vs {personal_only}"
+    );
+}
+
 
 /// 改前：50 条声明全部指向「on_view 时还不存在」的账户，total_mass 只有
 /// 1e-6 的下限；这些账户一登记，每条声明都饱和到 1.0，Σv = 50。

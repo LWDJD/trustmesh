@@ -320,6 +320,17 @@ impl Engine {
     // ---------- 收到观点 ----------
 
     /// 应用层成功取到对方观点后调用。
+    ///
+    /// # 参数校验
+    ///
+    /// `view.params()` 必须与 [EngineConfig::view_params] 完全一致
+    /// （`buckets` / `hashers` / `seed`）。不一致的视图**整条丢弃**：
+    /// 不计 [Engine::stats] 的命中、不进缓存、不清退避计数、也不更新时钟 ——
+    /// 对这个引擎来说它是无法解释的字节。
+    ///
+    /// 这是必需的输入校验，不是优化：`hashers` 由对端声明，不校验时 16×4096
+    /// 的视图能把单次 `on_view` 从 0.9 ms 拉到 572 ms（×609），单视图体积
+    /// 上限 2^26 单元 = 256 MiB 也会原样进入缓存。
     pub fn on_view(
         &mut self,
         owner: AccountIdx,
@@ -327,6 +338,10 @@ impl Engine {
         published_at: Time,
         now: Time,
     ) {
+        // 参数（形状 + 种子）是全网约定；不一致的草图桶布局不同，读数没有意义。
+        if view.params() != self.cfg.view_params {
+            return;
+        }
         self.clock = now;
         let noise = view.noise_floor(1000, noise_seed(owner));
         // 接收方自己估计总质量：对已知账户求和。发布方无法伪造这个估计。

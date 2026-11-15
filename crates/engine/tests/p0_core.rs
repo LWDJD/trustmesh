@@ -1,0 +1,395 @@
+//! P0 核心修复的回归测试（crates/engine）。
+//!
+//! 每一条都对应一个「改前 → 改后」的最小复现，数字来自本工作树的实测：
+//!
+//! | 节 | 缺陷 | 改前 | 改后 |
+//! | --- | --- | ---: | ---: |
+//! | ① | 群体项分母只算「已取到观点」的来源 | 236.67× | 3.36×（≈1/β） |
+//! | 附带 | `total_mass` 只是 on_view 时刻的快照 | Σv = 50 | Σv = 0 |
+//! | ② | 归一化先除后夹紧 | Σv = 8 | Σv = 1 |
+//! | ③ | on_view 不校验观点参数 | 收下 16×4096 | 整条丢弃 |
+//!
+//! 每组都有一条「合规输入没变」的测试：满足前提时新旧口径**逐位相同**。
+
+use tm_agg::AggMode;
+use tm_engine::{Engine, EngineConfig};
+use tm_view::{CompressedView, ViewParams};
+
+fn key(i: u32) -> [u8; 32] {
+    let mut k = [0u8; 32];
+    k[0..4].copy_from_slice(&i.to_le_bytes());
+    k
+}
+
+fn params() -> ViewParams {
+    ViewParams {
+        buckets: 512,
+        hashers: 5,
+        seed: 7,
+    }
+}
+
+fn cfg() -> EngineConfig {
+    EngineConfig {
+        beta: 0.3,
+        half_life: 72,
+        view_params: params(),
+        agg_mode: AggMode::Mean,
+        noise_multiplier: 1.0,
+        decay_enabled: true,
+        decay_floor: 0.0,
+        ..Default::default()
+    }
+}
+
+fn view(pairs: &[(u32, f32)]) -> CompressedView {
+    let ps: Vec<([u8; 32], f32)> = pairs.iter().map(|(i, s)| (key(*i), *s)).collect();
+    CompressedView::from_pairs(params(), &ps)
+}
+
+// ===========================================================================
+// ① 群体项分母 = 我评过的全部来源（不论有没有观点）
+// ===========================================================================
+
+/// 改前：只取到 1 份观点时，那 1 份独占群体项，被背书账户是「同样评过、
+/// 但没人背书」的诚实账户的 236.67 倍。
+///
+/// 改后：分母是 100 个已评分来源的份额之和，被背书账户只拿 1/100，倍数回落到
+/// `1/β = 3.33`（这里 3.36，多出来的 0.8% 是个人项 β/N 的 N=101 不是 100）。
+#[test]
+fn group_denominator_counts_rated_sources_without_views() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let target = e.intern(key(1));
+    let sources: Vec<u32> = (0..100).map(|i| e.intern(key(1000 + i))).collect();
+    // T + 100 个来源各 1.0：101 个被评分账户，每人份额 1/101。
+    e.rate(target, 1.0, 0);
+    for &s in &sources {
+        e.rate(s, 1.0, 0);
+    }
+
+    // 只有 sources[0] 的观点到了，而且它只抬举 target。
+    e.on_view(sources[0], view(&[(1, 1.0)]), 0, 0);
+
+    let dist = e.trust_distribution(0);
+    let dt = dist.iter().find(|(i, _)| *i == target).map(|(_, v)| *v).unwrap();
+    let dh = dist
+        .iter()
+        .find(|(i, _)| *i == sources[1])
+        .map(|(_, v)| *v)
+        .unwrap();
+    let ratio = dt / dh;
+
+    // 改前是 236.67；改后应当贴着 1/β。
+    let want = 1.0 / 0.3;
+    assert!(
+        (ratio - want).abs() <= 0.02 * want,
+        "倍数应 ≈ 1/β = {want:.3}（±2%），实际 {ratio:.3}（改前 236.67）"
+    );
+    // 群体项 = 1 份观点 ÷ 101 个已评分来源（100 个来源 + target 自己）= 1/101，
+    // 与「谁先到」无关；个人项也是 1/101，所以 query 恰好是 1/101。
+    assert!(
+        (e.query(target, 0) - 1.0 / 101.0).abs() < 1e-6,
+        "query 应为 1/101，实际 {}",
+        e.query(target, 0)
+    );
+    // 诚实账户的群体项仍是 0，只剩个人项 0.3/101。
+    assert!((e.query(sources[1], 0) - 0.3 / 101.0).abs() < 1e-7);
+}
+
+/// 合规输入没变：所有**已评分**账户都有观点时，新旧口径逐位相同。
+///
+/// 场景里只有 3 个来源被评分、目标账户不评分 —— 这样「正分清单」与
+/// 「观点缓存」是同一个集合，新旧分母完全重合。位模式是**改动前**用同一份
+/// 场景打印的，改后必须逐位相同。
+#[test]
+fn full_coverage_is_bit_identical() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let targets: Vec<u32> = (0..5).map(|i| e.intern(key(i + 1))).collect();
+    let srcs: Vec<u32> = (0..3).map(|i| e.intern(key(100 + i))).collect();
+    for (i, s) in srcs.iter().enumerate() {
+        e.rate(*s, [1.0f32, 1.5, 0.5][i], 0);
+    }
+    let rows = [
+        [0.4f32, 0.3, 0.2, 0.1, 0.0],
+        [0.1, 0.2, 0.3, 0.4, 0.0],
+        [0.2, 0.2, 0.2, 0.2, 0.2],
+    ];
+    for (j, s) in srcs.iter().enumerate() {
+        let pairs: Vec<(u32, f32)> = (0..5).map(|i| (i as u32 + 1, rows[j][i])).collect();
+        e.on_view(*s, view(&pairs), 0, 0);
+    }
+    e.tick(37, 10);
+
+    let q0: Vec<(u32, u32)> = targets.iter().map(|&i| (i, e.query(i, 0).to_bits())).collect();
+    assert_eq!(
+        q0,
+        vec![
+            (0, 0x3e1b4e82),
+            (1, 0x3e2740da),
+            (2, 0x3e333333),
+            (3, 0x3e3f258c),
+            (4, 0x3cbf258c)
+        ],
+        "满覆盖时结果必须逐位不变"
+    );
+    // 全体来源一起变旧时，指数衰减是公因子，群体项不变。
+    let q37: Vec<(u32, u32)> = targets.iter().map(|&i| (i, e.query(i, 37).to_bits())).collect();
+    assert_eq!(q37, q0, "满覆盖时全体变旧是恒等变换");
+
+    let dist: Vec<(u32, u32)> = e
+        .trust_distribution(37)
+        .into_iter()
+        .map(|(i, v)| (i, v.to_bits()))
+        .collect();
+    assert_eq!(
+        dist,
+        vec![
+            (0, 0x3e1b4e82),
+            (1, 0x3e2740da),
+            (2, 0x3e333333),
+            (3, 0x3e3f258c),
+            (4, 0x3cbf258c),
+            (5, 0x3dccccce),
+            (6, 0x3e19999a),
+            (7, 0x3d4cccce)
+        ]
+    );
+}
+
+// ===========================================================================
+// ② 归一化：分子先夹紧，再除以同口径的分母
+// ===========================================================================
+
+/// 改前：8 条声明各 1000 ⇒ `total_mass` = 8×min(1000,1) = 8，但分子没夹紧，
+/// v = 1000/8 → 夹到 1，每个目标都拿满，Σv = 8（一份来源的预算从 1 变成 8）。
+///
+/// 改后：v = min(1000,1)/8 = 1/8，Σv = 1。
+///
+/// 阈值就是 K（受影响的账户数）：声明值 ≥ K 时旧写法必然饱和，所以 8 也要测。
+#[test]
+fn oversized_claims_cannot_exceed_budget() {
+    for claim in [8.0f32, 1000.0, 1e6] {
+        let mut e = Engine::with_seed(cfg(), 42);
+        let src = e.intern(key(100));
+        let targets: Vec<u32> = (1..=8).map(|i| e.intern(key(i))).collect();
+        e.rate(src, 1.0, 0);
+        let pairs: Vec<(u32, f32)> = (1..=8).map(|i| (i, claim)).collect();
+        e.on_view(src, view(&pairs), 0, 0);
+
+        let vs: Vec<f32> = targets.iter().map(|&t| e.query(t, 0) / 0.7).collect();
+        let sum: f32 = vs.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "声明 {claim}：Σv 应为 1（改前 8），实际 {sum}"
+        );
+        for v in &vs {
+            assert!(
+                (v - 0.125).abs() < 1e-6,
+                "声明 {claim}：每个目标应拿 1/8，实际 {v}"
+            );
+        }
+    }
+}
+
+/// 混合声明（1 条超量 + 7 条合规）也守得住预算：Σv 恒为
+/// `Σ min(c_i,1) / total_mass`，而分母正是同一个和，所以正好是 1。
+#[test]
+fn mixed_claims_still_sum_to_one() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let targets: Vec<u32> = (1..=8).map(|i| e.intern(key(i))).collect();
+    e.rate(src, 1.0, 0);
+    let mut pairs: Vec<(u32, f32)> = (1..=8).map(|i| (i, 0.125)).collect();
+    pairs[0].1 = 1000.0;
+    e.on_view(src, view(&pairs), 0, 0);
+
+    let sum: f32 = targets.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    assert!((sum - 1.0).abs() < 1e-6, "Σv 应为 1，实际 {sum}");
+    let hot = e.query(targets[0], 0) / 0.7;
+    let cold = e.query(targets[1], 0) / 0.7;
+    assert!((hot - 1.0 / 1.875).abs() < 1e-6, "超量声明只拿 min(c,1)/T，实际 {hot}");
+    assert!((cold - 0.125 / 1.875).abs() < 1e-6, "合规声明仍是 c/T，实际 {cold}");
+    assert!(hot > cold, "超量声明最多拿满 1 份，但仍是全场最高");
+}
+
+/// 合规输入没变：8 条各 0.125（全部读数 ≤ 1）时，结果与改前**逐位相同**。
+///
+/// 位模式是改动前打印的（0.7 × 0.125 = 0.0875）。
+#[test]
+fn compliant_claims_are_bit_identical() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let targets: Vec<u32> = (1..=8).map(|i| e.intern(key(i))).collect();
+    e.rate(src, 1.0, 0);
+    let pairs: Vec<(u32, f32)> = (1..=8).map(|i| (i, 0.125)).collect();
+    e.on_view(src, view(&pairs), 0, 0);
+
+    for &t in &targets {
+        assert_eq!(
+            e.query(t, 0).to_bits(),
+            1035154227,
+            "合规视图必须逐位不变（0.0875）"
+        );
+    }
+    let sum: f32 = targets.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    assert!((sum - 1.0).abs() < 1e-6, "合规视图 Σv 仍为 1，实际 {sum}");
+}
+
+// ===========================================================================
+// ③ on_view 校验观点参数
+// ===========================================================================
+
+/// 参数不符（buckets / hashers / seed 任一不同）的视图整条丢弃：
+/// 不计命中、不进缓存、不清退避、查询逐位不变。
+#[test]
+fn views_with_mismatched_params_are_dropped() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let target = e.intern(key(1));
+    e.rate(src, 1.0, 0);
+    let before = e.query(target, 0).to_bits();
+
+    let bad = [
+        ViewParams::new(256, 5, 7),   // buckets 不同
+        ViewParams::new(512, 6, 7),   // hashers 不同
+        ViewParams::new(512, 5, 8),   // seed 不同
+        ViewParams::new(16, 4096, 7), // 恶意参数：16×4096 = 256 KiB
+    ];
+    for p in bad {
+        let v = CompressedView::from_pairs(p, &[(key(1), 1.0)]);
+        e.on_view(src, v, 0, 0);
+        assert_eq!(e.stats(), (0, 0, 0, 1), "{p:?} 的视图应被整条丢弃");
+        assert_eq!(e.view_age(src, 0), None, "{p:?} 不应进入缓存");
+        assert_eq!(e.fail_streak(src), 0, "丢弃不等于失败，不应计入退避");
+        assert_eq!(e.query(target, 0).to_bits(), before, "{p:?} 不应影响查询");
+    }
+}
+
+/// 合规输入没变：参数完全一致时照常收下 —— 命中 +1、缓存 +1、观点参与查询。
+#[test]
+fn matching_params_are_accepted() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    let target = e.intern(key(1));
+    e.rate(src, 1.0, 0);
+
+    e.on_view(src, view(&[(1, 1.0)]), 0, 0);
+    assert_eq!(e.stats(), (0, 1, 1, 1));
+    assert_eq!(e.view_age(src, 0), Some(0));
+    assert!((e.query(target, 0) - 0.7).abs() < 1e-6, "群体项应为 1.0");
+}
+
+// ===========================================================================
+// 附带：total_mass 的覆盖快照（mass_covers）
+// ===========================================================================
+// ===========================================================================
+// 组合：三个 P0 + 附带一起上
+// ===========================================================================
+
+/// 超量声明 + 只取到 1 份观点 + 一半目标在 on_view 之后才登记 + 一份参数不符
+/// 的恶意视图。
+///
+/// 合理范围：每个值 ∈ [0,1]；后登记的账户拿到 0；被背书目标的群体项总量是
+/// `1 份观点 ÷ 21 个已评分来源` 的一部分，而不是「先到的那份独占」。
+#[test]
+fn combined_attack_stays_within_budget() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let sources: Vec<u32> = (0..20).map(|i| e.intern(key(1000 + i))).collect();
+    let honest = e.intern(key(50));
+    let early: Vec<u32> = (0..5).map(|i| e.intern(key(i + 1))).collect();
+    for &s in &sources {
+        e.rate(s, 1.0, 0);
+    }
+    e.rate(honest, 1.0, 0);
+
+    // 唯一一份观点：10 个目标各声明 1000（其中 5 个此刻还没登记）。
+    let pairs: Vec<(u32, f32)> = (1..=10).map(|i| (i, 1000.0)).collect();
+    e.on_view(sources[0], view(&pairs), 0, 0);
+    // 一份参数不符的视图：整条丢弃，连命中都不算。
+    let evil = CompressedView::from_pairs(ViewParams::new(16, 4096, 7), &[(key(1), 1e6)]);
+    e.on_view(sources[1], evil, 0, 0);
+
+    let late: Vec<u32> = (6..=10).map(|i| e.intern(key(i))).collect();
+
+    // on_view 时只有 5 个目标已登记 ⇒ T = 5，超大声明被夹到 1，
+    // 每个早期目标拿到 1/5；群体项再按 21 个已评分来源平均 ⇒ 1/(5×21)。
+    let early_v: Vec<f32> = early.iter().map(|&t| e.query(t, 0) / 0.7).collect();
+    for &v in &early_v {
+        assert!(
+            (v - 0.2 / 21.0).abs() < 1e-6,
+            "早期目标应拿 (1/5)/21，实际 {v}"
+        );
+    }
+    // 后登记的目标没有进过 total_mass ⇒ 按没表态处理。
+    for &t in &late {
+        assert!(
+            e.query(t, 0).abs() < 1e-9,
+            "后登记的目标不该被背书，实际 {}",
+            e.query(t, 0)
+        );
+    }
+
+    // 预算：总和远小于 1，且每个值都在 [0,1]。
+    let total: f32 = early_v.iter().sum();
+    assert!(total <= 1.0 + 1e-6, "群体项总量越界：{total}");
+    assert!(total > 0.0, "合规的那 5 条声明应当生效");
+    for &t in early.iter().chain(late.iter()) {
+        let q = e.query(t, 0);
+        assert!((0.0..=1.0).contains(&q), "查询值越界：{q}");
+    }
+
+    // 参数不符的那份视图没有进缓存；只剩 1 份观点、21 条评分。
+    assert_eq!(e.stats(), (0, 1, 1, 21));
+
+    // 全局归一化仍然成立。
+    let dist_sum: f32 = e.trust_distribution(0).iter().map(|(_, v)| *v).sum();
+    assert!((dist_sum - 1.0).abs() < 1e-4, "分布总和应为 1，实际 {dist_sum}");
+
+    // 被背书的目标没有压过「我亲自评分、没人背书」的账户。
+    let endorsed = e.query(early[0], 0);
+    let personal_only = e.query(honest, 0);
+    assert!(
+        endorsed < personal_only,
+        "背书不该压过个人评分：{endorsed} vs {personal_only}"
+    );
+}
+
+
+/// 改前：50 条声明全部指向「on_view 时还不存在」的账户，total_mass 只有
+/// 1e-6 的下限；这些账户一登记，每条声明都饱和到 1.0，Σv = 50。
+///
+/// 改后：它们不在 mass_covers 范围内，按「这份观点没表态」处理，Σv = 0。
+#[test]
+fn late_interned_accounts_are_not_endorsed() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    e.rate(src, 1.0, 0);
+    let pairs: Vec<(u32, f32)> = (1..=50).map(|i| (i, 1.0)).collect();
+    e.on_view(src, view(&pairs), 0, 0);
+
+    let late: Vec<u32> = (1..=50).map(|i| e.intern(key(i))).collect();
+    let sum: f32 = late.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    assert!(
+        sum.abs() < 1e-9,
+        "后登记的账户不该被背书，Σv 应为 0（改前 50），实际 {sum}"
+    );
+}
+
+/// 合规输入没变：on_view 之前登记的账户照旧按 total_mass 归一化（Σv = 1），
+/// 只有「之后才登记」的那一半被丢弃。
+#[test]
+fn mass_snapshot_boundary_only_drops_later_accounts() {
+    let mut e = Engine::with_seed(cfg(), 42);
+    let src = e.intern(key(100));
+    e.rate(src, 1.0, 0);
+    let early: Vec<u32> = (1..=25).map(|i| e.intern(key(i))).collect();
+    let pairs: Vec<(u32, f32)> = (1..=50).map(|i| (i, 1.0)).collect();
+    // total_mass 只数到已知的 25 个 key，每条声明被归一化成 1/25。
+    e.on_view(src, view(&pairs), 0, 0);
+    let late: Vec<u32> = (26..=50).map(|i| e.intern(key(i))).collect();
+
+    let sum_early: f32 = early.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    let sum_late: f32 = late.iter().map(|&t| e.query(t, 0) / 0.7).sum();
+    assert!((sum_early - 1.0).abs() < 1e-5, "先登记的 25 个 Σv 仍为 1，实际 {sum_early}");
+    assert!(sum_late.abs() < 1e-9, "后登记的 25 个应为 0，实际 {sum_late}");
+}

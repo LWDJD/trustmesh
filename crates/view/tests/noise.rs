@@ -156,3 +156,23 @@ fn different_view_seeds_agree_on_magnitude() {
         "不同视图种子的 p95 噪声差异过大: {a} vs {b}"
     );
 }
+
+#[test]
+fn even_sample_median_does_not_overflow_large_view() {
+    // buckets = 1：每次查询都落在同一个桶上，五个估计全是 ±2e38。
+    // 2e38 + 2e38 超出 f32::MAX（约 3.4e38），旧实现 (a+b)*0.5 会得到 inf。
+    let mut view = CompressedView::new(ViewParams::new(1, 5, 0));
+    view.add(&[7u8; 32], 2.0e38);
+
+    // 999 是奇数样本（取中间一个），1000 是偶数样本（旧实现恰好在这里溢出）。
+    let odd = view.noise_floor(999, 1);
+    let even = view.noise_floor(1000, 1);
+    assert!(odd.median.is_finite(), "999 样本的中位数不应是 inf: {odd}");
+    assert!(even.median.is_finite(), "1000 样本的中位数不应是 inf: {even}");
+    assert!(even.median > 0.0);
+    let ratio = even.median / odd.median;
+    assert!(
+        (0.5..=2.0).contains(&ratio),
+        "偶/奇样本的中位数应同量级: {odd} vs {even}"
+    );
+}

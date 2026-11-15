@@ -19,7 +19,8 @@
 //!
 //! ## 设计约束
 //!
-//! 1. 评分只有 (0, 1] 的正数，0 表示「没表态」；没有负分。
+//! 1. 评分只收正数（0 表示「没表态」；没有负分）。应用层可以给 0~n 的原始数值，
+//!    存储层只按 [MAX_SCORE]（1.0e9）截断，不按 1.0 截断。
 //! 2. 抽样只从「正分清单」里等概率抽取，**不按评分加权**。
 //! 3. 抽样失败是正常路径，存储层不参与重试、不阻塞、也不更新时间戳。
 //!    它只把「连续失败了几次」记下来（[PositiveList::record_failure]），
@@ -80,7 +81,8 @@ pub type AccountKey = [u8; 32];
 /// 账户编号：由 [AccountTable] 分配的紧凑整数，从 0 开始连续递增。
 pub type AccountIdx = u32;
 
-/// 评分：取值范围 (0, 1]，0 表示「没表态」。没有负分。
+/// 评分：正数表示信任程度，0 表示「没表态」。取值范围是 (0, MAX_SCORE]，
+/// 应用层给 0~n 的原始数值，存储层按 [MAX_SCORE]（1.0e9）截断；没有负分。
 pub type Score = f32;
 
 /// 时间戳：由上层给出的相对时间（秒、毫秒均可，只要单位一致）。
@@ -96,6 +98,15 @@ pub type Time = u64;
 /// 所以这里不能按 1.0 截断。这个值只用来挡住 +∞ / NaN / 荒谬的大数，防止
 /// 后续求和溢出。
 pub const MAX_SCORE: Score = 1.0e9;
+
+/// 份额的工程下限：任何正分条目的份额都不允许是 0。
+///
+/// 理论份额 = s ÷ total。极端比值（MIN_POSITIVE ÷ MAX_SCORE ≈ 1.2e-47）
+/// 低于 f32 最小次正规数（≈ 1.4e-45），直接转 f32 会变成 0；于是条目仍然
+/// 留在正分清单里被抽样，群体项权重却恒为 0 —— 「正分」与「有影响力」脱钩。
+/// 这里用最小正**正规数**兜底：它足够小（在任何实际分布里都不影响归一化），
+/// 又避免次正规数在部分平台上被 flush-to-zero。只在真实份额下溢为 0 时启用。
+const SHARE_FLOOR: Score = f32::MIN_POSITIVE;
 
 // ===========================================================================
 // 1. AccountTable —— 账户表
@@ -210,8 +221,9 @@ struct Entry {
 ///
 /// * 只保存 score > 0 的条目。set 传入 <= 0（含负数、-0.0、NaN）
 ///   等价于删除该条目，不会留下 score == 0 的占位项。
-/// * 传入的分数若大于 [MAX_SCORE]（含 +∞）会被截断为 1.0，
-///   以此在存储层边界上守住「评分 ∈ (0, 1]」这个不变量。
+/// * 传入的分数若大于 [MAX_SCORE]（含 +∞）会被截断为 [MAX_SCORE]（1.0e9）。
+///   这是防止后续求和溢出的**存储层上界**，不是「评分 ∈ (0, 1]」的语义上限：
+///   应用层可以给 0~n 的原始数值，2.5 会原样保留，1e10 会存成 1e9。
 /// * set 无论新增还是修改，都会把 last_check 刷新为传入的 now。
 /// * [PositiveList::touch] 只刷新时间、不改分数，用于「成功取到观点」；
 ///   「抽样失败」时上层不应调用它（失败不更新时间戳）。
@@ -258,7 +270,7 @@ impl PositiveList {
     ///
     /// score <= 0（含负数、NaN）表示「没表态」，等价于删除该条目：
     /// 若条目本来就不存在则什么也不做。
-    /// score > 1.0 会被截断为 [MAX_SCORE]。
+    /// score > [MAX_SCORE] 会被截断为 [MAX_SCORE]。
     ///
     /// 新增条目从连败计数 0 开始；**已存在的条目会保留原有连败计数**——
     /// 改分是「我的判断变了」，不是「我刚取到了它的观点」，
@@ -298,25 +310,37 @@ impl PositiveList {
     }
 
     /// 全部评分的总和（影响力预算的分母）。
+    ///
+    /// 内部用 f64 累加，只在出口转回 f32：1000 条 [MAX_SCORE] 时 f32 顺序连加
+    /// 会把 1e12 漂到约 1.0000095e12（相对 9.5e-6），分母偏大会让
+    /// [PositiveList::shares] 的总和塌到 0.9999905。改用 f64 中途累加后，
+    /// 只剩出口的一次 f32 舍入（相对约 4e-9）。
     pub fn total(&self) -> Score {
-        self.entries.values().map(|e| e.score).sum()
+        let sum: f64 = self.entries.values().map(|e| f64::from(e.score)).sum();
+        sum as Score
     }
 
     /// 归一化后的份额：该账户占我总配额的比值，所有份额之和恒为 1。
     ///
     /// 这是「切蛋糕」的最终结果：应用层给 0~n 的原始数值，
     /// 这里把它换算成占比。没表过态返回 None。
+    ///
+    /// 只要评分 > 0，返回的份额就一定 > 0：真实比值若低于 f32 能表示的
+    /// 正数下限，会取 `SHARE_FLOOR`（最小正正规数），而不是悄悄下溢成 0。
     pub fn share(&self, idx: AccountIdx) -> Option<Score> {
         let s = self.entries.get(&idx)?.score;
         let total = self.total();
         if total > 0.0 {
-            Some(s / total)
+            Some(normalized_share(s, total))
         } else {
             None
         }
     }
 
     /// 完整份额表，总和恒为 1（无条目时为空）。按编号升序。
+    ///
+    /// 与 [PositiveList::share] 同口径：每一条正分都保证拿到 > 0 的份额，
+    /// 极端小的条目不会被下溢抹成 0.0。
     pub fn shares(&self) -> Vec<(AccountIdx, Score)> {
         let total = self.total();
         if total <= 0.0 {
@@ -324,7 +348,7 @@ impl PositiveList {
         }
         self.entries
             .iter()
-            .map(|(k, e)| (*k, e.score / total))
+            .map(|(k, e)| (*k, normalized_share(e.score, total)))
             .collect()
     }
 
@@ -762,6 +786,22 @@ impl RoundSampler {
     }
 }
 
+/// 把原始评分换算成 f32 份额；只有真实份额下溢为 0 时才抬到 [SHARE_FLOOR]。
+///
+/// 中间的除法用 f64：`MIN_POSITIVE / MAX_SCORE ≈ 1.2e-47` 在 f32 里会直接
+/// 变成 0，而在 f64 里仍是一个可表示的正数。转回 f32 后若仍为 0（真实份额
+/// 低于 f32 最小次正规数），才启用下限——正常份额（例如 1/N）不会被改动。
+fn normalized_share(score: Score, total: Score) -> Score {
+    let share = (f64::from(score) / f64::from(total)) as Score;
+    if share > 0.0 {
+        share
+    } else if score > 0.0 {
+        SHARE_FLOOR
+    } else {
+        0.0
+    }
+}
+
 /// 去重并升序排列，作为内部「全量清单」的规范形式。
 ///
 /// 升序不影响均匀性（抽样下标本身是均匀随机的），但让状态可复现、可断言。
@@ -1176,6 +1216,12 @@ mod tests {
         assert_eq!(l.get(1), Some(2.5), "0~n 的原始数值不得被截断");
         l.set(2, f32::INFINITY, 0);
         assert_eq!(l.get(2), Some(MAX_SCORE), "无穷大收敛到上界");
+        l.set(3, 1.0e10, 0);
+        assert_eq!(
+            l.get(3),
+            Some(MAX_SCORE),
+            "1e10 必须存成 MAX_SCORE（1e9），不是 1.0"
+        );
     }
 
     #[test]

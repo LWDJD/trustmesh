@@ -13,7 +13,8 @@ fn main() {
     let mut w0 = tm_sim::World::new(base.clone());
     w0.run();
     let inf = w0.accounts().iter().find(|a| matches!(a.kind, Kind::Infiltrator { .. })).map(|a| a.idx).unwrap();
-    let alive = w0.alive_count();
+    // 账户号基数必须是 accounts().len()：World 只增不删，alive_count() 更小会撞号。
+    let alive = w0.accounts().len();
     let atk = vec![inf];
 
     let modes: [(&str, bool, bool, bool); 4] = [
@@ -36,12 +37,13 @@ fn main() {
             }
             let pc = PropConfig {
                 beta: 0.3, samples: 16, rounds: 4, mode: AggMode::Mean,
-                use_noise_floor: true, exclude_zero: true,
+                use_noise_floor: true,
                 banlist: false, ban_penalty: 0.5, ban_floor: 0.2,
                 ban_exclude: 0.0, ban_lambda: 0.0,
                 normalize_view: norm_honest,
                 attacker_normalizes: atk_norm,
                 receiver_normalizes: rx_norm,
+                ..PropConfig::default()
             };
             let o = run_case_full(base.clone(), &pc, &inject, &sybils, &atk);
             let mut hsum = 0.0f64; let mut hcnt = 0usize;

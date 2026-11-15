@@ -56,7 +56,8 @@ fn main() {
     println!("普通攻击者入度：{:?}", ordinary.iter().map(|i| indeg[*i]).collect::<Vec<_>>());
     println!("高连接攻击者入度：{:?}", top.iter().map(|i| indeg[*i]).collect::<Vec<_>>());
 
-    let alive = w0.alive_count();
+    // 账户号基数必须是 accounts().len()：World 只增不删，alive_count() 更小会撞号。
+    let alive = w0.accounts().len();
     for (conn_label, pool) in [("普通节点", &ordinary), ("高连接节点", &top)] {
         for (cnt_label, k) in [("单个", 1usize), ("多个(5)", 5)] {
             let atk: Vec<usize> = pool.iter().copied().take(k).collect();
@@ -73,10 +74,11 @@ fn main() {
                 // 额外账户里包含女巫
                 let pc = PropConfig {
                     beta: 0.3, samples: 16, rounds: 4, mode: AggMode::Mean,
-                    use_noise_floor: true, exclude_zero: true,
+                    use_noise_floor: true,
                     banlist: false, ban_penalty: 0.5, ban_floor: 0.2,
                     ban_exclude: 0.0, ban_lambda: 0.0,
                     normalize_view: true, attacker_normalizes: true, receiver_normalizes: true,
+                    ..PropConfig::default()
                 };
                 let o = run_case_full(base.clone(), &pc, &inject, &sybils, &atk);
                 let b = baseline_of(&o);

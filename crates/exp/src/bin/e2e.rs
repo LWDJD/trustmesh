@@ -24,10 +24,11 @@ fn main() {
     for norm in [false, true] {
         let pc = PropConfig {
             beta: 0.3, samples: 16, rounds: 4, mode: AggMode::Mean,
-            use_noise_floor: true, exclude_zero: true,
+            use_noise_floor: true,
             banlist: false, ban_penalty: 0.5, ban_floor: 0.2,
             ban_exclude: 0.0, ban_lambda: 0.0, normalize_view: norm,
-                attacker_normalizes: true, receiver_normalizes: true,
+            attacker_normalizes: true, receiver_normalizes: true,
+            ..PropConfig::default()
         };
         println!("\n══════ 影响力预算 = {} ══════", if norm { "开" } else { "关" });
         println!("{:<14} {:>9} {:>9} {:>9} {:>10} {:>10}", "场景", "原始比", "计算比", "胜率", "诚实声望", "攻击声望");

@@ -111,6 +111,21 @@ pub struct PropConfig {
     pub attacker_normalizes: bool,
     /// 接收方是否按「估计的总质量」再归一化一次（防发布方不归一化）
     pub receiver_normalizes: bool,
+    /// 一轮代表多少小时（默认 1）。引擎侧等价写法是 `tick(now = r × step, …)`。
+    ///
+    /// 取 72（= 一个半衰期）时，相邻两轮的观点年龄相差一个半衰期，衰减因子相差一倍，
+    /// 衰减口径才真正参与结果（默认 1 小时时它只造成千分之几的差异）。
+    pub round_time_step: u64,
+    /// **验收测试专用**：最后一轮只刷新 `来源号 % stride == 0` 的观点，其余来源保留更旧的观点。
+    ///
+    /// 默认 1 = 每轮刷新全部来源，与引擎「抽到就 on_view」的时序完全等价。
+    /// 取 2 时，一半来源的 `last_check` 会比另一半**旧一个轮次**，
+    /// 衰减因子因此不再对所有来源相同 —— 加权平均不会再把公共因子约掉，
+    /// 「框架有没有实现衰减」这个口径才真正被测到。
+    ///
+    /// 没有这个旋钮的话，「全员每轮都被抽到」的时序会让所有来源的 `Δt` 相同，
+    /// 衰减作为一个公共因子被加权平均约掉：**删掉衰减实现，逐点对比也照样是 0 差异**。
+    pub last_round_refresh_stride: usize,
 }
 
 impl Default for PropConfig {
@@ -133,6 +148,9 @@ impl Default for PropConfig {
             normalize_view: true,
             attacker_normalizes: true,
             receiver_normalizes: true,
+            // 1 = 每轮刷新全部来源，与引擎时序等价。
+            round_time_step: 1,
+            last_round_refresh_stride: 1,
         }
     }
 }
@@ -321,6 +339,10 @@ impl<'a> Net<'a> {
             items.push((w, v));
         }
         let raw_personal = node.pl.get(target as AccountIdx).unwrap_or(0.0);
+        // 个人项 = 份额（评分 ÷ Σ评分），不是原始评分：引擎口径是 personal = s_u/Σs。
+        // 曾用变异测试验证过这条断言有判别力：把这一行换成 `let personal = raw_personal;`
+        // 后 `personal_term_is_share_not_raw_score` 与 `mixed_view_and_abstention_match_engine`
+        // 都会立刻变红（实测），故此处必须保持除法。
         let personal = if prep.total_rating > 0.0 {
             raw_personal / prep.total_rating
         } else {
@@ -585,8 +607,9 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
 
     let mut cur_gen = 0usize;
     let mut rng = Rng::new(RNG_SEED);
+    let step = pc.round_time_step.max(1);
     for r in 0..pc.rounds {
-        let now = r as u64;
+        let now = r as u64 * step;
         // —— 接收：按真引擎的轮次抽样器抽 k 个来源，抽到的立刻算「上次检查 = now」
         // （等价 tick + on_view）。框架里没有失败路径，所以连败恒为 0，
         // draw_backoff 退化成无放回均匀抽样；抽样偏差已被拒绝采样消除。
@@ -595,7 +618,12 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
             let ids: Vec<AccountIdx> = node.pl.indices();
             node.sampler.sync(&ids);
             let picked = node.sampler.draw_backoff(&node.pl, pc.samples, &mut rng);
+            // 最后一轮可以按 stride 只刷新一部分来源（验收测试用，默认 1 = 全刷）。
+            let stride = if r + 1 == pc.rounds { pc.last_round_refresh_stride.max(1) } else { 1 };
             for src in picked {
+                if (src as usize) % stride != 0 {
+                    continue;
+                }
                 node.stored[src as usize] =
                     Some(StampedView { generation: cur_gen, last_check: now, mass_covers: n });
             }
@@ -603,7 +631,7 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
         // —— 发布下一轮的观点（旧代码在最后一轮也就停在这里，之后的 mul 更新已无消费者）
         if r + 1 < pc.rounds {
             let next = cur_gen + 1;
-            publish_generation(&net, &nodes, &mul, &mut arena, next, (r + 1) as u64, Some(cur_gen));
+            publish_generation(&net, &nodes, &mul, &mut arena, next, (r + 1) as u64 * step, Some(cur_gen));
             cur_gen = next;
             if need_mul {
                 update_mul(&net, &nodes, &mut mul, &arena, cur_gen);
@@ -612,7 +640,7 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
     }
 
     // —— 最终结果：与真引擎网络一样，在 now = rounds 处查一次（最后一批观点的年龄是 1）。
-    let rep = evaluate(&net, &nodes, &mul, &arena, pc.rounds as u64, Some(cur_gen));
+    let rep = evaluate(&net, &nodes, &mul, &arena, pc.rounds as u64 * step, Some(cur_gen));
 
     Outcome {
         rep,

@@ -59,7 +59,7 @@ fn ecfg() -> EngineConfig {
 }
 
 /// 框架配置：与 [`ecfg`] 逐字段对齐，另外把三个框架独有旋钮取引擎等价取值。
-fn pcfg(rounds: usize, samples: usize) -> PropConfig {
+fn pcfg(rounds: usize, samples: usize, refresh_stride: usize, round_time_step: u64) -> PropConfig {
     PropConfig {
         beta: 0.3,
         samples,
@@ -79,6 +79,8 @@ fn pcfg(rounds: usize, samples: usize) -> PropConfig {
         ban_exclude: 0.0,
         ban_penalty: 0.5,
         ban_floor: 0.2,
+        round_time_step,
+        last_round_refresh_stride: refresh_stride,
     }
 }
 
@@ -138,22 +140,29 @@ fn build_nodes(world: &tm_sim::World, n: usize) -> Vec<Engine> {
 ///     export_view(r + 1)
 /// query(target, now = rounds)
 /// ```
-fn run_engine(mut nodes: Vec<Engine>, n: usize, rounds: usize) -> Vec<Vec<f32>> {
+fn run_engine(mut nodes: Vec<Engine>, n: usize, rounds: usize, refresh_stride: usize, round_time_step: u64) -> Vec<Vec<f32>> {
+    let step = round_time_step.max(1);
     let mut cur: Vec<CompressedView> = nodes.iter().map(|e| e.export_view(0)).collect();
     for r in 0..rounds {
-        let now = r as u64;
+        let now = r as u64 * step;
         for i in 0..n {
             // k = n：一定 >= 每个观察者的清单长度，抽样必然覆盖全员，
             // 两边「第几轮拿到了谁的观点」逐条一致，随机性被完全消除。
             let reqs = nodes[i].tick(now, n);
+            // 最后一轮可以只刷新一部分来源：让另一半的 last_check 保持「旧一轮」，
+            // 衰减因子就不再对全部来源相同，加权平均也就无法把它约掉。
+            let stride = if r + 1 == rounds { refresh_stride.max(1) } else { 1 };
             for req in &reqs {
                 let src = req.idx as usize;
+                if src % stride != 0 {
+                    continue;
+                }
                 nodes[i].on_view(req.idx, cur[src].clone(), now, now);
             }
         }
-        cur = nodes.iter().map(|e| e.export_view(now + 1)).collect();
+        cur = nodes.iter().map(|e| e.export_view((r as u64 + 1) * step)).collect();
     }
-    let now = rounds as u64;
+    let now = rounds as u64 * step;
     (0..n)
         .map(|i| (0..n).map(|t| nodes[i].query(t as u32, now)).collect())
         .collect()
@@ -170,23 +179,40 @@ fn run_personal_only(nodes: &[Engine], n: usize, rounds: usize) -> Vec<Vec<f32>>
         .collect()
 }
 
-fn build(seed: u64, rounds: usize) -> Network {
+fn build(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: u64) -> Network {
     let cfg = sim_cfg(seed);
     let mut world = tm_sim::World::new(cfg.clone());
     world.run();
     let n = world.accounts().len();
 
-    let engine_rep = run_engine(build_nodes(&world, n), n, rounds);
+    let engine_rep = run_engine(build_nodes(&world, n), n, rounds, refresh_stride, round_time_step);
     let personal_only = run_personal_only(&build_nodes(&world, n), n, rounds);
-    let outcome = run_case_full(cfg, &pcfg(rounds, n), &[], &[], &[]);
+    let outcome = run_case_full(cfg, &pcfg(rounds, n, refresh_stride, round_time_step), &[], &[], &[]);
     assert_eq!(n, outcome.rep.len(), "账户数必须一致（编号一一对应）");
 
     Network { n, engine_rep, personal_only, framework_rep: outcome.rep }
 }
 
+/// 一组用例对「这个比较不是空对空」的最低要求（按场景不同而不同）。
+struct Expect {
+    /// 非零声望点数 ÷ 总点数 的下限。
+    min_nonzero_frac: f32,
+    /// 与「只有个人项」对照组的最大差的下限；0 表示不检查（没有观点时它本来就是 0）。
+    min_group_gain: f32,
+}
+
+/// 默认：要求群体项真的参与了结果。
+const EXPECT_PROPAGATED: Expect = Expect { min_nonzero_frac: 0.25, min_group_gain: 0.01 };
+/// 零轮场景：一条观点都没有，群体项本来就该是 0，只要求结果别退化成全零。
+const EXPECT_PERSONAL_ONLY: Expect = Expect { min_nonzero_frac: 0.0, min_group_gain: 0.0 };
+
 /// 逐点比较并断言「差异有界、且这个比较不是空对空」。
-fn check(seed: u64, rounds: usize) -> f32 {
-    let net = build(seed, rounds);
+fn check(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: u64) -> f32 {
+    check_with(seed, rounds, refresh_stride, round_time_step, EXPECT_PROPAGATED)
+}
+
+fn check_with(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: u64, expect: Expect) -> f32 {
+    let net = build(seed, rounds, refresh_stride, round_time_step);
     let n = net.n;
     assert!(n > 0, "网络为空，比较无意义");
 
@@ -214,15 +240,19 @@ fn check(seed: u64, rounds: usize) -> f32 {
 
     // —— 防「两边都是 0」的自欺：结果必须非平凡，且群体项真的起了作用。
     assert!(
-        nonzero * 4 >= n * n,
+        (nonzero as f32) >= expect.min_nonzero_frac * (n * n) as f32,
         "引擎侧结果过于稀疏（{nonzero} / {} 个点非零），这个比较没有说服力",
         n * n
     );
-    assert!(max_value >= 0.05, "引擎侧最大声望只有 {max_value}，比较没有说服力");
-    assert!(
-        group_gain >= 0.01,
-        "群体项几乎没有参与（与只有个人项的对照最大差只有 {group_gain}），测不到传播口径"
-    );
+    if expect.min_nonzero_frac > 0.0 {
+        assert!(max_value >= 0.05, "引擎侧最大声望只有 {max_value}，比较没有说服力");
+    }
+    if expect.min_group_gain > 0.0 {
+        assert!(
+            group_gain >= expect.min_group_gain,
+            "群体项几乎没有参与（与只有个人项的对照最大差只有 {group_gain}），测不到传播口径"
+        );
+    }
 
     println!(
         "seed {seed} / {rounds} 轮：n = {n}，比较 {} 个点；\
@@ -245,20 +275,71 @@ fn check(seed: u64, rounds: usize) -> f32 {
 /// 核心验收：基线（无攻击）下框架与引擎逐点绝对值差 < 1%。
 #[test]
 fn framework_matches_engine_within_one_percent() {
-    check(1, 3);
+    check(1, 3, 1, 1);
 }
 
 /// 换种子重复一次，防止结论只是某一个特定网络的巧合。
 #[test]
 fn framework_matches_engine_on_another_seed() {
-    check(99, 3);
+    check(99, 3, 1, 1);
 }
 
 /// 跑满 6 轮：验证「观点缓存跨轮累积 + 跨轮衰减」这条口径也对齐
 /// （轮次越多，早期观点被新观点覆盖、衰减越明显，最容易暴露口径漂移）。
 #[test]
 fn framework_matches_engine_after_six_rounds() {
-    check(7, 6);
+    check(7, 6, 1, 1);
+}
+
+/// **衰减口径专项**：最后一轮只刷新一半来源，另一半的 `last_check` 停在上一轮。
+///
+/// 这条用例是对「全员每轮都被抽到」那个技巧的补丁：全员刷新时所有来源的 `Δt` 相同，
+/// 衰减因子是个**公共因子**，在加权平均里分子分母一起约掉 —— 此时把衰减实现整个
+/// 删掉，逐点对比依然全 0（实测确认过）。让一半来源老一轮，公共因子就没了，
+/// 「框架有没有真的算衰减」才被测到。
+#[test]
+fn framework_matches_engine_with_mixed_view_ages() {
+    let d = check(11, 3, 2, 1);
+    println!("（混合年龄用例的最大绝对差 {d:.3e}）");
+    assert!(d < 0.01, "混合观点年龄下差 {d}");
+}
+
+/// **衰减口径专项（真实时距）**：一轮 = 一个半衰期（72h），混合刷新节奏。
+///
+/// 前两条用例里一轮只走 1 小时，衰减因子 > 0.99，几乎可以忽略；即使把衰减实现
+/// 删掉，逐点差也只有千分之几。这条把时距拉到 72h，衰减因子横跨 1.0 / 0.5 / 0.25：
+/// 删掉衰减后**每条断言都会破**（实测把 `decay_factor` 换成常量 1.0 时，
+/// 最大绝对差从 0 跳到 0.135）。
+#[test]
+fn framework_matches_engine_with_real_decay() {
+    let d = check(5, 3, 2, 72);
+    println!("（真实时距衰减用例的最大绝对差 {d:.3e}）");
+    assert!(d < 0.01, "真实时距衰减下差 {d}");
+}
+
+/// **个人项口径专项**：rounds = 0 —— 一条观点都没有缓存，群体项恒为 0。
+///
+/// 这正好把「个人项是份额 s_u / Σs、不是原始评分」这条口径单独钉死：
+/// 只要有观点参与，两条口径的差异就会混在群体项里看不清；没有观点时
+/// 声望 = β × 个人项，比值一错立刻暴露。
+#[test]
+fn personal_term_is_share_not_raw_score() {
+    let d = check_with(13, 0, 1, 1, EXPECT_PERSONAL_ONLY);
+    println!("（零轮 / 只剩个人项用例的最大绝对差 {d:.3e}）");
+    assert!(d < 0.01, "个人项口径差 {d}");
+
+    // 直接断言量级：一条观点都没有时，声望 = β × 份额 ≤ β。
+    // 旧口径（个人项 = 原始评分）会给出 0.3 × 原始分（原始分可能是 0.9），
+    // 一旦个人项算错，这条上限就会被捅破。
+    let outcome = run_case_full(sim_cfg(13), &pcfg(0, 25, 1, 1), &[], &[], &[]);
+    let mut max_rep = 0.0f32;
+    for row in outcome.rep.iter() {
+        for v in row.iter() {
+            max_rep = max_rep.max(*v);
+        }
+    }
+    println!("（零轮用例里最大声望 {max_rep:.4}，上限 β = 0.3）");
+    assert!(max_rep <= 0.3 + 1e-4, "零轮时声望不该超过 β，实测 {max_rep}");
 }
 
 /// 抽样只抽 1/4 清单：两边抽到的来源不同，无法逐点比，但结果必须仍在协议内。
@@ -272,7 +353,7 @@ fn partial_sampling_stays_within_contract() {
         world.run();
         world.accounts().len()
     };
-    let outcome = run_case_full(sim_cfg(3), &pcfg(3, (n / 4).max(1)), &[], &[], &[]);
+    let outcome = run_case_full(sim_cfg(3), &pcfg(3, (n / 4).max(1), 1, 1), &[], &[], &[]);
     for (ob, row) in outcome.rep.iter().enumerate() {
         let mut sum = 0.0f32;
         for (t, v) in row.iter().enumerate() {

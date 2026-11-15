@@ -113,10 +113,7 @@ fn uniform_scenario_expected_discount_and_query() {
     // 闭式解的目标：压完后的群体项精确等于 ā = 1/3。
     // A 没有被我自己评分，所以个人项 = 0，群体项 = query / 0.7。
     let group = e.query(a, 0) / 0.7;
-    assert!(
-        (group - 1.0 / 3.0).abs() < 1e-5,
-        "G_A 应回到 ā: {group}"
-    );
+    assert!((group - 1.0 / 3.0).abs() < 1e-5, "G_A 应回到 ā: {group}");
 }
 
 /// 个人评分与份额必须原封不动：badlist 只动群体项权重。
@@ -655,4 +652,188 @@ fn default_config_has_single_penalty_knob() {
     // 没报告时默认引擎的折扣表为空，且 query 不进入折扣分支。
     let (e, a, _) = scenario3();
     assert!((e.query(a, 0) - 0.42).abs() < 1e-6);
+}
+
+// ---------------------------------------------------------------------------
+// 11. 弃权票：闭式解必须与 query 的新分母同口径（P0① 之后）
+// ---------------------------------------------------------------------------
+
+/// scenario3 的三个来源各加 `k` 个「已评分、但从未取到观点」的弃权来源。
+///
+/// 表过态的读数仍是 a = [1, 0, 0]，所以 **ā = 1/3**（弃权票不进 ā：它没有读数，
+/// 不是「打 0 分」）。但弃权票的份额 W_abs = k/(5+k) 必须进 query 的分母，
+/// 也必须进闭式解的分母，否则目标会落在别的地方。
+fn scenario3_with_abstainers(k: u32) -> (Engine, u32, u32, Vec<u32>) {
+    let mut e = eng();
+    let a = e.intern(key(1));
+    let _filler = e.intern(key(2));
+    let s0 = e.intern(key(10));
+    let s1 = e.intern(key(11));
+    let s2 = e.intern(key(12));
+    e.rate(s0, 3.0, 0);
+    e.rate(s1, 1.0, 0);
+    e.rate(s2, 1.0, 0);
+    e.on_view(s0, full(1), 0, 0);
+    e.on_view(s1, full(2), 0, 0);
+    e.on_view(s2, full(2), 0, 0);
+    let mut abstainers = Vec::new();
+    for i in 0..k {
+        let s = e.intern(key(13 + i));
+        // 评了分就是「我评过它」；没有观点就是弃权票（query 里按 (份额, 0.0) 进分母）。
+        e.rate(s, 1.0, 0);
+        abstainers.push(s);
+    }
+    (e, a, s0, abstainers)
+}
+
+/// **部分覆盖 + 弃权票**：闭式解把弃权票的份额并进分母后，群体项精确落在 ā = 1/3。
+///
+/// 推导（k 个弃权票、shares 都是 1/(5+k) 量级）：
+///
+/// ~~~text
+/// A0 = 3/(5+k)          S+ 的权重和（只有 s0 在 S+）
+/// A1 = 3/(5+k)          S+ 的加权读数（a = 1）
+/// B0 = 2/(5+k)          S− 的权重和（s1/s2，a = 0）
+/// B1 = 0
+/// W_abs = k/(5+k)       弃权票的权重和
+///
+/// f = (Σ_{S−} w(ā−a) + W_abs·ā) / Σ_{S+} w(a−ā) = (k+2)/6
+/// G_A = f·A1 / (f·A0 + B0 + W_abs) = 1/3
+/// ~~~
+///
+/// 旧闭式解（不把弃权票并进分母）在同一场景给出 f = 1/3、G_A = 1/(k+3)；
+/// k = 1 时正是 `审计/P0-core.md` §7.3 记录的 **0.25**。
+#[test]
+fn abstentions_are_folded_into_the_solver_denominator() {
+    for k in [1u32, 2, 3] {
+        let (mut e, a, s0, abstainers) = scenario3_with_abstainers(k);
+        let group_before = e.query(a, 0) / 0.7;
+        assert!(
+            group_before > 1.0 / 3.0 + 1e-3,
+            "k={k}: 压前 G_A 应高于 ā，否则没什么可压: {group_before}"
+        );
+
+        assert_eq!(e.report_bad_account(a), 1, "k={k}: 只有 s0 高于 ā");
+
+        // 关键断言：压完后的群体项精确等于 ā = 1/3。
+        // 旧口径（弃权票不并进目标方程）在这里落到 1/(k+3)：k=1 就是 P0 §7.3
+        // 记录的 0.25，k=2/3 是 0.2 / 1/6。
+        let group = e.query(a, 0) / 0.7;
+        assert!(
+            (group - 1.0 / 3.0).abs() < 1e-5,
+            "k={k}: 压完应精确落在 ā=1/3，实际 {group}（旧口径是 1/(k+3)）"
+        );
+
+        // f = (k+2)/6：k=1 是 1/2（旧口径是 1/3，「罚得更重」的偏差就来自这里）。
+        assert_close(
+            e.penalty_of(s0),
+            (k + 2) as f32 / 6.0,
+            &format!("k={k}: s0 的折扣"),
+        );
+        for &s in &abstainers {
+            assert_eq!(e.penalty_of(s), 1.0, "k={k}: 弃权票永远不该被罚");
+        }
+        assert_eq!(
+            e.penalty_of(e.lookup(&key(11)).unwrap()),
+            1.0,
+            "k={k}: S− 不动"
+        );
+
+        // 重复报告：min 语义，f 相同不再更狠。
+        assert_eq!(e.report_bad_account(a), 0, "k={k}: 重复报告不应更狠");
+        assert_close(
+            e.penalty_of(s0),
+            (k + 2) as f32 / 6.0,
+            &format!("k={k}: 重复报告后折扣逐位不变"),
+        );
+    }
+}
+
+/// 弃权票多到「压前群体项已经低于 ā」时，闭式解给出 f ≥ 1，夹紧后是**不罚**。
+///
+/// k = 4 时 G_A = 3/9 = 1/3 = ā：目标已经达成，不需要削任何人的峰。
+#[test]
+fn abstentions_can_make_the_target_unreachable_without_punishment() {
+    let (mut e, a, s0, _) = scenario3_with_abstainers(4);
+    let group_before = e.query(a, 0) / 0.7;
+    assert_close(group_before, 1.0 / 3.0, "k=4 时压前 G_A 恰好等于 ā");
+    assert_eq!(e.report_bad_account(a), 0, "已经在目标线上，不该罚");
+    assert_eq!(e.penalty_of(s0), 1.0, "f≥1 一律夹到 1（只削峰、不填谷）");
+}
+
+/// 满覆盖回归：没有任何弃权票时，闭式解与旧公式逐位等价，仍精确落在 ā。
+///
+/// 五个来源都有观点，读数 [1, 0.75, 0.5, 0.25, 0] 的未加权平均是 0.5；
+/// 权重是 4:1:1:1:1，所以加权平均 0.6 高于 ā，需要压。
+#[test]
+fn full_coverage_still_hits_the_plain_mean() {
+    let mut e = eng();
+    let a = e.intern(key(1));
+    let _filler = e.intern(key(2));
+    let srcs: Vec<u32> = (0..5).map(|i| e.intern(key(10 + i))).collect();
+    e.rate(srcs[0], 4.0, 0);
+    for s in &srcs[1..] {
+        e.rate(*s, 1.0, 0);
+    }
+    e.on_view(srcs[0], full(1), 0, 0); // 读数 1
+    e.on_view(srcs[1], mix(1, 0.75, 2), 0, 0); // 读数 0.75
+    e.on_view(srcs[2], mix(1, 0.5, 2), 0, 0); // 读数 0.5
+    e.on_view(srcs[3], mix(1, 0.25, 2), 0, 0); // 读数 0.25
+    e.on_view(srcs[4], full(2), 0, 0); // 读数 0
+
+    let abar = (1.0 + 0.75 + 0.5 + 0.25 + 0.0) / 5.0;
+    let group_before = e.query(a, 0) / 0.7;
+    // 0.5·1 + 0.125·0.75 + 0.125·0.5 + 0.125·0.25 + 0.125·0 = 0.6875
+    assert!(
+        (group_before - 0.6875).abs() < 1e-4,
+        "加权平均应为 0.6875: {group_before}"
+    );
+
+    assert_eq!(e.report_bad_account(a), 2, "读数 1 与 0.75 在 S+");
+    // weights = [0.5, 0.125, 0.125, 0.125, 0.125]
+    // num = 0.125·(0.5−0.5) + 0.125·(0.5−0.25) + 0.125·0.5 = 0.09375
+    // den = 0.5·0.5 + 0.125·0.25 = 0.28125  ⇒ f = 1/3
+    assert_close(e.penalty_of(srcs[0]), 1.0 / 3.0, "srcs[0] 折扣");
+    assert_close(e.penalty_of(srcs[1]), 1.0 / 3.0, "srcs[1] 折扣");
+    let group = e.query(a, 0) / 0.7;
+    assert!(
+        (group - abar).abs() < 1e-5,
+        "满覆盖时压完应精确落在 ā=0.5，实际 {group}"
+    );
+}
+
+/// 没有任何「对 A 表过态」的来源时，报告是**已定义的 no-op**：不 panic、不写折扣。
+///
+/// 两种情形都覆盖：
+/// 1. 一条观点都没有（所有人都在弃权）；
+/// 2. 有观点，但 A 是在观点生成**之后**才登记的（观点没覆盖 A，等同弃权）。
+#[test]
+fn report_without_any_statement_about_a_is_a_defined_noop() {
+    // 情形 1：全弃权
+    let mut e = eng();
+    let a = e.intern(key(1));
+    let srcs: Vec<u32> = (0..5).map(|i| e.intern(key(10 + i))).collect();
+    for s in &srcs {
+        e.rate(*s, 1.0, 0);
+    }
+    let before = bits(&e, 0);
+    assert_eq!(e.report_bad_account(a), 0, "没有任何观点 → 无读数可求");
+    all_penalties_are_one(&e, 20);
+    assert_eq!(bits(&e, 0), before, "no-op 必须逐位不变");
+    assert_eq!(e.query(a, 0), 0.0, "没有观点时群体项为 0");
+
+    // 情形 2：观点不覆盖 A（A 之后才登记）
+    let mut e2 = eng();
+    let srcs: Vec<u32> = (0..3).map(|i| e2.intern(key(10 + i))).collect();
+    for s in &srcs {
+        e2.rate(*s, 1.0, 0);
+    }
+    e2.on_view(srcs[0], full(1), 0, 0);
+    e2.on_view(srcs[1], full(1), 0, 0);
+    e2.on_view(srcs[2], full(2), 0, 0);
+    let late = e2.intern(key(1)); // 观点缓存之后才登记 → 三份观点都没覆盖它
+    let before2 = bits(&e2, 0);
+    assert_eq!(e2.report_bad_account(late), 0, "观点不覆盖 A ⇒ 没人表态");
+    all_penalties_are_one(&e2, 20);
+    assert_eq!(bits(&e2, 0), before2, "no-op 必须逐位不变");
 }

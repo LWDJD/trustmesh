@@ -1,0 +1,1038 @@
+﻿cargo :     Finished `release` profile [optimized] target(s) in 0.02s
+所在位置 行:1 字符: 638
++ ... TEXITCODE -eq 0) { (cargo run --release --bin b_baseline 2>&1 | Out-S ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `r...get(s) in 0.02s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running `target\release\b_baseline.exe`
+# B0 baseline（P0 修复后）scenarios=["sybil", "infiltrator", "endorser"] seeds=[11, 12, 13, 14, 15, 16, 17, 18]
+PARAM n_initial 200
+PARAM steps 100
+PARAM join_rate 0.15
+PARAM leave_rate 0.00012
+PARAM follow_min 20
+PARAM follow_max 30
+PARAM max_follows 40
+PARAM rounds 4
+PARAM hours_per_round 24
+PARAM samples_per_tick 12
+PARAM final_now 172
+PARAM beta 0.3
+PARAM half_life 72
+PARAM agg_mode Mean
+PARAM view_buckets 2048
+PARAM view_hashers 5
+PARAM view_seed 99
+PARAM attack_ratio 0.08
+PARAM attack_kinds sybil:cluster=3 infiltrator endorser:ratio=0.2
+PARAM empty_count 40
+PARAM inject_count 40
+PARAM fake_count 200
+PARAM analytic_floor_s3 3.33333320
+# 行格式：BASE <场景> <seed> <规模>；SEED <场景> <seed> <指标> <值>；SUM <场景> <指标> <mean> <sd> <min> <max> <n>
+FLOOR	s3	3.33333320
+BASE	sybil	11	world=233 total=513 alive=226 honest=210 attackers=16 sybil=16 benef=-1 injector=202 empty=40 fake=200 injected=40
+SEED	sybil	11	n_accounts	513
+SEED	sybil	11	n_world	233
+SEED	sybil	11	n_alive	226
+SEED	sybil	11	n_honest	210
+SEED	sybil	11	n_attackers	16
+SEED	sybil	11	n_benef	0
+SEED	sybil	11	n_injected	40
+SEED	sybil	11	n_empty	40
+SEED	sybil	11	n_fake	200
+SEED	sybil	11	obs_used	209
+SEED	sybil	11	obs_skipped	1
+SEED	sybil	11	dist_sum_err	0.00000052
+SEED	sybil	11	hm	0.00467328
+SEED	sybil	11	hm_present	0.00508405
+SEED	sybil	11	present_frac	0.91920711
+SEED	sybil	11	avg_views	17.28761062
+SEED	sybil	11	avg_degree	17.76991150
+SEED	sybil	11	avg_rating_sum	9.87257737
+SEED	sybil	11	s6_max	0.00000000
+SEED	sybil	11	s6_mean	0.00000000
+SEED	sybil	11	s6_len	107730
+SEED	sybil	11	s1_raw_self	1.00000000
+SEED	sybil	11	s1	0.00000000
+SEED	sybil	11	s1_hp	0.00000000
+SEED	sybil	11	s1_present	0.00000000
+[   10.6s] sybil seed=11 完成（obs=209，hm=0.00467328，S6max=0.00000000）
+BASE	sybil	12	world=233 total=513 alive=227 honest=213 attackers=16 sybil=16 benef=-1 injector=203 empty=40 fake=200 injected=40
+SEED	sybil	12	n_accounts	513
+SEED	sybil	12	n_world	233
+SEED	sybil	12	n_alive	227
+SEED	sybil	12	n_honest	213
+SEED	sybil	12	n_attackers	16
+SEED	sybil	12	n_benef	0
+SEED	sybil	12	n_injected	40
+SEED	sybil	12	n_empty	40
+SEED	sybil	12	n_fake	200
+SEED	sybil	12	obs_used	211
+SEED	sybil	12	obs_skipped	2
+SEED	sybil	12	dist_sum_err	0.00000058
+SEED	sybil	12	hm	0.00464549
+SEED	sybil	12	hm_present	0.00489835
+SEED	sybil	12	present_frac	0.94837906
+SEED	sybil	12	avg_views	17.54625551
+SEED	sybil	12	avg_degree	17.88546256
+SEED	sybil	12	avg_rating_sum	10.06362833
+SEED	sybil	12	s6_max	0.00000000
+SEED	sybil	12	s6_mean	0.00000000
+SEED	sybil	12	s6_len	109269
+SEED	sybil	12	s1_raw_self	1.00000000
+SEED	sybil	12	s1	0.00000000
+SEED	sybil	12	s1_hp	0.00000000
+SEED	sybil	12	s1_present	0.00000000
+[   23.2s] sybil seed=12 完成（obs=211，hm=0.00464549，S6max=0.00000000）
+BASE	sybil	13	world=236 total=516 alive=229 honest=213 attackers=16 sybil=16 benef=-1 injector=200 empty=40 fake=200 injected=40
+SEED	sybil	13	n_accounts	516
+SEED	sybil	13	n_world	236
+SEED	sybil	13	n_alive	229
+SEED	sybil	13	n_honest	213
+SEED	sybil	13	n_attackers	16
+SEED	sybil	13	n_benef	0
+SEED	sybil	13	n_injected	40
+SEED	sybil	13	n_empty	40
+SEED	sybil	13	n_fake	200
+SEED	sybil	13	obs_used	208
+SEED	sybil	13	obs_skipped	5
+SEED	sybil	13	dist_sum_err	0.00000050
+SEED	sybil	13	hm	0.00456289
+SEED	sybil	13	hm_present	0.00488555
+SEED	sybil	13	present_frac	0.93395630
+SEED	sybil	13	avg_views	17.17467249
+SEED	sybil	13	avg_degree	17.90393013
+SEED	sybil	13	avg_rating_sum	10.04173326
+SEED	sybil	13	s6_max	0.00000000
+SEED	sybil	13	s6_mean	0.00000000
+SEED	sybil	13	s6_len	109908
+SEED	sybil	13	s1_raw_self	1.00000000
+[   35.1s] sybil seed=13 完成（obs=208，hm=0.00456289，S6max=0.00000000）
+SEED	sybil	13	s1	0.00000000
+SEED	sybil	13	s1_hp	0.00000000
+SEED	sybil	13	s1_present	0.00000000
+BASE	sybil	14	world=232 total=512 alive=227 honest=211 attackers=16 sybil=16 benef=-1 injector=200 empty=40 fake=200 injected=40
+SEED	sybil	14	n_accounts	512
+SEED	sybil	14	n_world	232
+SEED	sybil	14	n_alive	227
+SEED	sybil	14	n_honest	211
+SEED	sybil	14	n_attackers	16
+SEED	sybil	14	n_benef	0
+SEED	sybil	14	n_injected	40
+SEED	sybil	14	n_empty	40
+SEED	sybil	14	n_fake	200
+SEED	sybil	14	obs_used	211
+SEED	sybil	14	obs_skipped	0
+SEED	sybil	14	dist_sum_err	0.00000066
+SEED	sybil	14	hm	0.00463523
+SEED	sybil	14	hm_present	0.00491486
+SEED	sybil	14	present_frac	0.94310550
+SEED	sybil	14	avg_views	17.73127753
+SEED	sybil	14	avg_degree	18.27312775
+SEED	sybil	14	avg_rating_sum	10.00615229
+SEED	sybil	14	s6_max	0.00000000
+SEED	sybil	14	s6_mean	0.00000000
+SEED	sybil	14	s6_len	108032
+SEED	sybil	14	s1_raw_self	1.00000000
+SEED	sybil	14	s1	0.00000000
+SEED	sybil	14	s1_hp	0.00000000
+SEED	sybil	14	s1_present	0.00000000
+[   47.5s] sybil seed=14 完成（obs=211，hm=0.00463523，S6max=0.00000000）
+BASE	sybil	15	world=232 total=512 alive=227 honest=212 attackers=16 sybil=16 benef=-1 injector=208 empty=40 fake=200 injected=40
+SEED	sybil	15	n_accounts	512
+SEED	sybil	15	n_world	232
+SEED	sybil	15	n_alive	227
+SEED	sybil	15	n_honest	212
+SEED	sybil	15	n_attackers	16
+SEED	sybil	15	n_benef	0
+SEED	sybil	15	n_injected	40
+SEED	sybil	15	n_empty	40
+SEED	sybil	15	n_fake	200
+SEED	sybil	15	obs_used	211
+SEED	sybil	15	obs_skipped	1
+SEED	sybil	15	dist_sum_err	0.00000052
+SEED	sybil	15	hm	0.00466047
+SEED	sybil	15	hm_present	0.00489597
+SEED	sybil	15	present_frac	0.95191362
+SEED	sybil	15	avg_views	17.67841410
+SEED	sybil	15	avg_degree	18.08370044
+SEED	sybil	15	avg_rating_sum	10.04670589
+SEED	sybil	15	s6_max	0.00000000
+SEED	sybil	15	s6_mean	0.00000000
+SEED	sybil	15	s6_len	108544
+SEED	sybil	15	s1_raw_self	1.00000000
+SEED	sybil	15	s1	0.00000000
+SEED	sybil	15	s1_hp	0.00000000
+SEED	sybil	15	s1_present	0.00000000
+[   60.6s] sybil seed=15 完成（obs=211，hm=0.00466047，S6max=0.00000000）
+BASE	sybil	16	world=227 total=507 alive=219 honest=204 attackers=16 sybil=16 benef=-1 injector=200 empty=40 fake=200 injected=40
+SEED	sybil	16	n_accounts	507
+SEED	sybil	16	n_world	227
+SEED	sybil	16	n_alive	219
+SEED	sybil	16	n_honest	204
+SEED	sybil	16	n_attackers	16
+SEED	sybil	16	n_benef	0
+SEED	sybil	16	n_injected	40
+SEED	sybil	16	n_empty	40
+SEED	sybil	16	n_fake	200
+SEED	sybil	16	obs_used	204
+SEED	sybil	16	obs_skipped	0
+SEED	sybil	16	dist_sum_err	0.00000056
+SEED	sybil	16	hm	0.00475352
+SEED	sybil	16	hm_present	0.00482482
+SEED	sybil	16	present_frac	0.98522203
+SEED	sybil	16	avg_views	17.69406393
+SEED	sybil	16	avg_degree	18.37899543
+SEED	sybil	16	avg_rating_sum	10.56049196
+SEED	sybil	16	s6_max	0.00000000
+SEED	sybil	16	s6_mean	0.00000000
+SEED	sybil	16	s6_len	103428
+SEED	sybil	16	s1_raw_self	1.00000000
+SEED	sybil	16	s1	0.00000000
+SEED	sybil	16	s1_hp	0.00000000
+SEED	sybil	16	s1_present	0.00000000
+[   72.2s] sybil seed=16 完成（obs=204，hm=0.00475352，S6max=0.00000000）
+BASE	sybil	17	world=230 total=510 alive=224 honest=208 attackers=16 sybil=16 benef=-1 injector=200 empty=40 fake=200 injected=40
+SEED	sybil	17	n_accounts	510
+SEED	sybil	17	n_world	230
+SEED	sybil	17	n_alive	224
+SEED	sybil	17	n_honest	208
+SEED	sybil	17	n_attackers	16
+SEED	sybil	17	n_benef	0
+SEED	sybil	17	n_injected	40
+SEED	sybil	17	n_empty	40
+SEED	sybil	17	n_fake	200
+SEED	sybil	17	obs_used	205
+SEED	sybil	17	obs_skipped	3
+SEED	sybil	17	dist_sum_err	0.00000057
+SEED	sybil	17	hm	0.00472618
+SEED	sybil	17	hm_present	0.00496476
+SEED	sybil	17	present_frac	0.95194653
+SEED	sybil	17	avg_views	16.77232143
+SEED	sybil	17	avg_degree	17.21875000
+SEED	sybil	17	avg_rating_sum	9.55956153
+SEED	sybil	17	s6_max	0.00000000
+SEED	sybil	17	s6_mean	0.00000000
+SEED	sybil	17	s6_len	106080
+SEED	sybil	17	s1_raw_self	1.00000000
+SEED	sybil	17	s1	0.00000000
+SEED	sybil	17	s1_hp	0.00000000
+SEED	sybil	17	s1_present	0.00000000
+[   83.4s] sybil seed=17 完成（obs=205，hm=0.00472618，S6max=0.00000000）
+BASE	sybil	18	world=229 total=509 alive=222 honest=206 attackers=16 sybil=16 benef=-1 injector=200 empty=40 fake=200 injected=40
+SEED	sybil	18	n_accounts	509
+SEED	sybil	18	n_world	229
+SEED	sybil	18	n_alive	222
+SEED	sybil	18	n_honest	206
+SEED	sybil	18	n_attackers	16
+SEED	sybil	18	n_benef	0
+SEED	sybil	18	n_injected	40
+SEED	sybil	18	n_empty	40
+SEED	sybil	18	n_fake	200
+SEED	sybil	18	obs_used	206
+SEED	sybil	18	obs_skipped	0
+SEED	sybil	18	dist_sum_err	0.00000053
+SEED	sybil	18	hm	0.00470727
+SEED	sybil	18	hm_present	0.00499794
+SEED	sybil	18	present_frac	0.94184183
+SEED	sybil	18	avg_views	17.58558559
+SEED	sybil	18	avg_degree	18.31531532
+SEED	sybil	18	avg_rating_sum	10.09314104
+SEED	sybil	18	s6_max	0.00000000
+SEED	sybil	18	s6_mean	0.00000000
+SEED	sybil	18	s6_len	104854
+SEED	sybil	18	s1_raw_self	1.00000000
+SEED	sybil	18	s1	0.00000000
+SEED	sybil	18	s1_hp	0.00000000
+SEED	sybil	18	s1_present	0.00000000
+[   95.3s] sybil seed=18 完成（obs=206，hm=0.00470727，S6max=0.00000000）
+SUM	sybil	n_accounts	512	2.77746030	507	516	8
+SUM	sybil	n_world	232	2.77746030	227	236	8
+SUM	sybil	n_alive	225	3.27053949	219	229	8
+SUM	sybil	n_honest	210	3.33541602	204	213	8
+SUM	sybil	n_attackers	16	0.00000000	16	16	8
+SUM	sybil	n_benef	0	0.00000000	0	0	8
+SUM	sybil	n_injected	40	0.00000000	40	40	8
+SUM	sybil	n_empty	40	0.00000000	40	40	8
+SUM	sybil	n_fake	200	0.00000000	200	200	8
+SUM	sybil	obs_used	208	2.85043856	204	211	8
+SUM	sybil	obs_skipped	2	1.77281052	0	5	8
+SUM	sybil	dist_sum_err	0.00000055	0.00000005	0.00000050	0.00000066	8
+SUM	sybil	hm	0.00467054	0.00005965	0.00456289	0.00475352	8
+SUM	sybil	hm_present	0.00493329	0.00008009	0.00482482	0.00508405	8
+SUM	sybil	present_frac	0.94694650	0.01888223	0.91920711	0.98522203	8
+SUM	sybil	avg_views	17.43377515	0.33334316	16.77232143	17.73127753	8
+SUM	sybil	avg_degree	17.97864914	0.37922091	17.21875000	18.37899543	8
+SUM	sybil	avg_rating_sum	10.03049896	0.27609964	9.55956153	10.56049196	8
+SUM	sybil	s6_max	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	sybil	s6_mean	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	sybil	s6_len	107231	2247.92227481	103428	109908	8
+SUM	sybil	s1_raw_self	1.00000000	0.00000000	1.00000000	1.00000000	8
+SUM	sybil	s1	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	sybil	s1_hp	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	sybil	s1_present	0.00000000	0.00000000	0.00000000	0.00000000	8
+BASE	infiltrator	11	world=212 total=492 alive=209 honest=192 attackers=16 sybil=0 benef=200 injector=2 empty=40 fake=200 injected=40
+SEED	infiltrator	11	n_accounts	492
+SEED	infiltrator	11	n_world	212
+SEED	infiltrator	11	n_alive	209
+SEED	infiltrator	11	n_honest	192
+SEED	infiltrator	11	n_attackers	16
+SEED	infiltrator	11	n_benef	1
+SEED	infiltrator	11	n_injected	40
+SEED	infiltrator	11	n_empty	40
+SEED	infiltrator	11	n_fake	200
+SEED	infiltrator	11	obs_used	192
+SEED	infiltrator	11	obs_skipped	0
+SEED	infiltrator	11	dist_sum_err	0.00000159
+SEED	infiltrator	11	hm	0.00437163
+SEED	infiltrator	11	hm_present	0.00448979
+SEED	infiltrator	11	present_frac	0.97368707
+SEED	infiltrator	11	avg_views	19.18660287
+SEED	infiltrator	11	avg_degree	19.53110048
+SEED	infiltrator	11	avg_rating_sum	10.08173771
+SEED	infiltrator	11	s6_max	0.00000000
+SEED	infiltrator	11	s6_mean	0.00000000
+SEED	infiltrator	11	s6_len	94464
+SEED	infiltrator	11	s2_ratio	0.06519029
+SEED	infiltrator	11	s2_ratio_hp	0.06347665
+SEED	infiltrator	11	s2_cross	0.00000000
+SEED	infiltrator	11	s2_cross_hp	0.00000000
+SEED	infiltrator	11	s2_present	1.00000000
+SEED	infiltrator	11	s2_cross_n	0
+SEED	infiltrator	11	s2_pairs_n	7680
+SEED	infiltrator	11	s3_benef	1.01496087
+SEED	infiltrator	11	s3_benef_hp	0.98827341
+SEED	infiltrator	11	s3_benef_max	2.10532159
+SEED	infiltrator	11	s3_att	1.98833863
+SEED	infiltrator	11	s3_att_hp	1.93603658
+SEED	infiltrator	11	s3_personal	0.01573873
+SEED	infiltrator	11	s3_group	0.99465197
+SEED	infiltrator	11	s3_benef_rated	1.53722352
+SEED	infiltrator	11	s3_obs_rated	6
+SEED	infiltrator	11	s3_floor	3.33333320
+SEED	infiltrator	11	s3_vs_floor	0.30448827
+SEED	infiltrator	11	s3_vs_floor_max	0.63159650
+SEED	infiltrator	11	s4	0.00946110
+SEED	infiltrator	11	s4_hp	0.00921179
+SEED	infiltrator	11	s4_max	0.37844389
+SEED	infiltrator	11	s4_max_hp	0.36847153
+SEED	infiltrator	11	s4_present	0.02500000
+SEED	infiltrator	11	s4_worst_obs_present	0.02500000
+SEED	infiltrator	11	s5_self	1.89707326
+SEED	infiltrator	11	s5_mass	1.00025562
+[  109.3s] infiltrator seed=11 完成（obs=192，hm=0.00437163，S6max=0.00000000）
+BASE	infiltrator	12	world=210 total=490 alive=208 honest=191 attackers=16 sybil=0 benef=200 injector=145 empty=40 fake=200 injected=40
+SEED	infiltrator	12	n_accounts	490
+SEED	infiltrator	12	n_world	210
+SEED	infiltrator	12	n_alive	208
+SEED	infiltrator	12	n_honest	191
+SEED	infiltrator	12	n_attackers	16
+SEED	infiltrator	12	n_benef	1
+SEED	infiltrator	12	n_injected	40
+SEED	infiltrator	12	n_empty	40
+SEED	infiltrator	12	n_fake	200
+SEED	infiltrator	12	obs_used	187
+SEED	infiltrator	12	obs_skipped	4
+SEED	infiltrator	12	dist_sum_err	0.00000149
+SEED	infiltrator	12	hm	0.00420209
+SEED	infiltrator	12	hm_present	0.00440961
+SEED	infiltrator	12	present_frac	0.95293558
+SEED	infiltrator	12	avg_views	19.11538462
+SEED	infiltrator	12	avg_degree	19.51442308
+SEED	infiltrator	12	avg_rating_sum	10.14016580
+SEED	infiltrator	12	s6_max	0.00000000
+SEED	infiltrator	12	s6_mean	0.00000000
+SEED	infiltrator	12	s6_len	93590
+SEED	infiltrator	12	s2_ratio	0.04936620
+SEED	infiltrator	12	s2_ratio_hp	0.04704205
+SEED	infiltrator	12	s2_cross	0.00000000
+SEED	infiltrator	12	s2_cross_hp	0.00000000
+SEED	infiltrator	12	s2_present	1.00000000
+SEED	infiltrator	12	s2_cross_n	0
+SEED	infiltrator	12	s2_pairs_n	7480
+SEED	infiltrator	12	s3_benef	2.31983087
+SEED	infiltrator	12	s3_benef_hp	2.21061439
+SEED	infiltrator	12	s3_benef_max	4.52518631
+SEED	infiltrator	12	s3_att	2.61899775
+SEED	infiltrator	12	s3_att_hp	2.49569520
+SEED	infiltrator	12	s3_personal	0.04174785
+SEED	infiltrator	12	s3_group	2.26766817
+SEED	infiltrator	12	s3_benef_rated	3.03117528
+SEED	infiltrator	12	s3_obs_rated	10
+SEED	infiltrator	12	s3_floor	3.33333320
+SEED	infiltrator	12	s3_vs_floor	0.69594929
+SEED	infiltrator	12	s3_vs_floor_max	1.35755595
+SEED	infiltrator	12	s4	0.01131067
+SEED	infiltrator	12	s4_hp	0.01077839
+SEED	infiltrator	12	s4_max	0.45242695
+SEED	infiltrator	12	s4_max_hp	0.43113549
+SEED	infiltrator	12	s4_present	0.02500000
+SEED	infiltrator	12	s4_worst_obs_present	0.02500000
+SEED	infiltrator	12	s5_self	1.82078987
+SEED	infiltrator	12	s5_mass	0.99698983
+[  123.1s] infiltrator seed=12 完成（obs=187，hm=0.00420209，S6max=0.00000000）
+BASE	infiltrator	13	world=207 total=487 alive=202 honest=185 attackers=16 sybil=0 benef=200 injector=120 empty=40 fake=200 injected=40
+SEED	infiltrator	13	n_accounts	487
+SEED	infiltrator	13	n_world	207
+SEED	infiltrator	13	n_alive	202
+SEED	infiltrator	13	n_honest	185
+SEED	infiltrator	13	n_attackers	16
+SEED	infiltrator	13	n_benef	1
+SEED	infiltrator	13	n_injected	40
+SEED	infiltrator	13	n_empty	40
+SEED	infiltrator	13	n_fake	200
+SEED	infiltrator	13	obs_used	185
+SEED	infiltrator	13	obs_skipped	0
+SEED	infiltrator	13	dist_sum_err	0.00000153
+SEED	infiltrator	13	hm	0.00443318
+SEED	infiltrator	13	hm_present	0.00455633
+SEED	infiltrator	13	present_frac	0.97297297
+SEED	infiltrator	13	avg_views	18.43069307
+SEED	infiltrator	13	avg_degree	19.18811881
+SEED	infiltrator	13	avg_rating_sum	10.05616842
+SEED	infiltrator	13	s6_max	0.00000000
+SEED	infiltrator	13	s6_mean	0.00000000
+SEED	infiltrator	13	s6_len	90095
+SEED	infiltrator	13	s2_ratio	0.07175104
+SEED	infiltrator	13	s2_ratio_hp	0.06981182
+SEED	infiltrator	13	s2_cross	0.00000000
+SEED	infiltrator	13	s2_cross_hp	0.00000000
+SEED	infiltrator	13	s2_present	1.00000000
+SEED	infiltrator	13	s2_cross_n	0
+SEED	infiltrator	13	s2_pairs_n	7400
+SEED	infiltrator	13	s3_benef	1.36481956
+SEED	infiltrator	13	s3_benef_hp	1.32793254
+SEED	infiltrator	13	s3_benef_max	2.85735246
+SEED	infiltrator	13	s3_att	1.88666122
+SEED	infiltrator	13	s3_att_hp	1.83567037
+SEED	infiltrator	13	s3_personal	0.02123768
+SEED	infiltrator	13	s3_group	1.31426449
+SEED	infiltrator	13	s3_benef_rated	1.80991053
+SEED	infiltrator	13	s3_obs_rated	9
+SEED	infiltrator	13	s3_floor	3.33333320
+SEED	infiltrator	13	s3_vs_floor	0.40944588
+SEED	infiltrator	13	s3_vs_floor_max	0.85720577
+SEED	infiltrator	13	s4	0.00891198
+SEED	infiltrator	13	s4_hp	0.00867111
+SEED	infiltrator	13	s4_max	0.35647911
+SEED	infiltrator	13	s4_max_hp	0.34684454
+SEED	infiltrator	13	s4_present	0.02500000
+SEED	infiltrator	13	s4_worst_obs_present	0.02500000
+SEED	infiltrator	13	s5_self	1.89692333
+SEED	infiltrator	13	s5_mass	0.99367639
+[  136.3s] infiltrator seed=13 完成（obs=185，hm=0.00443318，S6max=0.00000000）
+BASE	infiltrator	14	world=215 total=495 alive=212 honest=195 attackers=16 sybil=0 benef=200 injector=164 empty=40 fake=200 injected=40
+SEED	infiltrator	14	n_accounts	495
+SEED	infiltrator	14	n_world	215
+SEED	infiltrator	14	n_alive	212
+SEED	infiltrator	14	n_honest	195
+SEED	infiltrator	14	n_attackers	16
+SEED	infiltrator	14	n_benef	1
+SEED	infiltrator	14	n_injected	40
+SEED	infiltrator	14	n_empty	40
+SEED	infiltrator	14	n_fake	200
+SEED	infiltrator	14	obs_used	193
+SEED	infiltrator	14	obs_skipped	2
+SEED	infiltrator	14	dist_sum_err	0.00000156
+SEED	infiltrator	14	hm	0.00416816
+SEED	infiltrator	14	hm_present	0.00451550
+SEED	infiltrator	14	present_frac	0.92307692
+SEED	infiltrator	14	avg_views	18.82075472
+SEED	infiltrator	14	avg_degree	19.29245283
+SEED	infiltrator	14	avg_rating_sum	9.87940042
+SEED	infiltrator	14	s6_max	0.00000000
+SEED	infiltrator	14	s6_mean	0.00000000
+SEED	infiltrator	14	s6_len	96525
+SEED	infiltrator	14	s2_ratio	0.04428507
+SEED	infiltrator	14	s2_ratio_hp	0.04087852
+SEED	infiltrator	14	s2_cross	0.00000000
+SEED	infiltrator	14	s2_cross_hp	0.00000000
+SEED	infiltrator	14	s2_present	1.00000000
+SEED	infiltrator	14	s2_cross_n	0
+SEED	infiltrator	14	s2_pairs_n	7720
+SEED	infiltrator	14	s3_benef	2.06300136
+SEED	infiltrator	14	s3_benef_hp	1.90430895
+SEED	infiltrator	14	s3_benef_max	4.62620397
+SEED	infiltrator	14	s3_att	2.32876236
+SEED	infiltrator	14	s3_att_hp	2.14962680
+SEED	infiltrator	14	s3_personal	0.02706724
+SEED	infiltrator	14	s3_group	2.00988726
+SEED	infiltrator	14	s3_benef_rated	3.47525824
+SEED	infiltrator	14	s3_obs_rated	6
+SEED	infiltrator	14	s3_floor	3.33333320
+SEED	infiltrator	14	s3_vs_floor	0.61890043
+SEED	infiltrator	14	s3_vs_floor_max	1.38786125
+SEED	infiltrator	14	s4	0.00602111
+SEED	infiltrator	14	s4_hp	0.00555794
+SEED	infiltrator	14	s4_max	0.24084426
+SEED	infiltrator	14	s4_max_hp	0.22231778
+SEED	infiltrator	14	s4_present	0.02500000
+SEED	infiltrator	14	s4_worst_obs_present	0.02500000
+SEED	infiltrator	14	s5_self	1.77521921
+SEED	infiltrator	14	s5_mass	0.98876493
+[  149.9s] infiltrator seed=14 完成（obs=193，hm=0.00416816，S6max=0.00000000）
+BASE	infiltrator	15	world=220 total=500 alive=215 honest=198 attackers=16 sybil=0 benef=200 injector=98 empty=40 fake=200 injected=40
+SEED	infiltrator	15	n_accounts	500
+SEED	infiltrator	15	n_world	220
+SEED	infiltrator	15	n_alive	215
+SEED	infiltrator	15	n_honest	198
+SEED	infiltrator	15	n_attackers	16
+SEED	infiltrator	15	n_benef	1
+SEED	infiltrator	15	n_injected	40
+SEED	infiltrator	15	n_empty	40
+SEED	infiltrator	15	n_fake	200
+SEED	infiltrator	15	obs_used	198
+SEED	infiltrator	15	obs_skipped	0
+SEED	infiltrator	15	dist_sum_err	0.00000143
+SEED	infiltrator	15	hm	0.00419941
+SEED	infiltrator	15	hm_present	0.00445027
+SEED	infiltrator	15	present_frac	0.94362820
+SEED	infiltrator	15	avg_views	18.36279070
+SEED	infiltrator	15	avg_degree	18.80000000
+SEED	infiltrator	15	avg_rating_sum	9.82496573
+SEED	infiltrator	15	s6_max	0.00000000
+SEED	infiltrator	15	s6_mean	0.00000000
+SEED	infiltrator	15	s6_len	99000
+SEED	infiltrator	15	s2_ratio	0.03668851
+SEED	infiltrator	15	s2_ratio_hp	0.03462527
+SEED	infiltrator	15	s2_cross	0.00000000
+SEED	infiltrator	15	s2_cross_hp	0.00000000
+SEED	infiltrator	15	s2_present	1.00000000
+SEED	infiltrator	15	s2_cross_n	0
+SEED	infiltrator	15	s2_pairs_n	7920
+SEED	infiltrator	15	s3_benef	1.68309928
+SEED	infiltrator	15	s3_benef_hp	1.58804170
+SEED	infiltrator	15	s3_benef_max	4.78649461
+SEED	infiltrator	15	s3_att	2.20194815
+SEED	infiltrator	15	s3_att_hp	2.07771434
+SEED	infiltrator	15	s3_personal	0.05296159
+SEED	infiltrator	15	s3_group	1.61964397
+SEED	infiltrator	15	s3_benef_rated	2.91357110
+SEED	infiltrator	15	s3_obs_rated	9
+SEED	infiltrator	15	s3_floor	3.33333320
+SEED	infiltrator	15	s3_vs_floor	0.50492980
+SEED	infiltrator	15	s3_vs_floor_max	1.43594844
+SEED	infiltrator	15	s4	0.01207212
+SEED	infiltrator	15	s4_hp	0.01139161
+SEED	infiltrator	15	s4_max	0.48288468
+SEED	infiltrator	15	s4_max_hp	0.45566426
+SEED	infiltrator	15	s4_present	0.02500000
+SEED	infiltrator	15	s4_worst_obs_present	0.02500000
+SEED	infiltrator	15	s5_self	1.85622279
+SEED	infiltrator	15	s5_mass	0.98628267
+[  164.0s] infiltrator seed=15 完成（obs=198，hm=0.00419941，S6max=0.00000000）
+BASE	infiltrator	16	world=213 total=493 alive=207 honest=191 attackers=16 sybil=0 benef=200 injector=96 empty=40 fake=200 injected=40
+SEED	infiltrator	16	n_accounts	493
+SEED	infiltrator	16	n_world	213
+SEED	infiltrator	16	n_alive	207
+SEED	infiltrator	16	n_honest	191
+SEED	infiltrator	16	n_attackers	16
+SEED	infiltrator	16	n_benef	1
+SEED	infiltrator	16	n_injected	40
+SEED	infiltrator	16	n_empty	40
+SEED	infiltrator	16	n_fake	200
+SEED	infiltrator	16	obs_used	190
+SEED	infiltrator	16	obs_skipped	1
+SEED	infiltrator	16	dist_sum_err	0.00000144
+SEED	infiltrator	16	hm	0.00423227
+SEED	infiltrator	16	hm_present	0.00451587
+SEED	infiltrator	16	present_frac	0.93720033
+SEED	infiltrator	16	avg_views	18.35748792
+SEED	infiltrator	16	avg_degree	19.11594203
+SEED	infiltrator	16	avg_rating_sum	9.92642644
+SEED	infiltrator	16	s6_max	0.00000000
+SEED	infiltrator	16	s6_mean	0.00000000
+SEED	infiltrator	16	s6_len	94163
+SEED	infiltrator	16	s2_ratio	0.06331790
+SEED	infiltrator	16	s2_ratio_hp	0.05934024
+SEED	infiltrator	16	s2_cross	0.00000000
+SEED	infiltrator	16	s2_cross_hp	0.00000000
+SEED	infiltrator	16	s2_present	1.00000000
+SEED	infiltrator	16	s2_cross_n	0
+SEED	infiltrator	16	s2_pairs_n	7600
+SEED	infiltrator	16	s3_benef	1.75149163
+SEED	infiltrator	16	s3_benef_hp	1.64149474
+SEED	infiltrator	16	s3_benef_max	6.36845531
+SEED	infiltrator	16	s3_att	2.24431893
+SEED	infiltrator	16	s3_att_hp	2.10337051
+SEED	infiltrator	16	s3_personal	0.04928671
+SEED	infiltrator	16	s3_group	1.65916038
+SEED	infiltrator	16	s3_benef_rated	2.75001492
+SEED	infiltrator	16	s3_obs_rated	7
+SEED	infiltrator	16	s3_floor	3.33333320
+SEED	infiltrator	16	s3_vs_floor	0.52544751
+SEED	infiltrator	16	s3_vs_floor_max	1.91053667
+SEED	infiltrator	16	s4	0.00924415
+SEED	infiltrator	16	s4_hp	0.00866363
+SEED	infiltrator	16	s4_max	0.36976598
+SEED	infiltrator	16	s4_max_hp	0.34654514
+SEED	infiltrator	16	s4_present	0.02500000
+SEED	infiltrator	16	s4_worst_obs_present	0.02500000
+SEED	infiltrator	16	s5_self	1.89841972
+SEED	infiltrator	16	s5_mass	0.99542325
+[  177.3s] infiltrator seed=16 完成（obs=190，hm=0.00423227，S6max=0.00000000）
+BASE	infiltrator	17	world=218 total=498 alive=216 honest=199 attackers=16 sybil=0 benef=200 injector=97 empty=40 fake=200 injected=40
+SEED	infiltrator	17	n_accounts	498
+SEED	infiltrator	17	n_world	218
+SEED	infiltrator	17	n_alive	216
+SEED	infiltrator	17	n_honest	199
+SEED	infiltrator	17	n_attackers	16
+SEED	infiltrator	17	n_benef	1
+SEED	infiltrator	17	n_injected	40
+SEED	infiltrator	17	n_empty	40
+SEED	infiltrator	17	n_fake	200
+SEED	infiltrator	17	obs_used	195
+SEED	infiltrator	17	obs_skipped	4
+SEED	infiltrator	17	dist_sum_err	0.00000151
+SEED	infiltrator	17	hm	0.00410928
+SEED	infiltrator	17	hm_present	0.00449260
+SEED	infiltrator	17	present_frac	0.91467594
+SEED	infiltrator	17	avg_views	17.88888889
+SEED	infiltrator	17	avg_degree	18.23148148
+SEED	infiltrator	17	avg_rating_sum	9.40934432
+SEED	infiltrator	17	s6_max	0.00000000
+SEED	infiltrator	17	s6_mean	0.00000000
+SEED	infiltrator	17	s6_len	99102
+SEED	infiltrator	17	s2_ratio	0.04088668
+SEED	infiltrator	17	s2_ratio_hp	0.03739658
+SEED	infiltrator	17	s2_cross	0.00000000
+SEED	infiltrator	17	s2_cross_hp	0.00000000
+SEED	infiltrator	17	s2_present	1.00000000
+SEED	infiltrator	17	s2_cross_n	0
+SEED	infiltrator	17	s2_pairs_n	7800
+SEED	infiltrator	17	s3_benef	2.39690127
+SEED	infiltrator	17	s3_benef_hp	2.19239356
+SEED	infiltrator	17	s3_benef_max	5.13012053
+SEED	infiltrator	17	s3_att	2.43359642
+SEED	infiltrator	17	s3_att_hp	2.22592574
+SEED	infiltrator	17	s3_personal	0.05574653
+SEED	infiltrator	17	s3_group	2.32413301
+SEED	infiltrator	17	s3_benef_rated	3.18840876
+SEED	infiltrator	17	s3_obs_rated	14
+SEED	infiltrator	17	s3_floor	3.33333320
+SEED	infiltrator	17	s3_vs_floor	0.71907041
+SEED	infiltrator	17	s3_vs_floor_max	1.53903622
+SEED	infiltrator	17	s4	0.00074397
+SEED	infiltrator	17	s4_hp	0.00068051
+SEED	infiltrator	17	s4_max	0.02975867
+SEED	infiltrator	17	s4_max_hp	0.02722042
+SEED	infiltrator	17	s4_present	0.02500000
+SEED	infiltrator	17	s4_worst_obs_present	0.02500000
+SEED	infiltrator	17	s5_self	1.78733711
+SEED	infiltrator	17	s5_mass	0.99394298
+[  190.8s] infiltrator seed=17 完成（obs=195，hm=0.00410928，S6max=0.00000000）
+BASE	infiltrator	18	world=222 total=502 alive=213 honest=198 attackers=16 sybil=0 benef=200 injector=181 empty=40 fake=200 injected=40
+SEED	infiltrator	18	n_accounts	502
+SEED	infiltrator	18	n_world	222
+SEED	infiltrator	18	n_alive	213
+SEED	infiltrator	18	n_honest	198
+SEED	infiltrator	18	n_attackers	16
+SEED	infiltrator	18	n_benef	1
+SEED	infiltrator	18	n_injected	40
+SEED	infiltrator	18	n_empty	40
+SEED	infiltrator	18	n_fake	200
+SEED	infiltrator	18	obs_used	198
+SEED	infiltrator	18	obs_skipped	0
+SEED	infiltrator	18	dist_sum_err	0.00000149
+SEED	infiltrator	18	hm	0.00409722
+SEED	infiltrator	18	hm_present	0.00434373
+SEED	infiltrator	18	present_frac	0.94329660
+SEED	infiltrator	18	avg_views	17.69483568
+SEED	infiltrator	18	avg_degree	18.59624413
+SEED	infiltrator	18	avg_rating_sum	9.53248464
+SEED	infiltrator	18	s6_max	0.00000000
+SEED	infiltrator	18	s6_mean	0.00000000
+SEED	infiltrator	18	s6_len	99396
+SEED	infiltrator	18	s2_ratio	0.05279994
+SEED	infiltrator	18	s2_ratio_hp	0.04983054
+SEED	infiltrator	18	s2_cross	0.00000000
+SEED	infiltrator	18	s2_cross_hp	0.00000000
+SEED	infiltrator	18	s2_present	1.00000000
+SEED	infiltrator	18	s2_cross_n	0
+SEED	infiltrator	18	s2_pairs_n	7920
+SEED	infiltrator	18	s3_benef	1.97178870
+SEED	infiltrator	18	s3_benef_hp	1.86037902
+SEED	infiltrator	18	s3_benef_max	4.31753373
+SEED	infiltrator	18	s3_att	2.34183119
+SEED	infiltrator	18	s3_att_hp	2.20937114
+SEED	infiltrator	18	s3_personal	0.03863864
+SEED	infiltrator	18	s3_group	1.87308007
+SEED	infiltrator	18	s3_benef_rated	3.12551836
+SEED	infiltrator	18	s3_obs_rated	9
+SEED	infiltrator	18	s3_floor	3.33333320
+SEED	infiltrator	18	s3_vs_floor	0.59153663
+SEED	infiltrator	18	s3_vs_floor_max	1.29526017
+SEED	infiltrator	18	s4	0.00399584
+SEED	infiltrator	18	s4_hp	0.00376980
+SEED	infiltrator	18	s4_max	0.15983341
+SEED	infiltrator	18	s4_max_hp	0.15079196
+SEED	infiltrator	18	s4_present	0.02500000
+SEED	infiltrator	18	s4_worst_obs_present	0.02500000
+SEED	infiltrator	18	s5_self	1.69708325
+SEED	infiltrator	18	s5_mass	0.99160961
+[  204.1s] infiltrator seed=18 完成（obs=198，hm=0.00409722，S6max=0.00000000）
+SUM	infiltrator	n_accounts	495	5.12521777	487	502	8
+SUM	infiltrator	n_world	215	5.12521777	207	222	8
+SUM	infiltrator	n_alive	210	4.65218843	202	216	8
+SUM	infiltrator	n_honest	194	4.77904653	185	199	8
+SUM	infiltrator	n_attackers	16	0.00000000	16	16	8
+SUM	infiltrator	n_benef	1	0.00000000	1	1	8
+SUM	infiltrator	n_injected	40	0.00000000	40	40	8
+SUM	infiltrator	n_empty	40	0.00000000	40	40	8
+SUM	infiltrator	n_fake	200	0.00000000	200	200	8
+SUM	infiltrator	obs_used	192	4.77343841	185	198	8
+SUM	infiltrator	obs_skipped	1	1.76776695	0	4	8
+SUM	infiltrator	dist_sum_err	0.00000151	0.00000006	0.00000143	0.00000159	8
+SUM	infiltrator	hm	0.00422666	0.00011892	0.00409722	0.00443318	8
+SUM	infiltrator	hm_present	0.00447171	0.00006812	0.00434373	0.00455633	8
+SUM	infiltrator	present_frac	0.94518420	0.02115901	0.91467594	0.97368707	8
+SUM	infiltrator	avg_views	18.48217981	0.53667638	17.69483568	19.18660287	8
+SUM	infiltrator	avg_degree	19.03372035	0.45757150	18.23148148	19.53110048	8
+SUM	infiltrator	avg_rating_sum	9.85633669	0.26251756	9.40934432	10.14016580	8
+SUM	infiltrator	s6_max	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	infiltrator	s6_mean	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	infiltrator	s6_len	95792	3305.73758519	90095	99396	8
+SUM	infiltrator	s2_ratio	0.05303570	0.01258483	0.03668851	0.07175104	8
+SUM	infiltrator	s2_ratio_hp	0.05030021	0.01280544	0.03462527	0.06981182	8
+SUM	infiltrator	s2_cross	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	infiltrator	s2_cross_hp	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	infiltrator	s2_present	1.00000000	0.00000000	1.00000000	1.00000000	8
+SUM	infiltrator	s2_cross_n	0	0.00000000	0	0	8
+SUM	infiltrator	s2_pairs_n	7690	190.93753653	7400	7920	8
+SUM	infiltrator	s3_benef	1.82073669	0.46956569	1.01496087	2.39690127	8
+SUM	infiltrator	s3_benef_hp	1.71417979	0.41917947	0.98827341	2.21061439	8
+SUM	infiltrator	s3_benef_max	4.33958356	1.32271475	2.10532159	6.36845531	8
+SUM	infiltrator	s3_att	2.25555683	0.23515327	1.88666122	2.61899775	8
+SUM	infiltrator	s3_att_hp	2.12917634	0.19903659	1.83567037	2.49569520	8
+SUM	infiltrator	s3_personal	0.03780312	0.01500660	0.01573873	0.05574653	8
+SUM	infiltrator	s3_group	1.75781117	0.45755119	0.99465197	2.32413301	8
+SUM	infiltrator	s3_benef_rated	2.72888509	0.68827519	1.53722352	3.47525824	8
+SUM	infiltrator	s3_obs_rated	9	2.60494036	6	14	8
+SUM	infiltrator	s3_floor	3.33333320	0.00000000	3.33333320	3.33333320	8
+SUM	infiltrator	s3_vs_floor	0.54622103	0.14086971	0.30448827	0.71907041	8
+SUM	infiltrator	s3_vs_floor_max	1.30187512	0.39681444	0.63159650	1.91053667	8
+SUM	infiltrator	s4	0.00772012	0.00385505	0.00074397	0.01207212	8
+SUM	infiltrator	s4_hp	0.00734060	0.00369433	0.00068051	0.01139161	8
+SUM	infiltrator	s4_max	0.30880462	0.15420195	0.02975867	0.48288468	8
+SUM	infiltrator	s4_max_hp	0.29362389	0.14777305	0.02722042	0.45566426	8
+SUM	infiltrator	s4_present	0.02500000	0.00000000	0.02500000	0.02500000	8
+SUM	infiltrator	s4_worst_obs_present	0.02500000	0.00000000	0.02500000	0.02500000	8
+SUM	infiltrator	s5_self	1.82863357	0.07260879	1.69708325	1.89841972	8
+SUM	infiltrator	s5_mass	0.99336816	0.00446716	0.98628267	1.00025562	8
+BASE	endorser	11	world=224 total=504 alive=221 honest=181 attackers=40 sybil=0 benef=200 injector=154 empty=40 fake=200 injected=40
+SEED	endorser	11	n_accounts	504
+SEED	endorser	11	n_world	224
+SEED	endorser	11	n_alive	221
+SEED	endorser	11	n_honest	181
+SEED	endorser	11	n_attackers	40
+SEED	endorser	11	n_benef	1
+SEED	endorser	11	n_injected	40
+SEED	endorser	11	n_empty	40
+SEED	endorser	11	n_fake	200
+SEED	endorser	11	obs_used	181
+SEED	endorser	11	obs_skipped	0
+SEED	endorser	11	dist_sum_err	0.00000157
+SEED	endorser	11	hm	0.00376814
+SEED	endorser	11	hm_present	0.00408350
+SEED	endorser	11	present_frac	0.92277403
+SEED	endorser	11	avg_views	18.73755656
+SEED	endorser	11	avg_degree	19.14932127
+SEED	endorser	11	avg_rating_sum	9.88356713
+SEED	endorser	11	s6_max	0.00000000
+SEED	endorser	11	s6_mean	0.00000000
+SEED	endorser	11	s6_len	91224
+SEED	endorser	11	s3_benef	3.06446456
+SEED	endorser	11	s3_benef_hp	2.82776933
+SEED	endorser	11	s3_benef_max	5.51074586
+SEED	endorser	11	s3_att	1.94689985
+SEED	endorser	11	s3_att_hp	1.79654893
+SEED	endorser	11	s3_personal	0.01739802
+SEED	endorser	11	s3_group	3.02013791
+SEED	endorser	11	s3_benef_rated	3.46065497
+SEED	endorser	11	s3_obs_rated	6
+SEED	endorser	11	s3_floor	3.33333320
+SEED	endorser	11	s3_vs_floor	0.91933941
+SEED	endorser	11	s3_vs_floor_max	1.65322382
+[  218.0s] endorser seed=11 完成（obs=181，hm=0.00376814，S6max=0.00000000）
+BASE	endorser	12	world=219 total=499 alive=215 honest=174 attackers=40 sybil=0 benef=200 injector=143 empty=40 fake=200 injected=40
+SEED	endorser	12	n_accounts	499
+SEED	endorser	12	n_world	219
+SEED	endorser	12	n_alive	215
+SEED	endorser	12	n_honest	174
+SEED	endorser	12	n_attackers	40
+SEED	endorser	12	n_benef	1
+SEED	endorser	12	n_injected	40
+SEED	endorser	12	n_empty	40
+SEED	endorser	12	n_fake	200
+SEED	endorser	12	obs_used	171
+SEED	endorser	12	obs_skipped	3
+SEED	endorser	12	dist_sum_err	0.00000154
+SEED	endorser	12	hm	0.00359764
+SEED	endorser	12	hm_present	0.00392793
+SEED	endorser	12	present_frac	0.91594407
+SEED	endorser	12	avg_views	18.53023256
+SEED	endorser	12	avg_degree	18.97209302
+SEED	endorser	12	avg_rating_sum	9.93230112
+SEED	endorser	12	s6_max	0.00000000
+SEED	endorser	12	s6_mean	0.00000000
+SEED	endorser	12	s6_len	86826
+SEED	endorser	12	s3_benef	5.09553650
+SEED	endorser	12	s3_benef_hp	4.66725731
+SEED	endorser	12	s3_benef_max	8.75244319
+SEED	endorser	12	s3_att	2.29826738
+SEED	endorser	12	s3_att_hp	2.10501170
+SEED	endorser	12	s3_personal	0.01742544
+SEED	endorser	12	s3_group	5.03849634
+SEED	endorser	12	s3_benef_rated	5.44545787
+SEED	endorser	12	s3_obs_rated	4
+SEED	endorser	12	s3_floor	3.33333320
+SEED	endorser	12	s3_vs_floor	1.52866101
+SEED	endorser	12	s3_vs_floor_max	2.62573306
+[  231.3s] endorser seed=12 完成（obs=171，hm=0.00359764，S6max=0.00000000）
+BASE	endorser	13	world=220 total=500 alive=216 honest=175 attackers=40 sybil=0 benef=200 injector=120 empty=40 fake=200 injected=40
+SEED	endorser	13	n_accounts	500
+SEED	endorser	13	n_world	220
+SEED	endorser	13	n_alive	216
+SEED	endorser	13	n_honest	175
+SEED	endorser	13	n_attackers	40
+SEED	endorser	13	n_benef	1
+SEED	endorser	13	n_injected	40
+SEED	endorser	13	n_empty	40
+SEED	endorser	13	n_fake	200
+SEED	endorser	13	obs_used	174
+SEED	endorser	13	obs_skipped	1
+SEED	endorser	13	dist_sum_err	0.00000141
+SEED	endorser	13	hm	0.00384510
+SEED	endorser	13	hm_present	0.00407722
+SEED	endorser	13	present_frac	0.94305419
+SEED	endorser	13	avg_views	18.47222222
+SEED	endorser	13	avg_degree	18.95370370
+SEED	endorser	13	avg_rating_sum	10.06752377
+SEED	endorser	13	s6_max	0.00000000
+SEED	endorser	13	s6_mean	0.00000000
+SEED	endorser	13	s6_len	87500
+SEED	endorser	13	s3_benef	4.58736077
+SEED	endorser	13	s3_benef_hp	4.32588173
+SEED	endorser	13	s3_benef_max	8.29072674
+SEED	endorser	13	s3_att	1.86387812
+SEED	endorser	13	s3_att_hp	1.75766554
+SEED	endorser	13	s3_personal	0.01961963
+SEED	endorser	13	s3_group	4.51881361
+SEED	endorser	13	s3_benef_rated	5.41233787
+SEED	endorser	13	s3_obs_rated	8
+SEED	endorser	13	s3_floor	3.33333320
+SEED	endorser	13	s3_vs_floor	1.37620829
+SEED	endorser	13	s3_vs_floor_max	2.48721812
+[  245.1s] endorser seed=13 完成（obs=174，hm=0.00384510，S6max=0.00000000）
+BASE	endorser	14	world=212 total=492 alive=208 honest=167 attackers=40 sybil=0 benef=200 injector=48 empty=40 fake=200 injected=40
+SEED	endorser	14	n_accounts	492
+SEED	endorser	14	n_world	212
+SEED	endorser	14	n_alive	208
+SEED	endorser	14	n_honest	167
+SEED	endorser	14	n_attackers	40
+SEED	endorser	14	n_benef	1
+SEED	endorser	14	n_injected	40
+SEED	endorser	14	n_empty	40
+SEED	endorser	14	n_fake	200
+SEED	endorser	14	obs_used	167
+SEED	endorser	14	obs_skipped	0
+SEED	endorser	14	dist_sum_err	0.00000165
+SEED	endorser	14	hm	0.00389997
+SEED	endorser	14	hm_present	0.00412194
+SEED	endorser	14	present_frac	0.94614364
+SEED	endorser	14	avg_views	19.42307692
+SEED	endorser	14	avg_degree	19.86538462
+SEED	endorser	14	avg_rating_sum	10.07031725
+SEED	endorser	14	s6_max	0.00000000
+SEED	endorser	14	s6_mean	0.00000000
+SEED	endorser	14	s6_len	82164
+SEED	endorser	14	s3_benef	4.92563424
+SEED	endorser	14	s3_benef_hp	4.66027355
+SEED	endorser	14	s3_benef_max	7.91224576
+SEED	endorser	14	s3_att	2.01466852
+SEED	endorser	14	s3_att_hp	1.90613093
+SEED	endorser	14	s3_personal	0.01996651
+SEED	endorser	14	s3_group	4.87296698
+SEED	endorser	14	s3_benef_rated	5.71381206
+SEED	endorser	14	s3_obs_rated	5
+SEED	endorser	14	s3_floor	3.33333320
+SEED	endorser	14	s3_vs_floor	1.47769033
+SEED	endorser	14	s3_vs_floor_max	2.37367382
+[  258.2s] endorser seed=14 完成（obs=167，hm=0.00389997，S6max=0.00000000）
+BASE	endorser	15	world=214 total=494 alive=207 honest=168 attackers=40 sybil=0 benef=200 injector=12 empty=40 fake=200 injected=40
+SEED	endorser	15	n_accounts	494
+SEED	endorser	15	n_world	214
+SEED	endorser	15	n_alive	207
+SEED	endorser	15	n_honest	168
+SEED	endorser	15	n_attackers	40
+SEED	endorser	15	n_benef	1
+SEED	endorser	15	n_injected	40
+SEED	endorser	15	n_empty	40
+SEED	endorser	15	n_fake	200
+SEED	endorser	15	obs_used	167
+SEED	endorser	15	obs_skipped	1
+SEED	endorser	15	dist_sum_err	0.00000151
+SEED	endorser	15	hm	0.00406247
+SEED	endorser	15	hm_present	0.00423894
+SEED	endorser	15	present_frac	0.95836898
+SEED	endorser	15	avg_views	18.29468599
+SEED	endorser	15	avg_degree	18.96135266
+SEED	endorser	15	avg_rating_sum	10.31285164
+SEED	endorser	15	s6_max	0.00000000
+SEED	endorser	15	s6_mean	0.00000000
+SEED	endorser	15	s6_len	82992
+SEED	endorser	15	s3_benef	3.35137980
+SEED	endorser	15	s3_benef_hp	3.21185425
+SEED	endorser	15	s3_benef_max	6.93990347
+SEED	endorser	15	s3_att	1.75556890
+SEED	endorser	15	s3_att_hp	1.68247790
+SEED	endorser	15	s3_personal	0.03576852
+SEED	endorser	15	s3_group	3.24339924
+SEED	endorser	15	s3_benef_rated	3.86504106
+SEED	endorser	15	s3_obs_rated	6
+SEED	endorser	15	s3_floor	3.33333320
+SEED	endorser	15	s3_vs_floor	1.00541398
+SEED	endorser	15	s3_vs_floor_max	2.08197112
+[  271.1s] endorser seed=15 完成（obs=167，hm=0.00406247，S6max=0.00000000）
+BASE	endorser	16	world=222 total=502 alive=211 honest=172 attackers=40 sybil=0 benef=200 injector=96 empty=40 fake=200 injected=40
+SEED	endorser	16	n_accounts	502
+SEED	endorser	16	n_world	222
+SEED	endorser	16	n_alive	211
+SEED	endorser	16	n_honest	172
+SEED	endorser	16	n_attackers	40
+SEED	endorser	16	n_benef	1
+SEED	endorser	16	n_injected	40
+SEED	endorser	16	n_empty	40
+SEED	endorser	16	n_fake	200
+SEED	endorser	16	obs_used	169
+SEED	endorser	16	obs_skipped	3
+SEED	endorser	16	dist_sum_err	0.00000146
+SEED	endorser	16	hm	0.00366852
+SEED	endorser	16	hm_present	0.00397976
+SEED	endorser	16	present_frac	0.92176964
+SEED	endorser	16	avg_views	17.81042654
+SEED	endorser	16	avg_degree	18.94312796
+SEED	endorser	16	avg_rating_sum	9.90062046
+SEED	endorser	16	s6_max	0.00000000
+SEED	endorser	16	s6_mean	0.00000000
+SEED	endorser	16	s6_len	86344
+SEED	endorser	16	s3_benef	4.72261619
+SEED	endorser	16	s3_benef_hp	4.35265082
+SEED	endorser	16	s3_benef_max	9.90311480
+SEED	endorser	16	s3_att	2.13892660
+SEED	endorser	16	s3_att_hp	1.97131646
+SEED	endorser	16	s3_personal	0.04292408
+SEED	endorser	16	s3_group	4.50506754
+SEED	endorser	16	s3_benef_rated	5.81555956
+SEED	endorser	16	s3_obs_rated	8
+SEED	endorser	16	s3_floor	3.33333320
+SEED	endorser	16	s3_vs_floor	1.41678491
+SEED	endorser	16	s3_vs_floor_max	2.97093456
+[  283.8s] endorser seed=16 完成（obs=169，hm=0.00366852，S6max=0.00000000）
+BASE	endorser	17	world=217 total=497 alive=213 honest=172 attackers=40 sybil=0 benef=200 injector=118 empty=40 fake=200 injected=40
+SEED	endorser	17	n_accounts	497
+SEED	endorser	17	n_world	217
+SEED	endorser	17	n_alive	213
+SEED	endorser	17	n_honest	172
+SEED	endorser	17	n_attackers	40
+SEED	endorser	17	n_benef	1
+SEED	endorser	17	n_injected	40
+SEED	endorser	17	n_empty	40
+SEED	endorser	17	n_fake	200
+SEED	endorser	17	obs_used	171
+SEED	endorser	17	obs_skipped	1
+SEED	endorser	17	dist_sum_err	0.00000145
+SEED	endorser	17	hm	0.00381230
+SEED	endorser	17	hm_present	0.00410883
+SEED	endorser	17	present_frac	0.92781858
+SEED	endorser	17	avg_views	18.18779343
+SEED	endorser	17	avg_degree	18.66666667
+SEED	endorser	17	avg_rating_sum	9.68469656
+SEED	endorser	17	s6_max	0.00000000
+SEED	endorser	17	s6_mean	0.00000000
+SEED	endorser	17	s6_len	85484
+SEED	endorser	17	s3_benef	4.69976667
+SEED	endorser	17	s3_benef_hp	4.36035540
+SEED	endorser	17	s3_benef_max	9.87445384
+SEED	endorser	17	s3_att	2.04511949
+SEED	endorser	17	s3_att_hp	1.89737661
+SEED	endorser	17	s3_personal	0.03467588
+SEED	endorser	17	s3_group	4.63471929
+SEED	endorser	17	s3_benef_rated	5.19097730
+SEED	endorser	17	s3_obs_rated	7
+SEED	endorser	17	s3_floor	3.33333320
+SEED	endorser	17	s3_vs_floor	1.40993006
+SEED	endorser	17	s3_vs_floor_max	2.96233627
+[  296.9s] endorser seed=17 完成（obs=171，hm=0.00381230，S6max=0.00000000）
+BASE	endorser	18	world=213 total=493 alive=209 honest=169 attackers=40 sybil=0 benef=200 injector=182 empty=40 fake=200 injected=40
+SEED	endorser	18	n_accounts	493
+SEED	endorser	18	n_world	213
+SEED	endorser	18	n_alive	209
+SEED	endorser	18	n_honest	169
+SEED	endorser	18	n_attackers	40
+SEED	endorser	18	n_benef	1
+SEED	endorser	18	n_injected	40
+SEED	endorser	18	n_empty	40
+SEED	endorser	18	n_fake	200
+SEED	endorser	18	obs_used	167
+SEED	endorser	18	obs_skipped	2
+SEED	endorser	18	dist_sum_err	0.00000142
+SEED	endorser	18	hm	0.00397500
+SEED	endorser	18	hm_present	0.00417251
+SEED	endorser	18	present_frac	0.95266272
+SEED	endorser	18	avg_views	19.04784689
+SEED	endorser	18	avg_degree	19.46889952
+SEED	endorser	18	avg_rating_sum	9.98435307
+SEED	endorser	18	s6_max	0.00000000
+SEED	endorser	18	s6_mean	0.00000000
+SEED	endorser	18	s6_len	83317
+SEED	endorser	18	s3_benef	4.54698698
+SEED	endorser	18	s3_benef_hp	4.33174499
+SEED	endorser	18	s3_benef_max	7.90469437
+SEED	endorser	18	s3_att	1.91166789
+SEED	endorser	18	s3_att_hp	1.82117473
+SEED	endorser	18	s3_personal	0.03636441
+SEED	endorser	18	s3_group	4.47088581
+SEED	endorser	18	s3_benef_rated	5.62661809
+SEED	endorser	18	s3_obs_rated	8
+SEED	endorser	18	s3_floor	3.33333320
+SEED	endorser	18	s3_vs_floor	1.36409615
+SEED	endorser	18	s3_vs_floor_max	2.37140840
+[  310.0s] endorser seed=18 完成（obs=167，hm=0.00397500，S6max=0.00000000）
+SUM	endorser	n_accounts	498	4.37321392	492	504	8
+SUM	endorser	n_world	218	4.37321392	212	224	8
+SUM	endorser	n_alive	212	4.72077475	207	221	8
+SUM	endorser	n_honest	172	4.52769257	167	181	8
+SUM	endorser	n_attackers	40	0.00000000	40	40	8
+SUM	endorser	n_benef	1	0.00000000	1	1	8
+SUM	endorser	n_injected	40	0.00000000	40	40	8
+SUM	endorser	n_empty	40	0.00000000	40	40	8
+SUM	endorser	n_fake	200	0.00000000	200	200	8
+SUM	endorser	obs_used	171	4.79396943	167	181	8
+SUM	endorser	obs_skipped	1	1.18773494	0	3	8
+SUM	endorser	dist_sum_err	0.00000150	0.00000008	0.00000141	0.00000165	8
+SUM	endorser	hm	0.00382864	0.00015324	0.00359764	0.00406247	8
+SUM	endorser	hm_present	0.00408883	0.00009927	0.00392793	0.00423894	8
+SUM	endorser	present_frac	0.93606698	0.01593398	0.91594407	0.95836898	8
+SUM	endorser	avg_views	18.56298014	0.50620892	17.81042654	19.42307692	8
+SUM	endorser	avg_degree	19.12256868	0.37599977	18.66666667	19.86538462	8
+SUM	endorser	avg_rating_sum	9.97952887	0.18193591	9.68469656	10.31285164	8
+SUM	endorser	s6_max	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	endorser	s6_mean	0.00000000	0.00000000	0.00000000	0.00000000	8
+SUM	endorser	s6_len	85731	2951.78439677	82164	91224	8
+SUM	endorser	s3_benef	4.37421821	0.74533353	3.06446456	5.09553650	8
+SUM	endorser	s3_benef_hp	4.09222342	0.68441037	2.82776933	4.66725731	8
+SUM	endorser	s3_benef_max	8.13604100	1.46263136	5.51074586	9.90311480	8
+SUM	endorser	s3_att	1.99687459	0.16874949	1.75556890	2.29826738	8
+SUM	endorser	s3_att_hp	1.86721285	0.13258466	1.68247790	2.10501170	8
+SUM	endorser	s3_personal	0.02801781	0.01039641	0.01739802	0.04292408	8
+SUM	endorser	s3_group	4.28806084	0.74240448	3.02013791	5.03849634	8
+SUM	endorser	s3_benef_rated	5.06630735	0.89401058	3.46065497	5.81555956	8
+SUM	endorser	s3_obs_rated	6	1.51185789	4	8	8
+SUM	endorser	s3_floor	3.33333320	0.00000000	3.33333320	3.33333320	8
+SUM	endorser	s3_vs_floor	1.31226552	0.22360007	0.91933941	1.52866101	8
+SUM	endorser	s3_vs_floor_max	2.44081240	0.43878943	1.65322382	2.97093456	8
+# DONE elapsed 310.0s
+

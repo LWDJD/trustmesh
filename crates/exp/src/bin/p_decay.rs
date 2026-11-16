@@ -120,9 +120,16 @@ const E2_DARK_T: u64 = 300;
 /// E2 的快照点（攻击结束之后的小时数）。
 const E2_OFFSETS: [u64; 5] = [6, 24, 72, 168, 600];
 
+/// 「攻击落地」的判定门槛（见 run_residue_b 的注释）：
+/// 攻击期峰值相对攻击前基线的归一化增量小于它，就认为这次载荷根本没进到观察者的
+/// 群体项里（潜伏者先休眠、或观察者那时全离线），残差不参与聚合。
+/// 0.05 的取值依据：落地 seed 的增量中位数在 0.15~0.75 之间（见 E1B_ROW），
+/// 未落地 seed 的增量在 1e-3 量级，中间隔着两个数量级。
+const MIN_ATTACK_GAIN_Q: f64 = 0.05;
+const MIN_ATTACK_GAIN_G: f64 = 0.05;
+
 // ── E4（半衰期自适应）：600 步的世界，刷新周期 T 与批大小 k 都是变量 ──
 const E4_STEPS: usize = 600;
-const E4_DORM: f64 = 0.0025;
 const E4_H: [u64; 4] = [24, 72, 168, 720];
 const E4_T: [u64; 3] = [6, 12, 24];
 const E4_K: [usize; 3] = [6, 12, 24];
@@ -170,75 +177,23 @@ struct Cfg {
 /// 是为了让「2×4×N」的格子数真的被跑完，并用 E1_DET 行验证四个 off 格子的
 /// 输出 f64 位模式逐位相同 —— A4 当年用 5 格加等价性论证代替，本次改为实测。
 const CFGS8: [Cfg; 8] = [
-    Cfg {
-        name: "on24",
-        enabled: true,
-        h: 24,
-    },
-    Cfg {
-        name: "on72",
-        enabled: true,
-        h: 72,
-    },
-    Cfg {
-        name: "on168",
-        enabled: true,
-        h: 168,
-    },
-    Cfg {
-        name: "on720",
-        enabled: true,
-        h: 720,
-    },
-    Cfg {
-        name: "off24",
-        enabled: false,
-        h: 24,
-    },
-    Cfg {
-        name: "off72",
-        enabled: false,
-        h: 72,
-    },
-    Cfg {
-        name: "off168",
-        enabled: false,
-        h: 168,
-    },
-    Cfg {
-        name: "off720",
-        enabled: false,
-        h: 720,
-    },
+    Cfg { name: "on24", enabled: true, h: 24 },
+    Cfg { name: "on72", enabled: true, h: 72 },
+    Cfg { name: "on168", enabled: true, h: 168 },
+    Cfg { name: "on720", enabled: true, h: 720 },
+    Cfg { name: "off24", enabled: false, h: 24 },
+    Cfg { name: "off72", enabled: false, h: 72 },
+    Cfg { name: "off168", enabled: false, h: 168 },
+    Cfg { name: "off720", enabled: false, h: 720 },
 ];
 
 /// E2 使用的 5 个互异配置（off 只跑一个：四个 off 格逐位相同已由 E1_DET 证明）。
 const E2_CFGS: [Cfg; 5] = [
-    Cfg {
-        name: "on24",
-        enabled: true,
-        h: 24,
-    },
-    Cfg {
-        name: "on72",
-        enabled: true,
-        h: 72,
-    },
-    Cfg {
-        name: "on168",
-        enabled: true,
-        h: 168,
-    },
-    Cfg {
-        name: "on720",
-        enabled: true,
-        h: 720,
-    },
-    Cfg {
-        name: "off",
-        enabled: false,
-        h: 72,
-    },
+    Cfg { name: "on24", enabled: true, h: 24 },
+    Cfg { name: "on72", enabled: true, h: 72 },
+    Cfg { name: "on168", enabled: true, h: 168 },
+    Cfg { name: "on720", enabled: true, h: 720 },
+    Cfg { name: "off", enabled: false, h: 72 },
 ];
 
 /// 构造 EngineConfig：只覆盖 half_life / decay_enabled / view_params，
@@ -488,13 +443,7 @@ struct Paired {
 /// 由「基准组逐 seed 值」和「对照组逐 seed 值」算配对差。
 ///
 /// 两个切片必须按同一个 seed 列表顺序给出（本文件所有 stage 都是这样）。
-fn paired(
-    metric: &'static str,
-    cfg: &'static str,
-    base: &[f64],
-    other: &[f64],
-    n: usize,
-) -> Paired {
+fn paired(metric: &'static str, cfg: &'static str, base: &[f64], other: &[f64], n: usize) -> Paired {
     let d: Vec<f64> = (0..n).map(|i| other[i] - base[i]).collect();
     let m = mean(&d);
     let s = sd(&d);
@@ -516,22 +465,6 @@ fn paired(
         },
         base: b,
     }
-}
-
-fn print_paired(tag: &str, p: &Paired) {
-    println!(
-        "{},{},{},n={},mean={},sd={},ci95_lo={},ci95_hi={},base={},rel_pct={}",
-        tag,
-        p.metric,
-        p.cfg,
-        p.n,
-        f(p.mean, 6),
-        f(p.sd, 6),
-        f(p.lo, 6),
-        f(p.hi, 6),
-        f(p.base, 6),
-        f(p.rel_pct, 2)
-    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -564,10 +497,7 @@ fn par_map<T: Send>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> 
 
 fn nthreads() -> usize {
     std::env::args()
-        .find_map(|a| {
-            a.strip_prefix("threads=")
-                .and_then(|x| x.parse::<usize>().ok())
-        })
+        .find_map(|a| a.strip_prefix("threads=").and_then(|x| x.parse::<usize>().ok()))
         .unwrap_or(10)
         .clamp(1, 32)
 }
@@ -578,13 +508,11 @@ fn pilot() -> bool {
 
 fn arg_seeds(default: &[u64]) -> Vec<u64> {
     let v: Vec<u64> = std::env::args()
-        .find_map(|a| {
-            a.strip_prefix("seeds=").map(|s| {
-                s.split(',')
-                    .filter_map(|x| x.trim().parse::<u64>().ok())
-                    .collect::<Vec<u64>>()
-            })
-        })
+        .find_map(|a| a.strip_prefix("seeds=").map(|s| {
+            s.split(',')
+                .filter_map(|x| x.trim().parse::<u64>().ok())
+                .collect::<Vec<u64>>()
+        }))
         .filter(|v: &Vec<u64>| !v.is_empty())
         .unwrap_or_else(|| default.to_vec());
     if pilot() && v.len() > 2 {
@@ -632,6 +560,7 @@ fn cfg_a(seed: u64, dorm: f64) -> SimConfig {
 }
 
 /// 场景 A 的世界数据（同一 seed 的所有配置共享同一个世界）。
+#[allow(dead_code)]
 struct WorldA {
     seed: u64,
     dorm: f64,
@@ -663,18 +592,11 @@ fn build_world_a(seed: u64, dorm: f64) -> WorldA {
         .filter(|a| matches!(a.kind, Kind::Sleeper { .. }))
         .map(|a| a.idx)
         .collect();
-    let is_slp: Vec<bool> = accs
-        .iter()
-        .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
-        .collect();
+    let is_slp: Vec<bool> = accs.iter().map(|a| matches!(a.kind, Kind::Sleeper { .. })).collect();
     let is_prom: Vec<bool> = accs.iter().map(|a| a.kind == Kind::Promoted).collect();
     let is_hon: Vec<bool> = (0..n0).map(|i| !is_slp[i] && !is_prom[i]).collect();
     let quality: Vec<f64> = accs.iter().map(|a| a.quality as f64).collect();
-    let alive: Vec<usize> = accs
-        .iter()
-        .filter(|a| a.is_alive())
-        .map(|a| a.idx)
-        .collect();
+    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
     let mut alive_flag = vec![false; n0];
     for &i in &alive {
         alive_flag[i] = true;
@@ -716,17 +638,10 @@ fn build_world_a(seed: u64, dorm: f64) -> WorldA {
         .count();
 
     let online: Vec<Vec<bool>> = (0..n0)
-        .map(|i| {
-            (0..=A_ROUNDS)
-                .map(|r| world.was_online_at(i, r * A_TICK))
-                .collect()
-        })
+        .map(|i| (0..=A_ROUNDS).map(|r| world.was_online_at(i, r * A_TICK)).collect())
         .collect();
     let off_end = {
-        let off = alive
-            .iter()
-            .filter(|&&i| !online[i][A_ROUNDS as usize])
-            .count();
+        let off = alive.iter().filter(|&&i| !online[i][A_ROUNDS as usize]).count();
         if alive.is_empty() {
             0.0
         } else {
@@ -763,19 +678,11 @@ fn build_world_a(seed: u64, dorm: f64) -> WorldA {
 fn offline_frac_a(seed: u64, dorm: f64) -> f64 {
     let mut w = World::new(cfg_a(seed, dorm));
     w.run();
-    let alive: Vec<usize> = w
-        .accounts()
-        .iter()
-        .filter(|a| a.is_alive())
-        .map(|a| a.idx)
-        .collect();
+    let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
     if alive.is_empty() {
         return 0.0;
     }
-    let off = alive
-        .iter()
-        .filter(|&&i| !w.was_online_at(i, A_STEPS as u64))
-        .count();
+    let off = alive.iter().filter(|&&i| !w.was_online_at(i, A_STEPS as u64)).count();
     off as f64 / alive.len() as f64
 }
 
@@ -882,9 +789,7 @@ struct CellA {
 
 fn measure_a(wd: &WorldA, nodes: &[Option<Engine>], c: Cfg) -> CellA {
     let now = A_ROUNDS * A_TICK;
-    let hon_alive: Vec<usize> = (0..wd.n0)
-        .filter(|&i| wd.is_hon[i] && wd.alive_flag[i])
-        .collect();
+    let hon_alive: Vec<usize> = (0..wd.n0).filter(|&i| wd.is_hon[i] && wd.alive_flag[i]).collect();
     let mut cell = CellA {
         cfg: c.name,
         seed: wd.seed,
@@ -977,11 +882,7 @@ fn measure_a(wd: &WorldA, nodes: &[Option<Engine>], c: Cfg) -> CellA {
     cell.min_factor = factors.iter().copied().fold(f64::INFINITY, f64::min);
     cell.s3_abs = s3_sum / cell.n_obs as f64;
     cell.s4_abs = s4_sum / cell.n_obs as f64;
-    cell.sp = if sp_n > 0 {
-        sp_sum / sp_n as f64
-    } else {
-        f64::NAN
-    };
+    cell.sp = if sp_n > 0 { sp_sum / sp_n as f64 } else { f64::NAN };
     cell.sp_n = sp_n;
     if wd.n_syb > 0 {
         let inv = 1.0 / cell.n_obs as f64;
@@ -1022,6 +923,10 @@ fn run_a(wd: &WorldA, c: Cfg) -> CellA {
 /// 场景 B/E2 的底座配置。休眠时长固定 (168, 336)：两个场景的世界都在 600~900 小时之间，
 /// 用 (336,672) 会让大部分账户在攻击结束时还没回来，造成大量零基线观察者。
 fn cfg_b(seed: u64, dorm: f64, steps: usize, attack_t: u64) -> SimConfig {
+    // 休眠时长与 A4 的 base_cfg 逐字段对齐：按 steps/300 等比缩放 (168,336)。
+    // 换掉这个值会让离线标定结果与世界结构同时变化，E1B 就再也对不上 A4 的表 2.5。
+    let lo = (steps as u64 * 168 / 300).max(24);
+    let hi = (steps as u64 * 336 / 300).max(lo + 24);
     SimConfig {
         n_initial: N_INIT,
         steps,
@@ -1030,7 +935,7 @@ fn cfg_b(seed: u64, dorm: f64, steps: usize, attack_t: u64) -> SimConfig {
         leave_rate: 0.0,
         enable_rhythm: false,
         dormancy_rate: dorm,
-        sleep_hours: (168, 336),
+        sleep_hours: (lo, hi),
         return_rate: 0.10,
         attack_kind: AttackKind::Sleeper {
             normal_until: attack_t,
@@ -1041,6 +946,7 @@ fn cfg_b(seed: u64, dorm: f64, steps: usize, attack_t: u64) -> SimConfig {
 }
 
 /// 场景 B 世界。tick / rounds 由调用方给定（E1B 用 20h×30 轮，E2 用 6h×150 轮）。
+#[allow(dead_code)]
 struct WorldB {
     seed: u64,
     dorm: f64,
@@ -1074,18 +980,11 @@ fn build_world_b(
         .filter(|a| matches!(a.kind, Kind::Sleeper { .. }))
         .map(|a| a.idx)
         .collect();
-    let is_slp: Vec<bool> = accs
-        .iter()
-        .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
-        .collect();
+    let is_slp: Vec<bool> = accs.iter().map(|a| matches!(a.kind, Kind::Sleeper { .. })).collect();
     let is_prom: Vec<bool> = accs.iter().map(|a| a.kind == Kind::Promoted).collect();
     let is_hon: Vec<bool> = (0..n0).map(|i| !is_slp[i] && !is_prom[i]).collect();
     let quality: Vec<f64> = accs.iter().map(|a| a.quality as f64).collect();
-    let alive: Vec<usize> = accs
-        .iter()
-        .filter(|a| a.is_alive())
-        .map(|a| a.idx)
-        .collect();
+    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
     let mut alive_flag = vec![false; n0];
     for &i in &alive {
         alive_flag[i] = true;
@@ -1107,11 +1006,7 @@ fn build_world_b(
     }
 
     let online: Vec<Vec<bool>> = (0..n0)
-        .map(|i| {
-            (0..=rounds)
-                .map(|r| world.was_online_at(i, r * tick))
-                .collect()
-        })
+        .map(|i| (0..=rounds).map(|r| world.was_online_at(i, r * tick)).collect())
         .collect();
 
     WorldB {
@@ -1137,12 +1032,7 @@ fn offline_frac_b(seed: u64, dorm: f64, steps: usize, attack_t: u64, mark: u64) 
     while (w.time as usize) < mark as usize && w.step < steps {
         w.step();
     }
-    let alive: Vec<usize> = w
-        .accounts()
-        .iter()
-        .filter(|a| a.is_alive())
-        .map(|a| a.idx)
-        .collect();
+    let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
     if alive.is_empty() {
         return 0.0;
     }
@@ -1169,7 +1059,12 @@ fn build_nodes_b(wd: &WorldB, c: Cfg) -> Vec<Option<Engine>> {
     let mut nodes: Vec<Option<Engine>> = (0..wd.n0).map(|_| None).collect();
     for &a in &wd.alive {
         let mut e = Engine::new(cfg.clone());
-        for i in 0..wd.n0 {
+        // intern 到 n0 + N_EMPTY：A4 的 build_nodes 对所有场景都 intern 了「世界账户 +
+        // 60 个注入女巫 + 48 个空账户」；residue 场景里前两者为 0，但 48 个空账户
+        // 仍然在里面，它们会参与 on_view 的 total_mass 估计、并占掉草图里的桶。
+        // 只 intern n0 个会让归一化分母系统性偏小，读数与 A4 不再可比
+        // （本文件第一版就是这样，residue 的 pre 基线偏高一倍，残余失去意义）。
+        for i in 0..wd.n0 + N_EMPTY {
             e.intern(key(i));
         }
         for &(t, s) in &wd.ratings[a] {
@@ -1223,9 +1118,7 @@ fn exchange_b(nodes: &mut [Option<Engine>], wd: &WorldB, r: u64, dark: bool) {
 /// 另返回观察者数。
 fn ratio_at_b(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, usize) {
     let t = r * wd.tick;
-    let hon_alive: Vec<usize> = (0..wd.n0)
-        .filter(|&i| wd.is_hon[i] && wd.alive_flag[i])
-        .collect();
+    let hon_alive: Vec<usize> = (0..wd.n0).filter(|&i| wd.is_hon[i] && wd.alive_flag[i]).collect();
     let p = match wd.promoted {
         Some(p) => p,
         None => return (f64::NAN, f64::NAN, 0),
@@ -1267,16 +1160,8 @@ fn ratio_at_b(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, usize
         }
         cnt += 1;
     }
-    let q = if cnt > 0 {
-        q_sum / cnt as f64
-    } else {
-        f64::NAN
-    };
-    let g = if cnt > 0 {
-        g_sum / cnt as f64
-    } else {
-        f64::NAN
-    };
+    let q = if cnt > 0 { q_sum / cnt as f64 } else { f64::NAN };
+    let g = if cnt > 0 { g_sum / cnt as f64 } else { f64::NAN };
     (q, g, cnt)
 }
 
@@ -1326,9 +1211,7 @@ fn attacker_weight_stats(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64,
         }
         // 群体项权重 = 份额 × 衰减因子 × penalty（本实验从不写入 penalty，恒 1）
         for v in 0..wd.n0 {
-            let Some(share) = e.share_of(v as u32) else {
-                continue;
-            };
+            let Some(share) = e.share_of(v as u32) else { continue };
             let fs = match e.view_age(v as u32, t) {
                 Some(a) => e.decay_factor(a),
                 None => 1.0,
@@ -1341,16 +1224,8 @@ fn attacker_weight_stats(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64,
         }
     }
     (
-        if age_n > 0 {
-            age_sum / age_n as f64
-        } else {
-            f64::NAN
-        },
-        if all_w > 1e-12 {
-            atk_w / all_w
-        } else {
-            f64::NAN
-        },
+        if age_n > 0 { age_sum / age_n as f64 } else { f64::NAN },
+        if all_w > 1e-12 { atk_w / all_w } else { f64::NAN },
     )
 }
 
@@ -1422,12 +1297,21 @@ fn run_residue_b(wd: &WorldB, c: Cfg) -> ResidB {
     );
     let q_pre = mean(&pre_v);
     let g_pre = mean(&pre_g);
-    let q_residue = if (q_peak - q_pre).abs() > 1e-12 {
+    // 「攻击是否真的落地」判定。
+    //
+    // 原始公式 (末段 − 攻击前)/(峰值 − 攻击前) 在「攻击根本没落地」的 seed 上会
+    // 除以一个接近 0 的分母（潜伏者先休眠 → 永远不会给收益方打分 → 峰值 = 基线），
+    // 结果变成 ±几十的假残余。A4 用「补一条 1.0」保证载荷落地；本实验按 D2 口径
+    // 动态注入，所以必须显式判定：归一化增量 peak−pre 小于 MIN_ATTACK_GAIN 的 seed
+    // 记为未落地，残差不参与聚合（但仍在 E1B_ROW 里输出 landed=0）。
+    let landed = (q_peak - q_pre) >= MIN_ATTACK_GAIN_Q;
+    let q_residue = if landed {
         (q_end - q_pre) / (q_peak - q_pre)
     } else {
         f64::NAN
     };
-    let g_residue = if (g_peak - g_pre).abs() > 1e-12 {
+    let g_landed = (g_peak - g_pre) >= MIN_ATTACK_GAIN_G;
+    let g_residue = if g_landed {
         (g_end - g_pre) / (g_peak - g_pre)
     } else {
         f64::NAN
@@ -1477,6 +1361,8 @@ struct E2Snap {
     wshare_ratio: f64,
     /// 观察者缓存里攻击者副本的平均年龄
     mean_age: f64,
+    /// 该年龄对应的衰减因子均值（= 0.5^(age/H)，off 时恒 1）
+    mean_factor: f64,
     n_obs: usize,
 }
 
@@ -1493,17 +1379,15 @@ struct E2Run {
 }
 
 /// 某轮：攻击者份额（信任分布里的总份额）、收益方/诚实比、攻击者权重份额、平均副本年龄。
-fn e2_measure(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, f64, f64, usize) {
+fn e2_measure(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, f64, f64, f64, f64, usize) {
     let t = r * wd.tick;
-    let hon_alive: Vec<usize> = (0..wd.n0)
-        .filter(|&i| wd.is_hon[i] && wd.alive_flag[i])
-        .collect();
+    let hon_alive: Vec<usize> = (0..wd.n0).filter(|&i| wd.is_hon[i] && wd.alive_flag[i]).collect();
     let p = match wd.promoted {
         Some(p) => p,
-        None => return (f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0),
+        None => return (f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, 0),
     };
     let (mut mass_sum, mut q_sum, mut w_atk, mut w_all) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
-    let (mut age_sum, mut age_n, mut cnt) = (0.0f64, 0usize, 0usize);
+    let (mut age_sum, mut age_n, mut f_sum, mut f_n, mut cnt) = (0.0f64, 0usize, 0.0f64, 0usize, 0usize);
     for o in 0..wd.n0 {
         if !wd.is_hon[o] || !wd.alive_flag[o] || !wd.online[o][r as usize] {
             continue;
@@ -1519,9 +1403,7 @@ fn e2_measure(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, f64, 
         }
         // 群体项权重份额（份额 × 衰减因子）
         for v in 0..wd.n0 {
-            let Some(share) = e.share_of(v as u32) else {
-                continue;
-            };
+            let Some(share) = e.share_of(v as u32) else { continue };
             let fs = match e.view_age(v as u32, t) {
                 Some(a) => e.decay_factor(a),
                 None => 1.0,
@@ -1541,6 +1423,8 @@ fn e2_measure(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, f64, 
         }
         if let Some(a) = youngest {
             age_sum += a as f64;
+            f_sum += e.decay_factor(a) as f64;
+            f_n += 1;
             age_n += 1;
         }
         // 收益方 ÷ 诚实均值
@@ -1563,26 +1447,12 @@ fn e2_measure(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, f64, 
         cnt += 1;
     }
     (
-        if cnt > 0 {
-            mass_sum / cnt as f64
-        } else {
-            f64::NAN
-        },
-        if cnt > 0 {
-            q_sum / cnt as f64
-        } else {
-            f64::NAN
-        },
-        if w_all > 1e-12 {
-            w_atk / w_all
-        } else {
-            f64::NAN
-        },
-        if age_n > 0 {
-            age_sum / age_n as f64
-        } else {
-            f64::NAN
-        },
+        if cnt > 0 { mass_sum / cnt as f64 } else { f64::NAN },
+        if cnt > 0 { q_sum / cnt as f64 } else { f64::NAN },
+        if w_all > 1e-12 { w_atk / w_all } else { f64::NAN },
+        if age_n > 0 { age_sum / age_n as f64 } else { f64::NAN },
+        if f_n > 0 { f_sum / f_n as f64 } else { f64::NAN },
+        f64::NAN,
         cnt,
     )
 }
@@ -1590,7 +1460,8 @@ fn e2_measure(wd: &WorldB, nodes: &[Option<Engine>], r: u64) -> (f64, f64, f64, 
 fn run_e2(wd: &WorldB, c: Cfg) -> E2Run {
     let mut nodes = build_nodes_b(wd, c);
     let mut dark = false;
-    let mut per_round: Vec<(u64, f64, f64, f64, f64, usize)> =
+    // (t, mass, q, wshare, age, factor, cnt)
+    let mut per_round: Vec<(u64, f64, f64, f64, f64, f64, f64, usize)> =
         Vec::with_capacity(wd.rounds as usize + 1);
     for r in 0..=wd.rounds {
         let t = r * wd.tick;
@@ -1603,8 +1474,8 @@ fn run_e2(wd: &WorldB, c: Cfg) -> E2Run {
                 }
             }
         }
-        let (mass, q, wshare, age, cnt) = e2_measure(wd, &nodes, r);
-        per_round.push((t, mass, q, wshare, age, cnt));
+        let (mass, q, wshare, age, factor, _atk_landed_probe, cnt) = e2_measure(wd, &nodes, r);
+        per_round.push((t, mass, q, wshare, age, factor, 0.0, cnt));
         if t == E2_DARK_T {
             dark = true;
         }
@@ -1652,21 +1523,14 @@ fn run_e2(wd: &WorldB, c: Cfg) -> E2Run {
                 off,
                 t,
                 mass: x.1,
-                mass_ratio: if mass_peak.abs() > 1e-12 {
-                    x.1 / mass_peak
-                } else {
-                    f64::NAN
-                },
+                mass_ratio: if mass_peak.abs() > 1e-12 { x.1 / mass_peak } else { f64::NAN },
                 q: x.2,
                 q_resid,
                 wshare: x.3,
-                wshare_ratio: if wshare_peak.abs() > 1e-12 {
-                    x.3 / wshare_peak
-                } else {
-                    f64::NAN
-                },
+                wshare_ratio: if wshare_peak.abs() > 1e-12 { x.3 / wshare_peak } else { f64::NAN },
                 mean_age: x.4,
-                n_obs: x.5,
+                mean_factor: x.5,
+                n_obs: x.7,
             });
         }
     }
@@ -1702,9 +1566,8 @@ fn s5_case(c: Cfg, honest_age: u64, seed: u64) -> (f64, f64, f64) {
     // 结果 measured 恒为 0：参数不匹配时观点根本没进缓存）。
     let atk_key = key(1000 + (seed as usize % 97));
     let target_key = key(2000 + (seed as usize % 89));
-    let honest_keys: Vec<AccountKey> = (0..6)
-        .map(|i| key(3000 + i * 17 + (seed as usize % 71)))
-        .collect();
+    let honest_keys: Vec<AccountKey> =
+        (0..6).map(|i| key(3000 + i * 17 + (seed as usize % 71))).collect();
     let vp = view_params();
     let cap = (1.0 - BETA) / 7.0;
 
@@ -1752,8 +1615,6 @@ fn s5_case(c: Cfg, honest_age: u64, seed: u64) -> (f64, f64, f64) {
 /// 那样 n/k ≡ 1，判据退化成 T ≤ H/2，测不出任何东西。
 const E4_N: usize = 150;
 const E4_FOLLOWS: usize = 60;
-const E4_TICK_H: u64 = 1;
-const E4_SEED_DORM: f64 = 0.004;
 
 fn cfg_e4(seed: u64, dorm: f64) -> SimConfig {
     SimConfig {
@@ -1777,6 +1638,7 @@ fn cfg_e4(seed: u64, dorm: f64) -> SimConfig {
     }
 }
 
+#[allow(dead_code)]
 struct WorldE4 {
     seed: u64,
     dorm: f64,
@@ -1796,11 +1658,7 @@ fn build_world_e4(seed: u64, dorm: f64, tick: u64, rounds: u64) -> WorldE4 {
     let accs = world.accounts();
     let n0 = accs.len();
     let is_hon: Vec<bool> = (0..n0).map(|i| accs[i].kind == Kind::Honest).collect();
-    let alive: Vec<usize> = accs
-        .iter()
-        .filter(|a| a.is_alive())
-        .map(|a| a.idx)
-        .collect();
+    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
     let mut alive_flag = vec![false; n0];
     for &i in &alive {
         alive_flag[i] = true;
@@ -1822,11 +1680,7 @@ fn build_world_e4(seed: u64, dorm: f64, tick: u64, rounds: u64) -> WorldE4 {
     let mean_ratings = if hon_alive.is_empty() {
         0.0
     } else {
-        hon_alive
-            .iter()
-            .map(|&i| ratings[i].len() as f64)
-            .sum::<f64>()
-            / hon_alive.len() as f64
+        hon_alive.iter().map(|&i| ratings[i].len() as f64).sum::<f64>() / hon_alive.len() as f64
     };
     WorldE4 {
         seed,
@@ -1845,12 +1699,7 @@ fn offline_frac_e4(seed: u64, dorm: f64, steps: usize) -> f64 {
     let mut w = World::new(cfg_e4(seed, dorm));
     w.run();
     let _ = steps;
-    let alive: Vec<usize> = w
-        .accounts()
-        .iter()
-        .filter(|a| a.is_alive())
-        .map(|a| a.idx)
-        .collect();
+    let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
     if alive.is_empty() {
         return 0.0;
     }
@@ -1950,7 +1799,6 @@ fn run_e4(wd: &WorldE4, h: u64, t_card: u64, k: usize) -> CellE4 {
         }
     }
 
-    let _ = E4_TICK_H;
     let mut ess: Vec<f64> = Vec::new();
     let mut cov: Vec<f64> = Vec::new();
     let mut fstale: Vec<f64> = Vec::new();
@@ -1974,9 +1822,7 @@ fn run_e4(wd: &WorldE4, h: u64, t_card: u64, k: usize) -> CellE4 {
         let (mut w_sum, mut w2_sum) = (0.0f64, 0.0f64);
         let (mut cached, mut stale, mut age_sum, mut fac_sum) = (0usize, 0usize, 0.0f64, 0.0f64);
         for &(v, _score) in &wd.ratings[o] {
-            let Some(share) = e.share_of(v as u32) else {
-                continue;
-            };
+            let Some(share) = e.share_of(v as u32) else { continue };
             let fsv = match e.view_age(v as u32, now) {
                 Some(a) => {
                     cached += 1;
@@ -2052,17 +1898,9 @@ fn cmd_e1a() {
         let c = run_a(&worlds[wi], CFGS8[ci]);
         (wi, ci, c)
     });
-    eprintln!(
-        "[E1A] {} 次仿真完成（{:.1}s）",
-        cells.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    eprintln!("[E1A] {} 次仿真完成（{:.1}s）", cells.len(), t0.elapsed().as_secs_f64());
 
-    println!(
-        "\n== E1A 逐格原始数字（cfg = decay_enabled × half_life；2×4×{} = {} 次仿真） ==",
-        seeds.len(),
-        cells.len()
-    );
+    println!("\n== E1A 逐格原始数字（cfg = decay_enabled × half_life；2×4×{} = {} 次仿真） ==", seeds.len(), cells.len());
     println!("E1A_ROW,cfg,enabled,H,seed,dorm,off_end,n0,n_total,n_obs,n_hon_alive,n_hon_targets,honest_mean,s1_abs,s1_ratio,s1_max,s2_eff,s2_eff_p50,s2_total,s3_abs,s3_ratio,s4_abs,s4_ratio,spearman,sp_n,sum_err,mean_views,mean_factor,min_factor,n_syb_ratings,det_hash");
     for (wi, ci, c) in &cells {
         let wd = &worlds[*wi];
@@ -2116,17 +1954,10 @@ fn cmd_e1a() {
         ("mean_factor", |c| c.mean_factor),
         ("min_factor", |c| c.min_factor),
     ];
-    println!(
-        "\n== E1A 均值±sd（每个配置跨 {} seed；sd = 样本标准差 df=n-1） ==",
-        seeds.len()
-    );
+    println!("\n== E1A 均值±sd（每个配置跨 {} seed；sd = 样本标准差 df=n-1） ==", seeds.len());
     println!("E1A_CELL,cfg,metric,n,mean,sd,median,min,max");
     for ci in 0..CFGS8.len() {
-        let g: Vec<&CellA> = cells
-            .iter()
-            .filter(|(_, cj, _)| *cj == ci)
-            .map(|(_, _, c)| c)
-            .collect();
+        let g: Vec<&CellA> = cells.iter().filter(|(_, cj, _)| *cj == ci).map(|(_, _, c)| c).collect();
         for (name, getv) in metrics {
             let v: Vec<f64> = g.iter().map(|c| getv(c)).collect();
             let xs: Vec<f64> = v.iter().copied().filter(|x| x.is_finite()).collect();
@@ -2150,16 +1981,8 @@ fn cmd_e1a() {
     println!("E1A_PAIRED,metric,cfg,n,diff_mean,diff_sd,ci95_lo,ci95_hi,base,rel_pct,significant");
     let base_ci = CFGS8.iter().position(|c| c.name == "off72").unwrap();
     for ci in 0..4usize {
-        let a: Vec<&CellA> = cells
-            .iter()
-            .filter(|(_, cj, _)| *cj == ci)
-            .map(|(_, _, c)| c)
-            .collect();
-        let b: Vec<&CellA> = cells
-            .iter()
-            .filter(|(_, cj, _)| *cj == base_ci)
-            .map(|(_, _, c)| c)
-            .collect();
+        let a: Vec<&CellA> = cells.iter().filter(|(_, cj, _)| *cj == ci).map(|(_, _, c)| c).collect();
+        let b: Vec<&CellA> = cells.iter().filter(|(_, cj, _)| *cj == base_ci).map(|(_, _, c)| c).collect();
         for (name, getv) in metrics {
             let va: Vec<f64> = a.iter().map(|c| getv(c)).collect();
             let vb: Vec<f64> = b.iter().map(|c| getv(c)).collect();
@@ -2213,10 +2036,7 @@ fn cmd_e1a() {
             if ident { 1 } else { 0 }
         );
     }
-    println!(
-        "E1A_DET_ALL_IDENTICAL,{}",
-        if all_identical { 1 } else { 0 }
-    );
+    println!("E1A_DET_ALL_IDENTICAL,{}", if all_identical { 1 } else { 0 });
     eprintln!("[E1A] 结束 {:.1}s", t0.elapsed().as_secs_f64());
 }
 
@@ -2229,7 +2049,7 @@ fn cmd_e1b() {
     let t0 = Instant::now();
     let worlds: Vec<WorldB> = par_map(seeds.len(), nthreads(), |i| {
         let s = seeds[i];
-        let dorm = calibrate_b(s, B_STEPS, B_ATTACK_T, B_DARK_T);
+        let dorm = calibrate_b(s, B_STEPS, B_ATTACK_T, B_STEPS as u64);
         build_world_b(s, dorm, B_STEPS, B_TICK, B_ROUNDS, B_ATTACK_T)
     });
     eprintln!(
@@ -2245,19 +2065,17 @@ fn cmd_e1b() {
         let (wi, ci) = jobs[j];
         run_residue_b(&worlds[wi], CFGS8[ci])
     });
-    eprintln!(
-        "[E1B] {} 次仿真完成（{:.1}s）",
-        rows.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    eprintln!("[E1B] {} 次仿真完成（{:.1}s）", rows.len(), t0.elapsed().as_secs_f64());
 
     println!("\n== E1B 攻击残余逐格（D2 口径：600h/30 轮/每轮 20h；t=120 注入载荷、t=300 攻击者转离线） ==");
-    println!("E1B_ROW,cfg,enabled,H,seed,dorm,q_pre,q_peak,t_peak,q_end,q_residue,g_pre,g_peak,g_end,g_residue,n_obs_end,mean_age_end,wshare_end");
+    println!("E1B_ROW,cfg,enabled,H,seed,dorm,q_pre,q_peak,q_end,q_residue,q_landed,g_pre,g_peak,g_end,g_residue,g_landed,t_peak,n_obs_end,mean_age_end,wshare_end");
     for (j, r) in rows.iter().enumerate() {
         let (wi, ci) = jobs[j];
         let cfg = CFGS8[ci];
+        let q_landed = (r.q_peak - r.q_pre) >= MIN_ATTACK_GAIN_Q;
+        let g_landed = (r.g_peak - r.g_pre) >= MIN_ATTACK_GAIN_G;
         println!(
-            "E1B_ROW,{},{},{},{},{:.6},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "E1B_ROW,{},{},{},{},{:.6},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.cfg,
             if cfg.enabled { 1 } else { 0 },
             cfg.h,
@@ -2265,16 +2083,18 @@ fn cmd_e1b() {
             worlds[wi].dorm,
             f(r.q_pre, 6),
             f(r.q_peak, 6),
-            r.t_peak,
             f(r.q_end, 6),
             f(r.q_residue, 6),
+            if q_landed { 1 } else { 0 },
             f(r.g_pre, 6),
             f(r.g_peak, 6),
             f(r.g_end, 6),
             f(r.g_residue, 6),
+            if g_landed { 1 } else { 0 },
+            r.t_peak,
             r.n_obs_end,
             f(r.mean_age_end, 2),
-            f(r.wshare_end, 5),
+            f(r.wshare_end, 5)
         );
     }
 
@@ -2290,6 +2110,15 @@ fn cmd_e1b() {
         ("wshare_end", |r| r.wshare_end),
         ("n_obs_end", |r| r.n_obs_end as f64),
     ];
+    println!("\n== E1B 攻击落地计数（峰值−基线 >= {} 视为落地；未落地的 seed 残差记为 nan 且不参与聚合） ==", MIN_ATTACK_GAIN_Q);
+    println!("E1B_LANDED,cfg,n_seeds,q_landed,g_landed");
+    for ci in 0..CFGS8.len() {
+        let g: Vec<&ResidB> = rows.iter().filter(|r| r.cfg == CFGS8[ci].name).collect();
+        let ql = g.iter().filter(|r| (r.q_peak - r.q_pre) >= MIN_ATTACK_GAIN_Q).count();
+        let gl = g.iter().filter(|r| (r.g_peak - r.g_pre) >= MIN_ATTACK_GAIN_G).count();
+        println!("E1B_LANDED,{},{},{},{}", CFGS8[ci].name, g.len(), ql, gl);
+    }
+
     println!("\n== E1B 均值±sd（每个配置跨 {} seed） ==", seeds.len());
     println!("E1B_CELL,cfg,metric,n,mean,sd,median,min,max");
     for ci in 0..CFGS8.len() {
@@ -2346,40 +2175,25 @@ fn cmd_e1b() {
         let g = pick(ci);
         for (name, getv) in metrics {
             let (f8, l16) = if seeds.len() >= 24 {
-                (
-                    mean(&g[..8].iter().map(|r| getv(r)).collect::<Vec<_>>()),
-                    mean(&g[8..].iter().map(|r| getv(r)).collect::<Vec<_>>()),
-                )
+                (mean(&g[..8].iter().map(|r| getv(r)).collect::<Vec<_>>()),
+                 mean(&g[8..].iter().map(|r| getv(r)).collect::<Vec<_>>()))
             } else {
                 (f64::NAN, f64::NAN)
             };
             let (s8, s16) = if seeds.len() >= 24 {
-                (
-                    sd(&g[..8].iter().map(|r| getv(r)).collect::<Vec<_>>()),
-                    sd(&g[8..].iter().map(|r| getv(r)).collect::<Vec<_>>()),
-                )
+                (sd(&g[..8].iter().map(|r| getv(r)).collect::<Vec<_>>()),
+                 sd(&g[8..].iter().map(|r| getv(r)).collect::<Vec<_>>()))
             } else {
                 (f64::NAN, f64::NAN)
             };
             let flip = if f8.is_finite() && l16.is_finite() {
-                if (f8 > 0.0 && l16 < 0.0) || (f8 < 0.0 && l16 > 0.0) {
-                    1
-                } else {
-                    0
-                }
+                if (f8 > 0.0 && l16 < 0.0) || (f8 < 0.0 && l16 > 0.0) { 1 } else { 0 }
             } else {
                 0
             };
             println!(
                 "E1B_SPLIT,{},{},{},{},{},{},{},{}",
-                CFGS8[ci].name,
-                name,
-                f(f8, 6),
-                f(l16, 6),
-                f(s8, 6),
-                f(s16, 6),
-                flip,
-                ""
+                CFGS8[ci].name, name, f(f8, 6), f(l16, 6), f(s8, 6), f(s16, 6), flip, ""
             );
         }
     }
@@ -2395,14 +2209,10 @@ fn cmd_e2() {
     let t0 = Instant::now();
     let worlds: Vec<WorldB> = par_map(seeds.len(), nthreads(), |i| {
         let s = seeds[i];
-        let dorm = calibrate_b(s, E2_STEPS, E2_ATTACK_T, E2_DARK_T);
+        let dorm = calibrate_b(s, E2_STEPS, E2_ATTACK_T, E2_STEPS as u64);
         build_world_b(s, dorm, E2_STEPS, E2_TICK, E2_ROUNDS, E2_ATTACK_T)
     });
-    eprintln!(
-        "[E2] 世界就绪 {} 个（{:.1}s）",
-        worlds.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    eprintln!("[E2] 世界就绪 {} 个（{:.1}s）", worlds.len(), t0.elapsed().as_secs_f64());
     let jobs: Vec<(usize, usize)> = (0..worlds.len())
         .flat_map(|wi| (0..E2_CFGS.len()).map(move |ci| (wi, ci)))
         .collect();
@@ -2410,68 +2220,42 @@ fn cmd_e2() {
         let (wi, ci) = jobs[j];
         run_e2(&worlds[wi], E2_CFGS[ci])
     });
-    eprintln!(
-        "[E2] {} 次仿真完成（{:.1}s）",
-        runs.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    eprintln!("[E2] {} 次仿真完成（{:.1}s）", runs.len(), t0.elapsed().as_secs_f64());
 
-    println!(
-        "\n== E2 攻击结束前的基线/峰值（每配置跨 {} seed） ==",
-        seeds.len()
-    );
-    println!("E2_BASE,cfg,seed,dorm,q_pre,q_peak,mass_peak,wshare_peak,t_peak");
+    println!("\n== E2 攻击结束前的基线/峰值（每配置跨 {} seed） ==", seeds.len());
+    println!("E2_BASE,cfg,seed,dorm,q_pre,q_peak,q_gain,mass_peak,wshare_peak,t_peak");
     for (j, r) in runs.iter().enumerate() {
         let (wi, _ci) = jobs[j];
         println!(
-            "E2_BASE,{},{},{:.6},{},{},{},{},{}",
-            r.cfg,
-            r.seed,
-            worlds[wi].dorm,
-            f(r.q_pre, 6),
-            f(r.q_peak, 6),
-            f(r.mass_peak, 6),
-            f(r.wshare_peak, 6),
-            r.t_peak
+            "E2_BASE,{},{},{:.6},{},{},{},{},{},{}",
+            r.cfg, r.seed, worlds[wi].dorm, f(r.q_pre, 6), f(r.q_peak, 6),
+            f(r.q_peak - r.q_pre, 6), f(r.mass_peak, 6), f(r.wshare_peak, 6), r.t_peak
         );
     }
 
     println!("\n== E2 快照（攻击结束后 off 小时；mass_ratio = 攻击者份额 ÷ 攻击期峰值） ==");
-    println!(
-        "E2_SNAP,cfg,seed,off_h,t,mass,mass_ratio,q,q_resid,wshare,wshare_ratio,mean_age,n_obs"
-    );
+    println!("E2_SNAP,cfg,seed,off_h,t,mass,mass_ratio,q,q_resid,wshare,wshare_ratio,mean_age,mean_factor,n_obs");
     for r in &runs {
         for s in &r.snaps {
             println!(
-                "E2_SNAP,{},{},{},{},{},{},{},{},{},{},{},{}",
-                s.cfg,
-                s.seed,
-                s.off,
-                s.t,
-                f(s.mass, 8),
-                f(s.mass_ratio, 6),
-                f(s.q, 6),
-                f(s.q_resid, 6),
-                f(s.wshare, 6),
-                f(s.wshare_ratio, 6),
-                f(s.mean_age, 1),
-                s.n_obs
+                "E2_SNAP,{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                s.cfg, s.seed, s.off, s.t, f(s.mass, 8), f(s.mass_ratio, 6), f(s.q, 6),
+                f(s.q_resid, 6), f(s.wshare, 6), f(s.wshare_ratio, 6), f(s.mean_age, 1),
+                f(s.mean_factor, 5), s.n_obs
             );
         }
     }
 
-    println!(
-        "\n== E2 聚合（每配置 × 每偏移点，跨 {} seed 的 mean±sd） ==",
-        seeds.len()
-    );
+    println!("\n== E2 聚合（每配置 × 每偏移点，跨 {} seed 的 mean±sd） ==", seeds.len());
     println!("E2_AGG,cfg,off_h,metric,n,mean,sd,median");
-    let metrics: [(&'static str, fn(&E2Snap) -> f64); 7] = [
+    let metrics: [(&'static str, fn(&E2Snap) -> f64); 8] = [
         ("mass_ratio", |s| s.mass_ratio),
         ("q_resid", |s| s.q_resid),
         ("wshare_ratio", |s| s.wshare_ratio),
         ("mass", |s| s.mass),
         ("q", |s| s.q),
         ("mean_age", |s| s.mean_age),
+        ("mean_factor", |s| s.mean_factor),
         ("n_obs", |s| s.n_obs as f64),
     ];
     for c in E2_CFGS {
@@ -2486,6 +2270,37 @@ fn cmd_e2() {
                 let v: Vec<f64> = g.iter().map(|s| getv(s)).collect();
                 println!(
                     "E2_AGG,{},{},{},{},{},{},{}",
+                    c.name,
+                    off,
+                    name,
+                    v.iter().filter(|x| x.is_finite()).count(),
+                    f(mean(&v), 6),
+                    f(sd(&v), 6),
+                    f(median(&v), 6)
+                );
+            }
+        }
+    }
+
+    // 只统计「攻击真的落地」的 seed（q_peak − q_pre >= MIN_ATTACK_GAIN_Q）。
+    // 未落地的 seed 的 q 曲线只是收益方的世俗漂移，会把残差分母抬成噪声。
+    println!("\n== E2 聚合（仅落地的 seed；q_gain >= {}） ==", MIN_ATTACK_GAIN_Q);
+    println!("E2_AGG_LANDED,cfg,off_h,metric,n,mean,sd,median");
+    for c in E2_CFGS {
+        let landed_runs: Vec<&E2Run> = runs
+            .iter()
+            .filter(|r| r.cfg == c.name && (r.q_peak - r.q_pre) >= MIN_ATTACK_GAIN_Q)
+            .collect();
+        for off in E2_OFFSETS {
+            let g: Vec<&E2Snap> = landed_runs
+                .iter()
+                .flat_map(|r| r.snaps.iter())
+                .filter(|s| s.off == off)
+                .collect();
+            for (name, getv) in metrics {
+                let v: Vec<f64> = g.iter().map(|s| getv(s)).collect();
+                println!(
+                    "E2_AGG_LANDED,{},{},{},{},{},{},{}",
                     c.name,
                     off,
                     name,
@@ -2547,26 +2362,16 @@ fn cmd_e3() {
     println!("E3_ROW,H,age_h,seed,measured_over_cap,analytic_ratio,allfresh_over_cap,cap_abs,engine_factor");
     let n_seeds = seeds.len();
     let jobs: Vec<(usize, usize, usize)> = (0..S5_H.len())
-        .flat_map(|hi| {
-            (0..S5_AGES.len()).flat_map(move |ai| (0..n_seeds).map(move |si| (hi, ai, si)))
-        })
+        .flat_map(|hi| (0..S5_AGES.len()).flat_map(move |ai| (0..n_seeds).map(move |si| (hi, ai, si))))
         .collect();
     let rows: Vec<(f64, f64, f64)> = par_map(jobs.len(), nthreads(), |j| {
         let (hi, ai, si) = jobs[j];
-        let c = Cfg {
-            name: "s5",
-            enabled: true,
-            h: S5_H[hi],
-        };
+        let c = Cfg { name: "s5", enabled: true, h: S5_H[hi] };
         s5_case(c, S5_AGES[ai], seeds[si])
     });
     for (j, &(m, a, hom)) in rows.iter().enumerate() {
         let (hi, ai, si) = jobs[j];
-        let c = Cfg {
-            name: "s5",
-            enabled: true,
-            h: S5_H[hi],
-        };
+        let c = Cfg { name: "s5", enabled: true, h: S5_H[hi] };
         let e = Engine::new(ecfg(c));
         println!(
             "E3_ROW,{},{},{},{},{},{},{},{},{}",
@@ -2582,13 +2387,8 @@ fn cmd_e3() {
         );
     }
 
-    println!(
-        "\n== E3 聚合（H × age，跨 {} seed 的 mean±sd；并与解析式对照） ==",
-        seeds.len()
-    );
-    println!(
-        "E3_AGG,H,age_h,n,measured_mean,measured_sd,analytic,abs_err_mean,abs_err_max,rel_err_pct"
-    );
+    println!("\n== E3 聚合（H × age，跨 {} seed 的 mean±sd；并与解析式对照） ==", seeds.len());
+    println!("E3_AGG,H,age_h,n,measured_mean,measured_sd,analytic,abs_err_mean,abs_err_max,rel_err_pct");
     for hi in 0..S5_H.len() {
         for ai in 0..S5_AGES.len() {
             let v: Vec<(f64, f64, f64)> = (0..jobs.len())
@@ -2609,20 +2409,8 @@ fn cmd_e3() {
                 f(sd(&meas), 8),
                 f(am, 8),
                 f(em, 8),
-                f(
-                    err.iter()
-                        .map(|x| x.abs())
-                        .fold(f64::NEG_INFINITY, f64::max),
-                    8
-                ),
-                f(
-                    if am.abs() > 1e-12 {
-                        100.0 * em / am
-                    } else {
-                        f64::NAN
-                    },
-                    3
-                )
+                f(err.iter().map(|x| x.abs()).fold(f64::NEG_INFINITY, f64::max), 8),
+                f(if am.abs() > 1e-12 { 100.0 * em / am } else { f64::NAN }, 3)
             );
         }
     }
@@ -2631,11 +2419,7 @@ fn cmd_e3() {
     println!("\n== E3 对照：decay_enabled=false 时放大倍数必须恒为 1 ==");
     println!("E3_OFF,age_h,n,measured_mean,measured_sd");
     for &age in &S5_AGES {
-        let c = Cfg {
-            name: "off",
-            enabled: false,
-            h: 72,
-        };
+        let c = Cfg { name: "off", enabled: false, h: 72 };
         let v: Vec<f64> = seeds.iter().map(|&s| s5_case(c, age, s).0).collect();
         println!(
             "E3_OFF,{},{},{},{}",
@@ -2663,16 +2447,14 @@ fn cmd_e4() {
         let dorm = calibrate_e4(s);
         build_world_e4(s, dorm, E4_T[ti], E4_STEPS as u64 / E4_T[ti])
     });
-    eprintln!(
-        "[E4] 世界就绪 {} 个（{:.1}s）",
-        worlds.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    eprintln!("[E4] 世界就绪 {} 个（{:.1}s）", worlds.len(), t0.elapsed().as_secs_f64());
 
     let jobs: Vec<(usize, usize, usize, usize)> = (0..seeds.len())
         .flat_map(|si| {
             (0..E4_H.len()).flat_map(move |hi| {
-                (0..E4_T.len()).flat_map(move |ti| (0..E4_K.len()).map(move |ki| (si, hi, ti, ki)))
+                (0..E4_T.len()).flat_map(move |ti| {
+                    (0..E4_K.len()).map(move |ki| (si, hi, ti, ki))
+                })
             })
         })
         .collect();
@@ -2681,11 +2463,7 @@ fn cmd_e4() {
         let wd = &worlds[si * E4_T.len() + ti];
         run_e4(wd, E4_H[hi], E4_T[ti], E4_K[ki])
     });
-    eprintln!(
-        "[E4] {} 次仿真完成（{:.1}s）",
-        cells.len(),
-        t0.elapsed().as_secs_f64()
-    );
+    eprintln!("[E4] {} 次仿真完成（{:.1}s）", cells.len(), t0.elapsed().as_secs_f64());
 
     println!("\n== E4 逐格（H × T × k；每格 {} seed） ==", seeds.len());
     println!("E4_ROW,H,T,k,seed,n_sources,sweep_h,satisfied,ess,coverage,frac_stale,mean_age,mean_factor,frac_noview");
@@ -2711,10 +2489,7 @@ fn cmd_e4() {
         );
     }
 
-    println!(
-        "\n== E4 聚合（H × T × k，跨 {} seed 的 mean±sd） ==",
-        seeds.len()
-    );
+    println!("\n== E4 聚合（H × T × k，跨 {} seed 的 mean±sd） ==", seeds.len());
     println!("E4_AGG,H,T,k,satisfied,n,ess_mean,ess_sd,coverage_mean,coverage_sd,frac_stale_mean,frac_stale_sd,mean_age_mean,mean_factor_mean,frac_noview_mean");
     for hi in 0..E4_H.len() {
         for ti in 0..E4_T.len() {
@@ -2734,11 +2509,7 @@ fn cmd_e4() {
                     E4_H[hi],
                     E4_T[ti],
                     E4_K[ki],
-                    if g.first().map(|c| c.satisfied).unwrap_or(false) {
-                        1
-                    } else {
-                        0
-                    },
+                    if g.first().map(|c| c.satisfied).unwrap_or(false) { 1 } else { 0 },
                     g.len(),
                     f(mean(&ess), 4),
                     f(sd(&ess), 4),
@@ -2778,16 +2549,8 @@ fn cmd_e4() {
     }
     // 分组更细：T·(n/k)/H 的比值分箱
     println!("\n== E4 判据细化：(T·(n/k))/H 比值分箱 ==");
-    println!(
-        "E4_BIN,ratio_lo,ratio_hi,n_cells,ess_mean,coverage_mean,frac_stale_mean,mean_age_mean"
-    );
-    for (lo, hi) in [
-        (0.0, 0.25),
-        (0.25, 0.5),
-        (0.5, 1.0),
-        (1.0, 2.0),
-        (2.0, 100.0),
-    ] {
+    println!("E4_BIN,ratio_lo,ratio_hi,n_cells,ess_mean,coverage_mean,frac_stale_mean,mean_age_mean");
+    for (lo, hi) in [(0.0, 0.25), (0.25, 0.5), (0.5, 1.0), (1.0, 2.0), (2.0, 100.0)] {
         let g: Vec<&CellE4> = cells
             .iter()
             .filter(|c| {
@@ -2826,11 +2589,7 @@ fn main() {
     );
     println!(
         "# 场景 A（S 判据）：steps={} rounds={} tick={}h 潜伏者 t={}h 突变；离线标定目标 {:.0}%",
-        A_STEPS,
-        A_ROUNDS,
-        A_TICK,
-        A_NORMAL_UNTIL,
-        OFFLINE_TARGET_A * 100.0
+        A_STEPS, A_ROUNDS, A_TICK, A_NORMAL_UNTIL, OFFLINE_TARGET_A * 100.0
     );
     println!(
         "# 场景 B/E1B：steps={} rounds={} tick={}h t={}h 注入 t={}h 转离线；离线标定目标(在 t={}) {:.0}%",
@@ -2840,10 +2599,7 @@ fn main() {
         "# E2：steps={} rounds={} tick={}h 快照偏移={:?}h",
         E2_STEPS, E2_ROUNDS, E2_TICK, E2_OFFSETS
     );
-    println!(
-        "# E3：H={:?} ages={:?} 合成用例 7 来源各 1.0",
-        S5_H, S5_AGES
-    );
+    println!("# E3：H={:?} ages={:?} 合成用例 7 来源各 1.0", S5_H, S5_AGES);
     println!(
         "# E4：H={:?} T={:?} k={:?} N={} FOLLOWS={} steps={}",
         E4_H, E4_T, E4_K, E4_N, E4_FOLLOWS, E4_STEPS

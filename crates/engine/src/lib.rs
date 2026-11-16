@@ -85,6 +85,26 @@
 //! 折扣取 `min`，不复合，也**没有自动恢复**（[Engine::clear_penalties] 是
 //! 应用层的手动撤销）。默认 `penalty_strength = 1.0`、折扣表为空，
 //! 不调用报告接口时行为与改造前逐位一致。算法细节见 `src/badlist.rs`。
+//!
+//! ## 状态持久化：快照（P4）
+//!
+//! 引擎仍然**不做 I/O**，但它现在能把整份运行状态**变成字节**、再从字节**装回来**：
+//!
+//! * [Engine::snapshot] → [EngineSnapshot]：正分清单、观点缓存、账户编号、折扣表、
+//!   时钟、统计、抽样轮次进度、随机流的**内部状态**，一次全拿到；
+//! * [EngineSnapshot::encode] → [EngineSnapshot::decode]：手写定长字节格式
+//!   （零外部依赖、**不用 serde**），浮点用 `to_bits()` 逐位搬运；
+//! * [Engine::restore]：三层校验（版本 → 结构自洽 → 观点字节能被
+//!   `cfg.view_params` 解出来），任何一层不过都返回 `None`，**绝不部分恢复**。
+//!
+//! 恢复后的引擎与原引擎**逐位一致**：`query` / `shares` /
+//! `freshness_stats` / `trust_distribution` / `stats` 全部相同，
+//! 之后每一步 `tick` 抽到的请求序列也相同（轮次进度与随机流位置都装回去了）。
+//!
+//! 快照**不含 cfg**：配置是部署参数、不是运行状态，由调用方自己保管并在
+//! `restore` 时原样传入。参数不符会被拒绝 —— 包括「seed 不同但观点字节长度
+//! 完全一样」这种 `CompressedView::decode` 抓不到的情形（靠快照里的参数指纹挡）。
+//! 格式细节见 `src/snapshot.rs` 的模块文档。
 
 mod badlist;
 pub mod criteria;

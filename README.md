@@ -47,14 +47,14 @@ cd crates/engine && cargo run --example quickstart
 
 | crate | 职责 | 测试 |
 |---|---|---:|
-| [`tm_store`](crates/store) | 账户表、正分清单、轮次抽样 + 退避 | 136 |
+| [`tm_store`](crates/store) | 账户表、正分清单、轮次抽样 + 退避、状态导出 | 157 |
 | [`tm_view`](crates/view) | Count Sketch 定长压缩观点（2048×5 f32 = 40 KB） | 51 |
 | [`tm_agg`](crates/agg) | 指数衰减、聚合（Mean/Median/WeightedMedian/Trimmed）、β 混合 | 63 |
-| [`tm_engine`](crates/engine) | 运行时：把上面三个拼起来、badlist 受害者反馈、判据 | 92 |
+| [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 195 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
-| [`tm_exp`](crates/exp) | 端到端实验装置（21 个 bin） | 25 |
+| [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
 
-能力矩阵 **555 passed / 0 failed / 1 ignored**。
+能力矩阵 **606 passed / 0 failed / 1 ignored**（七个 workspace）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 
@@ -91,8 +91,17 @@ cd crates/engine && cargo run --example quickstart
 
 ## 构建与测试
 
+**一条命令跑完全部检查**（推荐）：
+
+~~~powershell
+.\verify-all.ps1
+~~~
+
+它会跑七个 workspace 的测试、文档测试、clippy、以及 wasm32 逐位对拍，最后打印汇总。
+
+**手动跑某个 crate**（每个 crate 是独立 workspace，要分别 cd 进去）：
+
 ~~~bash
-# 每个 crate 是独立 workspace，要分别跑
 cd crates/store && cargo test
 cd crates/view  && cargo test
 cd crates/agg   && cargo test
@@ -101,10 +110,22 @@ cd crates/sim   && cargo test
 cd crates/exp   && cargo test
 ~~~
 
+⚠️ **不要只在根目录跑 `cargo test`**——根目录是 v1.0 旧代码，只有 58 条测试。
+上面六个 crate 是独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
+
+### wasm32 逐位对拍
+
+~~~powershell
+cd tools\wasm-smoke
+.\run-all.ps1
+~~~
+
+证明**整个引擎**（不是某个纯函数）在 wasm32 与 native 上给出逐位相同的声望值。
+
 ## 许可
 
 MIT。见 [LICENSE](LICENSE)。
 
 ---
 
-**最后更新**：2026-11-16。能力矩阵与威胁模型数字均来自 P0 修复后的 8 seed 真引擎实测。
+**最后更新**：2026-11-16。能力矩阵与威胁模型数字均来自 P0 修复后的 **16 seed** 真引擎实测。

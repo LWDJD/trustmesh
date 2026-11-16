@@ -826,6 +826,10 @@ impl Engine {
             stat_rejected_view: snap.stat_rejected_view,
             stat_rejected_capacity: snap.stat_rejected_capacity,
             stat_rejected_nonfinite: snap.stat_rejected_nonfinite,
+            // last_k 是**观测值**（最近一次 tick 传的 k），不是运行状态：
+            // 恢复后还没 tick 过，按「一次都没 tick 过」置 0。
+            // 它只用于 freshness_budget 的 refresh_period 推算，不影响任何计算。
+            last_k: 0,
         })
     }
 }

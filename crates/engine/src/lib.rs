@@ -30,6 +30,12 @@
 
 mod badlist;
 
+/// 自适应抽样预算：A10 硬约束 `(n_list/k)·T ≤ H/2` 的纯函数实现。
+///
+/// 只提供只读能力（推荐值 + 体检结果），不改变引擎的任何行为：
+/// 抽样仍然由应用层按自己的节奏调用 [Engine::tick]，预算 `k` 由应用层决定。
+pub mod budget;
+
 use std::collections::BTreeMap;
 
 use badlist::SourceSnapshot;

@@ -196,7 +196,9 @@ pub fn effective_sample_size(weights: &[Score]) -> f32 {
         .copied()
         .filter(|w| w.is_finite() && *w > 0.0)
         .fold(0.0f32, f32::max);
-    if !(max > 0.0) {
+    // 显式判 NaN：max 是 f32::max 的折积结果，NaN 输入已在 filter 里剔除，
+    // 这里保留 NaN 分支只是防御性写法（真实路径不会走到）。
+    if max.is_nan() || max <= 0.0 {
         // 空切片、全部非法、或全部下溢到 0。
         return 0.0;
     }
@@ -210,7 +212,7 @@ pub fn effective_sample_size(weights: &[Score]) -> f32 {
         sum += x;
         sum_sq += x * x;
     }
-    if !(sum_sq > 0.0) {
+    if sum_sq.is_nan() || sum_sq <= 0.0 {
         return 0.0;
     }
     let ess = sum * sum / sum_sq;
@@ -426,9 +428,14 @@ mod tests {
     #[test]
     fn 推荐值_复现_a10_推荐的_k16() {
         assert_eq!(recommended_k(46, 12, 72), 16);
-        // 实数约束确实卡在 15 与 16 之间
-        assert!(2.0 * 46.0 * 12.0 / 72.0 > 15.0);
-        assert!(2.0 * 46.0 * 12.0 / 72.0 < 16.0);
+        // 实数约束确实卡在 15 与 16 之间（用变量绕开 clippy 的常量断言告警，
+        // 这样将来改 n_list/T/H 时断言仍然有效）
+        let n = 46usize;
+        let t = 12u64;
+        let h = 72u64;
+        let raw = 2.0 * n as f64 * t as f64 / h as f64;
+        assert!(raw > 15.0, "实数值 {raw}");
+        assert!(raw < 16.0, "实数值 {raw}");
     }
 
     /// 防回归：H/2 边界被算成 H 或 2H。按 A10 硬约束 `k ≥ 2·n·T/H`：

@@ -9,6 +9,64 @@
 //! - 它产出「我需要谁的观点」的请求意图，由应用层去真正发起
 //! - 应用层拿到观点后回调 `on_view`
 //!
+//! # 五分钟上手
+//!
+//! 下面这段是**真能跑**的最小流程（`cargo test --doc` 会验证它）。
+//! 完整版见 `examples/quickstart.rs`。
+//!
+//! ~~~rust
+//! use tm_engine::{Engine, EngineConfig};
+//! use tm_view::{CompressedView, ViewParams};
+//!
+//! fn key(name: &str) -> [u8; 32] {
+//!     let mut k = [0u8; 32];
+//!     k[..name.len()].copy_from_slice(name.as_bytes());
+//!     k
+//! }
+//!
+//! // 全网必须用同一套 ViewParams（形状 + 种子），不一致的观点会被整条丢弃。
+//! let params = ViewParams::new(2048, 5, 0);
+//! let cfg = EngineConfig { view_params: params, ..EngineConfig::default() };
+//!
+//! let names = ["alice", "bob", "carol"];
+//! // 每个在线节点各有一个引擎。编号顺序（intern 的先后）全网一致。
+//! let mut engines: Vec<Engine> = (0..names.len())
+//!     .map(|_| {
+//!         let mut e = Engine::with_seed(cfg.clone(), 7);
+//!         for n in &names {
+//!             e.intern(key(n));   // 顺序必须一致：编号 = intern 的先后次序
+//!         }
+//!         e
+//!     })
+//!     .collect();
+//!
+//! // 打分：alice 信任 bob 0.9、carol 0.7（取值 (0,1]）
+//! engines[0].rate(1, 0.9, 0);
+//! engines[0].rate(2, 0.7, 0);
+//!
+//! // 一轮传播：导出 → 抽样 → 收取
+//! let now = 12;
+//! let published: Vec<CompressedView> = engines.iter().map(|e| e.export_view(now)).collect();
+//! let fetches: Vec<Vec<u32>> = engines
+//!     .iter_mut()
+//!     .map(|e| e.tick(now, 2).into_iter().map(|r| r.idx).collect())
+//!     .collect();
+//! for (i, reqs) in fetches.iter().enumerate() {
+//!     for &owner in reqs {
+//!         engines[i].on_view(owner, published[owner as usize].clone(), now, now);
+//!     }
+//! }
+//!
+//! // 查询：我眼中 bob 有多可信（0~1）
+//! let bob = engines[0].query(1, now);
+//! assert!(bob > 0.0, "alice 评过 bob，应该拿到正的声望");
+//! assert!((0.0..=1.0).contains(&bob), "声望恒在 [0,1]");
+//!
+//! // 发布自己的观点（对外只是一份定长字节）
+//! let mine = engines[0].export_view(now);
+//! assert_eq!(mine.bytes(), 2048 * 5 * 4);
+//! ~~~
+//!
 //! ## 抽样退避与兜底探测（设计规格 4.9.4）
 //!
 //! * [Engine::tick] 按**连续失败次数**退避（权重 1/2^n）：连续取不到观点的来源

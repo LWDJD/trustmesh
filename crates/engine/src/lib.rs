@@ -150,6 +150,24 @@ pub struct EngineConfig {
     ///
     /// 这是 badlist 的**唯一**配置项：没有清单、没有 EMA、没有恢复速率。
     pub penalty_strength: Score,
+    /// 观点缓存的**条目数**上限；`0`（默认）= 无限制，与引入本字段之前逐位一致。
+    ///
+    /// 设计规格 §0.3 把「观点文件设条目数 / 字节数上限，超出即丢弃并视同失败」
+    /// 写成**唯一的**资源保护，但旧实现里 [Engine::on_view] 无条件插入
+    /// `views`，`views` 只会被应用层主动调用的 [Engine::prune_stale]
+    /// 缩小（审计 A13-spec U-01 判「未实现」）。恶意应用层持续
+    /// `on_view` 不同 owner 就能让内存无界增长（每份视图 40 KiB 起）。
+    ///
+    /// 字节数上限由形状参数固定：每份视图恒为
+    /// `view_params.buckets × view_params.hashers × 4` 字节，参数不一致的视图
+    /// 在入口就被丢弃，所以**条数上限即内存上限**
+    /// `max_views × 视图字节数`（另加每条约几十字节的
+    /// [StoredView] 元数据与 `Vec` 头）。
+    ///
+    /// 判定规则见 [Engine::on_view] 的「容量上限」一节，要点：
+    /// **只有「新 owner 且已满」才丢；已缓存的 owner 更新既有条目永远接受**
+    /// （原地覆盖不增长内存）。
+    pub max_views: usize,
 }
 
 impl Default for EngineConfig {
@@ -166,6 +184,9 @@ impl Default for EngineConfig {
             // 没人调用 report_bad_account 时 query 完全跳过折扣分支，
             // 因此默认行为与引入本机制之前逐位一致。
             penalty_strength: 1.0,
+            // 0 = 无上限（旧行为）。默认值必须逐位保持：任何一个既有实验/测试
+            // 都可能喂超过（将来）某个上限的 owner 数量，改默认值等于改口径。
+            max_views: 0,
         }
     }
 }
@@ -198,6 +219,20 @@ pub struct FetchRequest {
     pub key: AccountKey,
 }
 
+/// [Engine::on_view] 丢弃一份观点的原因（安全加固 P2）。
+///
+/// 两种原因的**处理语义完全相同**（见 [Engine::on_view]）：整条丢弃、按
+/// [Engine::on_view_failed] 的语义只给 owner 累计连败、不刷新 `last_check`、
+/// 不进缓存、不计命中。区分它们只为可观测性：容量丢弃说明 `max_views` 已经
+/// 顶满（资源保护在起作用）；非有限丢弃说明**有人在喂脏视图**（安全信号）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rejection {
+    /// 缓存已达 [EngineConfig::max_views] 且这是新 owner。
+    Capacity,
+    /// 这份观点的 `total_mass` 不是有限值（NaN / ±∞）。
+    NonFinite,
+}
+
 pub struct Engine {
     accounts: AccountTable,
     ratings: PositiveList,
@@ -224,6 +259,18 @@ pub struct Engine {
     /// 统计：累计请求数 / 成功数
     stat_requests: u64,
     stat_hits: u64,
+    /// 被 [Engine::on_view] **整条丢弃**的观点累计数（安全加固 P2）。
+    ///
+    /// 与 [Engine::stats] 分开记，是为了让 `stats()` 的四元组**形状与含义
+    /// 一个字节都不变**（既有实验与测试直接按位置解构它）。这里含两类丢弃：
+    /// 容量（[EngineConfig::max_views]）与非有限读数；`view.params()` 不匹配
+    /// 的那类仍然**只**静默丢弃、不计入——它属于协议层的「无法解释的字节」，
+    /// 与「可解释但被拒」是两件事。细分计数见 [Engine::rejected_breakdown]。
+    stat_rejected_view: u64,
+    /// 其中因容量上限被丢的条数。
+    stat_rejected_capacity: u64,
+    /// 其中因读数非有限（NaN / ±∞）被丢的条数。
+    stat_rejected_nonfinite: u64,
 }
 
 impl Engine {
@@ -244,6 +291,9 @@ impl Engine {
             rng,
             stat_requests: 0,
             stat_hits: 0,
+            stat_rejected_view: 0,
+            stat_rejected_capacity: 0,
+            stat_rejected_nonfinite: 0,
         }
     }
 
@@ -390,6 +440,45 @@ impl Engine {
     /// 这是必需的输入校验，不是优化：`hashers` 由对端声明，不校验时 16×4096
     /// 的视图能把单次 `on_view` 从 0.9 ms 拉到 572 ms（×609），单视图体积
     /// 上限 2^26 单元 = 256 MiB 也会原样进入缓存。
+    ///
+    /// # 容量上限（设计规格 §0.3，安全加固 P2）
+    ///
+    /// [EngineConfig::max_views] 给出缓存条目数上限，`0` 表示无限制。
+    ///
+    /// * **新 owner 且 `views.len() >= max_views`** → 整条**丢弃**，并按
+    ///   [Engine::on_view_failed] 的语义处理：只给该 owner 累计连败、**不**刷新
+    ///   `last_check`、不进缓存、不计 [Engine::stats] 的命中，只累加 [Engine::rejected_count] 与细分计数。
+    ///   调用方本来就分不清「成功」与「失败」，所以丢弃对上层是透明的：下一次
+    ///   [Engine::tick] 会按 1/2^n 退避它，链路自然收敛。
+    /// * **owner 已在缓存里** → 原地覆盖既有条目，**永远接受**：内存不增长，
+    ///   丢它没有任何资源保护收益，反而会阻断正常的观点刷新。
+    /// * `max_views = 0` → 两条判定都不触发，行为与引入本字段之前**逐位一致**。
+    ///
+    /// 「字节数上限」由形状参数决定：`view.params()` 必须与
+    /// [EngineConfig::view_params] 一致，于是每份缓存视图恒占
+    /// `buckets × hashers × 4` 字节，**条目数上限即内存上限**。
+    ///
+    /// # 非有限读数的防护
+    ///
+    /// `total_mass` 是对已知账户的 `query` 求和。只要任一 `query` 返回 NaN 或
+    /// ±∞，这份观点就**整条丢弃**（语义与容量路径完全相同），细分计数见
+    /// [Engine::rejected_breakdown]。
+    ///
+    /// 三个数值细节决定了必须**在求和过程中**逐个检查，而不是求和之后再查：
+    ///
+    /// 1. `clamp(0.0, 1.0)` 把 +∞ 收成 1.0、把 -∞ 收成 0.0——`total_mass` 之外
+    ///    看不出任何异常，但这份视图的读数已经被静默改写；
+    /// 2. NaN 会传染给求和结果，然而 `NaN.max(1e-6)` **精确等于 `1e-6`**
+    ///    （`f32::max` 返回非 NaN 的那个操作数），所以「在 `.max()` 之后查
+    ///    `is_finite()`」永远查不出 NaN——它只会把总质量塌到 1e-6 这个
+    ///    「放大器」档位，让每条读数都被抬到 1.0（审计 A6 D4 记的同一个洞）；
+    /// 3. 求和本身仍可能溢出成 +∞（每个读数都被 clamp 进 [0,1]，账户数要超过
+    ///    3.4e38 才可能，实际不可达），但保留 `total_mass.is_finite()` 这一条作为
+    ///    与 `all_finite` 互补的兜底。
+    ///
+    /// 注意正常路径上 `decode` 已经拒绝非有限负载，这里是**防御纵深**：
+    /// 应用层可能用 [CompressedView::merge] 把 `0 × ∞` 之类的 NaN 合进视图，
+    /// 或者自己构造 `f32` 数组（见 `crates/engine/tests/capacity.rs`）。
     pub fn on_view(
         &mut self,
         owner: AccountIdx,
@@ -402,15 +491,46 @@ impl Engine {
             return;
         }
         self.clock = now;
+        // —— 容量上限（设计规格 §0.3）——
+        // 已缓存的 owner 是原地覆盖，不增长内存，永远接受；只有「新 owner 且已满」
+        // 才丢。判定放在 noise_floor 与质量扫描之前：被丢的观点一分钱计算都不做。
+        if self.cfg.max_views > 0
+            && self.views.len() >= self.cfg.max_views
+            && !self.views.contains_key(&owner)
+        {
+            self.reject_view(owner, Rejection::Capacity);
+            return;
+        }
         let noise = view.noise_floor(1000, noise_seed(owner));
         // 接收方自己估计总质量：对已知账户求和。发布方无法伪造这个估计。
+        //
+        // **求和过程中逐个校验有限性**，而不是求和之后再查：
+        // `clamp(0.0, 1.0)` 会把 +∞ 收成 1.0、把 -∞ 收成 0.0（静默丢掉信息），
+        // NaN 则会一路传染给和；更致命的是 `NaN.max(1e-6)` 精确等于 1e-6
+        // （`f32::max` 返回非 NaN 的那个操作数），于是「查 .max() 之后的值」
+        // 永远查不出 NaN，还会把这份视图的总质量塌到 1e-6 这个放大器档位。
+        // 所以必须看 `query` 的原始返回值。
         let mut total_mass = 0.0f32;
+        let mut all_finite = true;
         for i in 0..self.accounts.len() as u32 {
             if let Some(k) = self.accounts.key_of(i) {
-                total_mass += view.query(&k).clamp(0.0, 1.0);
+                let q = view.query(&k);
+                if !q.is_finite() {
+                    all_finite = false;
+                    break;
+                }
+                total_mass += q.clamp(0.0, 1.0);
             }
         }
         let total_mass = total_mass.max(1e-6);
+        // —— 非有限读数防护 ——
+        // 判定必须在 `.max(1e-6)` **之外**留着 `all_finite`：NaN.max(1e-6) 等于 1e-6，
+        // 光看 total_mass 永远看不出 NaN。`total_mass.is_finite()` 只是为求和溢出兜底，
+        // 两者任一不成立就整条丢弃——非有限值在协议里就是「无法解释的字节」。
+        if !all_finite || !total_mass.is_finite() {
+            self.reject_view(owner, Rejection::NonFinite);
+            return;
+        }
         self.stat_hits += 1;
         self.views.insert(
             owner,
@@ -439,6 +559,25 @@ impl Engine {
     /// 普通抽样失败与兜底探测失败都要调用它。
     pub fn on_view_failed(&mut self, owner: AccountIdx, now: Time) {
         self.clock = now;
+        self.ratings.record_failure(owner);
+    }
+
+    /// 统一的「观点被拒」路径：累加计数，并按失败语义处理 owner。
+    ///
+    /// 规格 §0.3 的原文是「超出即丢弃并**视同失败**」。这里刻意直接复用
+    /// [Engine::on_view_failed] 的两条效果（时钟前移 + 连败 +1），而不是另写一遍，
+    /// 免得两条路径日后漂移。
+    ///
+    /// 代价说明：丢弃一条视图是 O(log n)（计数 + [tm_store::PositiveList] 里的
+    /// 一次 BTreeMap 查询），而被丢弃的 `view` 参数在函数返回时立刻释放——
+    /// 容量上限挡住的正是「留在缓存里」的那部分内存，不是丢弃动作本身。
+    fn reject_view(&mut self, owner: AccountIdx, why: Rejection) {
+        self.stat_rejected_view += 1;
+        match why {
+            Rejection::Capacity => self.stat_rejected_capacity += 1,
+            Rejection::NonFinite => self.stat_rejected_nonfinite += 1,
+        }
+        // 与 on_view_failed 完全同一语义：只加连败，不刷新 last_check。
         self.ratings.record_failure(owner);
     }
 
@@ -887,6 +1026,31 @@ impl Engine {
             self.views.len(),
             self.ratings.len(),
         )
+    }
+
+    /// 被 [Engine::on_view] **整条丢弃**的观点累计条数（安全加固 P2）。
+
+    /// 含两类：容量上限（[EngineConfig::max_views]）与非有限读数。
+    /// `view.params()` 不匹配的视图仍然只静默丢弃、不计入这里。
+
+    /// 与 [Engine::stats] 分开暴露是刻意的：`stats()` 的四元组形状与含义
+    /// 保持不变（既有实验按位置解构它），新计数走新接口。
+    ///
+    /// 这个数字**单调递增**、只增不减（[Engine::prune_stale] 清理旧观点不会让它
+    /// 回退），它是「被拒了多少次」的累计事件计数，不是「现在有多少条被拒」。
+    #[must_use]
+    pub fn rejected_count(&self) -> u64 {
+        self.stat_rejected_view
+    }
+
+    /// 丢弃原因的细分计数：`(因容量被丢, 因读数非有限被丢)`。
+
+    /// 两者之和恒等于 [Engine::rejected_count]。容量那一项大于 0 说明
+    /// [EngineConfig::max_views] 正在顶满（资源保护生效）；非有限那一项大于 0
+    /// 说明有人在喂脏视图（安全信号，值得上层告警）。
+    #[must_use]
+    pub fn rejected_breakdown(&self) -> (u64, u64) {
+        (self.stat_rejected_capacity, self.stat_rejected_nonfinite)
     }
 }
 

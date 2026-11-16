@@ -22,6 +22,8 @@ fn eng() -> Engine {
         decay_floor: 0.0,
         // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
         penalty_strength: 1.0,
+        // 其余字段取默认值：尤其是 `max_views = 0`（无上限），本文件不测容量。
+        ..Default::default()
     })
 }
 

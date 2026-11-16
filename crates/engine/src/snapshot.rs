@@ -684,7 +684,7 @@ fn strictly_increasing(indices: impl Iterator<Item = AccountIdx>, n: AccountIdx)
 ///   可以让 [EngineSnapshot::decode] 在没有 cfg 时也把它们判为畸形）。
 fn valid_view_bytes(bytes: &[u8]) -> bool {
     let cell = std::mem::size_of::<Score>();
-    if bytes.len() < cell || bytes.len() % cell != 0 {
+    if bytes.len() < cell || !bytes.len().is_multiple_of(cell) {
         return false;
     }
     // 单元数上限与 tm_view 的口径一致（2^26 个 f32 = 256 MiB）。

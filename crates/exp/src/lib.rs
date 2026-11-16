@@ -495,8 +495,8 @@ fn evaluate(
     for i in 0..n {
         let mul_row = if net.need_mul { Some(&mul[i][..]) } else { None };
         let prep = net.prepare(&nodes[i], arena, now, mul_row, fallback_gen);
-        for u in 0..n {
-            rep[i][u] = net.query(&nodes[i], &prep, u, arena, &mut items);
+        for (u, slot) in rep[i].iter_mut().enumerate() {
+            *slot = net.query(&nodes[i], &prep, u, arena, &mut items);
         }
     }
     rep
@@ -613,15 +613,14 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
         // —— 接收：按真引擎的轮次抽样器抽 k 个来源，抽到的立刻算「上次检查 = now」
         // （等价 tick + on_view）。框架里没有失败路径，所以连败恒为 0，
         // draw_backoff 退化成无放回均匀抽样；抽样偏差已被拒绝采样消除。
-        for i in 0..n {
-            let node = &mut nodes[i];
+        for node in nodes.iter_mut() {
             let ids: Vec<AccountIdx> = node.pl.indices();
             node.sampler.sync(&ids);
             let picked = node.sampler.draw_backoff(&node.pl, pc.samples, &mut rng);
             // 最后一轮可以按 stride 只刷新一部分来源（验收测试用，默认 1 = 全刷）。
             let stride = if r + 1 == pc.rounds { pc.last_round_refresh_stride.max(1) } else { 1 };
             for src in picked {
-                if (src as usize) % stride != 0 {
+                if !(src as usize).is_multiple_of(stride) {
                     continue;
                 }
                 node.stored[src as usize] =
@@ -711,8 +710,8 @@ mod engine_parity_unit {
     /// 总质量只对前 known 个账户求和。
     fn readings_of(view: &CompressedView, keys: &[[u8; 32]], known: usize, n: usize, floor: f32) -> Vec<f32> {
         let mut total_mass = 0.0f32;
-        for i in 0..known {
-            total_mass += view.query(&keys[i]).clamp(0.0, 1.0);
+        for k in keys.iter().take(known) {
+            total_mass += view.query(k).clamp(0.0, 1.0);
         }
         let total_mass = total_mass.max(1e-6);
         (0..n)
@@ -791,8 +790,10 @@ mod engine_parity_unit {
         ];
 
         for decay_enabled in [true, false] {
-            let mut pc = PropConfig::default();
-            pc.decay_enabled = decay_enabled;
+            let pc = PropConfig {
+                decay_enabled,
+                ..PropConfig::default()
+            };
             let mut pl = PositiveList::new();
             pl.set(1, 1.0, 0);
             let mut stored = vec![None; 3];
@@ -805,8 +806,8 @@ mod engine_parity_unit {
             let mut cfg = engine_cfg();
             cfg.decay_enabled = decay_enabled;
             let mut e = Engine::new(cfg);
-            for i in 0..3 {
-                e.intern(keys[i]);
+            for k in &keys {
+                e.intern(*k);
             }
             e.rate(1, 1.0, 0);
             e.on_view(1, view.clone(), 0, 0);

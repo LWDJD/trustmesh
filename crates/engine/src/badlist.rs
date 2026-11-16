@@ -176,11 +176,9 @@ pub(crate) fn solve_uniform(weights: &[f64], readings: &[Option<f64>]) -> Unifor
     // 等于「覆盖不足就少罚」——那不是这个机制想表达的东西。
     let mut stated = 0usize;
     let mut stated_sum = 0.0f64;
-    for r in readings[..n].iter() {
-        if let Some(a) = r {
-            stated += 1;
-            stated_sum += sanitize_reading(*a);
-        }
+    for a in readings[..n].iter().flatten() {
+        stated += 1;
+        stated_sum += sanitize_reading(*a);
     }
     if stated == 0 {
         // 一个人都没对 A 表过态：目标线未定义，机制自动退出。

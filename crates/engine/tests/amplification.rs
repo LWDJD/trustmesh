@@ -143,13 +143,11 @@ fn amplifying_a_single_declaration_never_increases_it() {
     let rated: u32 = 8;
 
     // 合规：来源 0 的视图里只给 1 号账户 1.0，其余都不写
-    let mut single = Vec::new();
-    single.push((key(1), 1.0f32));
+    let single = vec![(key(1), 1.0f32)];
     let view_single = CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &single);
 
     // 放大：同一条声明写成 1e6
-    let mut single_amp = Vec::new();
-    single_amp.push((key(1), 1e6f32));
+    let single_amp = vec![(key(1), 1e6f32)];
     let view_single_amp = CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &single_amp);
 
     let mut a = engine_with(known, rated);
@@ -177,8 +175,7 @@ fn a_single_source_can_never_exceed_one_full_share() {
     let rated: u32 = 4;
 
     let mut e = engine_with(known, rated);
-    let mut vals = Vec::new();
-    vals.push((key(0), 1e9f32));
+    let vals = vec![(key(0), 1e9f32)];
     e.on_view(0, CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &vals), 0, 0);
 
     // 来源 0 自己的份额是 1/4；它给 0 号（自己）的读数最多 1 ⇒ 群体项 <= 1

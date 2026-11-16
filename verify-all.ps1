@@ -44,7 +44,7 @@ function Sum-Tests($out) {
 Write-Host "仓库根：$root" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "[1/4] 测试" -ForegroundColor Cyan
+Write-Host "[1/5] 测试" -ForegroundColor Cyan
 foreach ($c in $crates) {
     Push-Location -LiteralPath (Join-Path $root ("crates/" + $c))
     try {
@@ -61,7 +61,7 @@ try {
 } finally { Pop-Location }
 Write-Host ""
 
-Write-Host "[2/4] 文档测试" -ForegroundColor Cyan
+Write-Host "[2/5] 文档测试" -ForegroundColor Cyan
 foreach ($c in $crates) {
     Push-Location -LiteralPath (Join-Path $root ("crates/" + $c))
     try {
@@ -74,7 +74,7 @@ foreach ($c in $crates) {
 }
 Write-Host ""
 
-Write-Host "[3/4] clippy" -ForegroundColor Cyan
+Write-Host "[3/5] clippy" -ForegroundColor Cyan
 # exp 的 21 个历史实验 bin 有约 50 条遗留警告（未读字段、过时变量等），
 # 那些是一次性实验代码，改它们的应该是重跑实验的人。所以 exp 只对 lib 与 tests 严格。
 foreach ($c in $crates) {
@@ -94,7 +94,18 @@ foreach ($c in $crates) {
 }
 Write-Host ""
 
-Write-Host "[4/4] wasm32 逐位对拍" -ForegroundColor Cyan
+Write-Host "[4/5] cargo fmt --check" -ForegroundColor Cyan
+foreach ($c in $crates) {
+    Push-Location -LiteralPath (Join-Path $root ("crates/" + $c))
+    try {
+        $out = (cargo fmt --check 2>&1 | Out-String)
+        $d = ([regex]::Matches($out, '(?m)^Diff in ')).Count
+        Report $c ($d -eq 0) ("diffs={0}" -f $d)
+    } finally { Pop-Location }
+}
+Write-Host ""
+
+Write-Host "[5/5] wasm32 逐位对拍" -ForegroundColor Cyan
 $wasm = Join-Path $root 'tools/wasm-smoke/run-all.ps1'
 $out = (& $wasm 2>&1 | Out-String)
 $ok = ($LASTEXITCODE -eq 0)

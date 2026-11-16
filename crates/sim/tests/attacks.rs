@@ -35,7 +35,10 @@ fn 潜伏者突变前不刷分突变后刷满分() {
         .iter()
         .filter(|&&s| w.accounts[s].rating_of(target) == Some(1.0))
         .count();
-    assert!(提前满分 * 3 < sleepers.len(), "突变前就有 {提前满分} 个潜伏者打了满分");
+    assert!(
+        提前满分 * 3 < sleepers.len(),
+        "突变前就有 {提前满分} 个潜伏者打了满分"
+    );
 
     // 突变后
     w.run_steps(60);
@@ -55,7 +58,11 @@ fn 潜伏者突变前不刷分突变后刷满分() {
         .filter(|&&s| w.accounts[s].rating_of(target) == Some(1.0))
         .count() as f32
         / alive.len() as f32;
-    assert!(满分比例 > 0.8, "突变后只有 {:.0}% 的潜伏者给收益方打满分", 满分比例 * 100.0);
+    assert!(
+        满分比例 > 0.8,
+        "突变后只有 {:.0}% 的潜伏者给收益方打满分",
+        满分比例 * 100.0
+    );
     // 收益方确实被抬起来了
     let snap = w.report();
     assert!(
@@ -101,9 +108,15 @@ fn 渗透者按声誉挑选并在指定时刻收买() {
     assert_eq!(实际, 最高20, "应该收买声誉最高的 20 个账户");
 
     for &c in &w.attack.purchased {
-        assert!(matches!(w.accounts[c].kind, Kind::Infiltrator { bought_at: 50 }));
+        assert!(matches!(
+            w.accounts[c].kind,
+            Kind::Infiltrator { bought_at: 50 }
+        ));
         assert!(w.accounts[c].attack_active);
-        assert!(w.accounts[c].follows.contains(&target), "渗透者必须关注收益方");
+        assert!(
+            w.accounts[c].follows.contains(&target),
+            "渗透者必须关注收益方"
+        );
     }
 
     // 再跑一段时间，多数渗透者会给收益方打满分
@@ -148,7 +161,10 @@ fn 背书者按比例挑选高质量账户() {
         .filter(|a| a.kind == Kind::Honest)
         .map(|a| a.quality)
         .fold(0.0f32, f32::max);
-    assert!(min_end >= max_other - 1e-6, "背书者不是质量最高的那批：{min_end} vs {max_other}");
+    assert!(
+        min_end >= max_other - 1e-6,
+        "背书者不是质量最高的那批：{min_end} vs {max_other}"
+    );
 }
 
 #[test]
@@ -166,9 +182,16 @@ fn 背书者最终给收益方打满分() {
         .iter()
         .filter(|a| a.kind == Kind::Endorser && a.rating_of(target) == Some(1.0))
         .count();
-    assert!(满分 * 10 >= endorsers * 9, "{满分}/{endorsers} 个背书者打了满分");
+    assert!(
+        满分 * 10 >= endorsers * 9,
+        "{满分}/{endorsers} 个背书者打了满分"
+    );
     let s = w.report();
-    assert!(s.target_advantage > 1.3, "收益方优势 {}", s.target_advantage);
+    assert!(
+        s.target_advantage > 1.3,
+        "收益方优势 {}",
+        s.target_advantage
+    );
     assert!(
         s.observer_win_rate < 0.5,
         "多数观察者仍认为诚实账户更好（胜率 {}），攻击没生效",
@@ -250,7 +273,9 @@ fn 单个潜伏者也有真实收益方() {
         "潜伏者必须关注收益方，否则评分写不进去"
     );
     assert!(
-        !w.accounts.iter().any(|a| matches!(a.kind, Kind::Promoted) && a.idx != target),
+        !w.accounts
+            .iter()
+            .any(|a| matches!(a.kind, Kind::Promoted) && a.idx != target),
         "收益方应当就是那个 Promoted 账户"
     );
 

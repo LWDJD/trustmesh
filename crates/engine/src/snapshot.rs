@@ -961,7 +961,14 @@ mod tests {
             e.intern(key(i)); // 编号 0..=39
         }
         // 评分不对称（份额 1/3、1/4、1/12、1/6、1/24、1/8），后面报告才压得动。
-        for (i, s) in [(1u32, 4.0f32), (2, 3.0), (3, 1.0), (4, 2.0), (5, 0.5), (6, 1.5)] {
+        for (i, s) in [
+            (1u32, 4.0f32),
+            (2, 3.0),
+            (3, 1.0),
+            (4, 2.0),
+            (5, 0.5),
+            (6, 1.5),
+        ] {
             e.rate(i, s, 0);
         }
         // 来源 1/2 对 A(=9) 热情、3/4 冷淡 —— 造出「均值以上」的来源。
@@ -1110,9 +1117,8 @@ mod tests {
     fn tick_sequence_is_identical_after_restore() {
         let mut e = busy_engine();
         let snap = e.snapshot(1000);
-        let mut restored =
-            Engine::restore(cfg(), EngineSnapshot::decode(&snap.encode()).unwrap())
-                .expect("必须能恢复");
+        let mut restored = Engine::restore(cfg(), EngineSnapshot::decode(&snap.encode()).unwrap())
+            .expect("必须能恢复");
 
         // 6 批 × 每批 2 个：抽完一轮并触发自动重开，覆盖「pending 顺序 + rng 状态」两件事。
         let mut now = 1000;
@@ -1190,7 +1196,10 @@ mod tests {
         let mut bad_version = bytes.clone();
         bad_version[VERSION_START..VERSION_END]
             .copy_from_slice(&(SNAPSHOT_VERSION + 1).to_le_bytes());
-        assert!(EngineSnapshot::decode(&bad_version).is_none(), "版本不符必须拒绝");
+        assert!(
+            EngineSnapshot::decode(&bad_version).is_none(),
+            "版本不符必须拒绝"
+        );
         // 版本号可读，且能读出「不认识」。
         assert_eq!(
             EngineSnapshot::version_of(&bad_version),
@@ -1200,12 +1209,18 @@ mod tests {
         // 6c. 魔数错。
         let mut bad_magic = bytes.clone();
         bad_magic[0] = b'X';
-        assert!(EngineSnapshot::decode(&bad_magic).is_none(), "魔数不符必须拒绝");
+        assert!(
+            EngineSnapshot::decode(&bad_magic).is_none(),
+            "魔数不符必须拒绝"
+        );
 
         // 6d. 末尾多一个字节（长度对不上）。
         let mut too_long = bytes.clone();
         too_long.push(0xAA);
-        assert!(EngineSnapshot::decode(&too_long).is_none(), "多余字节必须拒绝");
+        assert!(
+            EngineSnapshot::decode(&too_long).is_none(),
+            "多余字节必须拒绝"
+        );
 
         // 6e. view_bytes 被改成 NaN / ∞：解码阶段（不需要 cfg）就必须拒绝。
         for poison in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
@@ -1515,7 +1530,10 @@ mod tests {
         // 12d. 随机流状态 0（xorshift 不动点，真实引擎走不到）。
         let mut bad = base.clone();
         bad.rng_state = 0;
-        assert!(Engine::restore(cfg(), bad.clone()).is_none(), "rng 状态 0 必须拒绝");
+        assert!(
+            Engine::restore(cfg(), bad.clone()).is_none(),
+            "rng 状态 0 必须拒绝"
+        );
         assert!(
             EngineSnapshot::decode(&bad.encode()).is_none(),
             "rng 状态 0 的快照在 decode 阶段就该被拒"

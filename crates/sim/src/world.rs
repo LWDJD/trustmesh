@@ -648,8 +648,12 @@ impl World {
         let community = self.pick_community(idx);
         let dims = self.cfg.interest_dims;
         let center = self.communities.center(community).clone();
-        let interest =
-            Interest::mixed(&center, self.cfg.topic_correlation as f32, dims, &mut self.rng);
+        let interest = Interest::mixed(
+            &center,
+            self.cfg.topic_correlation as f32,
+            dims,
+            &mut self.rng,
+        );
         let quality = self.sample_quality(kind);
         let activity = self
             .rng
@@ -657,9 +661,7 @@ impl World {
             .min(self.cfg.activity_cap)
             .max(1.0);
         let active_start = self.rng.below(24) as u8;
-        let span = self
-            .rng
-            .range_inclusive(MIN_ACTIVE_SPAN, MAX_ACTIVE_SPAN) as u8;
+        let span = self.rng.range_inclusive(MIN_ACTIVE_SPAN, MAX_ACTIVE_SPAN) as u8;
         let is_bridge = self.rng.chance(self.cfg.bridge_ratio);
 
         let account = Account {
@@ -1050,7 +1052,11 @@ mod tests {
                 .filter_map(|o| o.rating_of(a.idx))
                 .map(|x| x as f64)
                 .sum();
-            assert!((sum - a.received_sum).abs() < 1e-4, "账户 {} 收到合计不一致", a.idx);
+            assert!(
+                (sum - a.received_sum).abs() < 1e-4,
+                "账户 {} 收到合计不一致",
+                a.idx
+            );
             let n = w
                 .accounts
                 .iter()
@@ -1152,10 +1158,7 @@ mod tests {
                 }
                 // 不关注集群外的人
                 for &u in &w.accounts[s].follows {
-                    assert!(
-                        group.contains(&u),
-                        "女巫 {s} 关注了集群外的 {u}"
-                    );
+                    assert!(group.contains(&u), "女巫 {s} 关注了集群外的 {u}");
                 }
             }
         }

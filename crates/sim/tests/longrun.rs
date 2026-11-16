@@ -33,7 +33,11 @@ fn 一千步稳定且内存有界() {
     let s = w.report();
     assert_eq!(s.step, 1000);
     assert_eq!(s.time, 1000);
-    assert!(s.rating_edges > 1000, "跑了一千步评分太少了：{}", s.rating_edges);
+    assert!(
+        s.rating_edges > 1000,
+        "跑了一千步评分太少了：{}",
+        s.rating_edges
+    );
     assert!(s.alive > 50, "人口崩了：{}", s.alive);
     assert!(峰值账户 <= 20_000);
     // 内存上界估计：评分 12 字节/条 + 关注 8 字节/条
@@ -133,7 +137,10 @@ fn 极端参数不崩() {
         assert!(s.all_finite(), "{name}：出现非有限指标");
         assert!(s.online <= s.alive, "{name}");
         assert!(s.alive <= s.accounts, "{name}");
-        assert!(w.ratings().iter().all(|(_, _, x)| *x > 0.0 && *x <= 1.0), "{name}");
+        assert!(
+            w.ratings().iter().all(|(_, _, x)| *x > 0.0 && *x <= 1.0),
+            "{name}"
+        );
         // 渲染也不能崩
         assert!(s.render().contains("快照"), "{name}");
     }

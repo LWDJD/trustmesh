@@ -16,7 +16,13 @@ fn 配置(seed: u64) -> SimConfig {
     }
 }
 
-fn 跑(seed: u64) -> (Vec<(usize, usize, f32)>, tm_sim::Snapshot, Vec<tm_sim::Snapshot>) {
+fn 跑(
+    seed: u64,
+) -> (
+    Vec<(usize, usize, f32)>,
+    tm_sim::Snapshot,
+    Vec<tm_sim::Snapshot>,
+) {
     let mut w = World::new(配置(seed));
     w.run();
     (w.ratings(), w.report(), w.history.clone())

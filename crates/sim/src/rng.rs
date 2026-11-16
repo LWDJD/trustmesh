@@ -20,7 +20,11 @@ impl Rng {
     /// 构造。种子为 0 时换成一个固定常数，避免全零状态退化。
     pub fn new(seed: u64) -> Self {
         Self {
-            state: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            state: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
 
@@ -189,9 +193,7 @@ impl Rng {
             r -= w;
         }
         // 浮点累加误差兜底：返回最后一个正权重
-        weights
-            .iter()
-            .rposition(|&w| w.is_finite() && w > 0.0)
+        weights.iter().rposition(|&w| w.is_finite() && w > 0.0)
     }
 
     /// 按权重不放回抽 k 个下标。
@@ -408,6 +410,10 @@ mod tests {
         let mut sorted = v.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, (0..50).collect::<Vec<_>>());
-        assert_ne!(v, (0..50).collect::<Vec<_>>(), "50 个元素洗牌后不应恰好还原");
+        assert_ne!(
+            v,
+            (0..50).collect::<Vec<_>>(),
+            "50 个元素洗牌后不应恰好还原"
+        );
     }
 }

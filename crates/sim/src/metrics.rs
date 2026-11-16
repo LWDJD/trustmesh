@@ -106,7 +106,11 @@ impl Distribution {
         if sorted.len() == 1 {
             return sorted[0];
         }
-        let q = if q.is_finite() { q.clamp(0.0, 1.0) } else { 0.0 };
+        let q = if q.is_finite() {
+            q.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let pos = q * (sorted.len() - 1) as f32;
         let lo = pos.floor() as usize;
         let hi = pos.ceil() as usize;
@@ -532,11 +536,7 @@ impl Snapshot {
     /// 渲染成人类可读的多行文本。二进制程序与测试共用。
     pub fn render(&self) -> String {
         let mut s = String::new();
-        let _ = writeln!(
-            s,
-            "=== 快照 · 第 {} 步 / t = {}h ===",
-            self.step, self.time
-        );
+        let _ = writeln!(s, "=== 快照 · 第 {} 步 / t = {}h ===", self.step, self.time);
         let _ = writeln!(
             s,
             "账户 {} ｜ 存活 {} ｜ 在线 {} ｜ 休眠 {} ｜ 离开 {} ｜ 桥接 {}",
@@ -617,7 +617,10 @@ impl Snapshot {
         let _ = writeln!(
             s,
             "观察者胜率 {:.3}（{} 位观察者）｜ 质量-评分相关 {:.3} ｜ 影响力基尼 {:.3}",
-            self.observer_win_rate, self.observers_compared, self.honest_quality_corr, self.gini_received
+            self.observer_win_rate,
+            self.observers_compared,
+            self.honest_quality_corr,
+            self.gini_received
         );
         s
     }

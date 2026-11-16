@@ -62,9 +62,7 @@ fn view_of(target: u32, score: f32) -> CompressedView {
 /// 全部目标的查询结果，按 to_bits() 取快照：逐位比较比 == 更严格，
 /// 能把 -0.0 与 0.0、以及任何一个 ULP 的漂移都揪出来。
 fn snapshot(e: &Engine, targets: std::ops::Range<u32>, now: u64) -> Vec<(u32, u32)> {
-    targets
-        .map(|t| (t, e.query(t, now).to_bits()))
-        .collect()
+    targets.map(|t| (t, e.query(t, now).to_bits())).collect()
 }
 
 /// 造一份**含 NaN 读数**的视图，只用公开 API（decode 会拒绝 NaN 负载，
@@ -104,8 +102,16 @@ fn nan_max_semantics_make_post_summation_check_useless() {
     assert_eq!(nan.max(1e-6), 1e-6, "NaN.max(1e-6) 等于 1e-6，不是 NaN");
     assert!(nan.max(1e-6).is_finite(), "所以求和之后再查有限性没有用");
     assert!(nan.clamp(0.0, 1.0).is_nan(), "clamp 不会把 NaN 变成有限值");
-    assert_eq!(f32::INFINITY.clamp(0.0, 1.0), 1.0, "+∞ 会被 clamp 静默收成 1.0");
-    assert_eq!(f32::NEG_INFINITY.clamp(0.0, 1.0), 0.0, "-∞ 会被 clamp 静默收成 0.0");
+    assert_eq!(
+        f32::INFINITY.clamp(0.0, 1.0),
+        1.0,
+        "+∞ 会被 clamp 静默收成 1.0"
+    );
+    assert_eq!(
+        f32::NEG_INFINITY.clamp(0.0, 1.0),
+        0.0,
+        "-∞ 会被 clamp 静默收成 0.0"
+    );
 }
 
 /// 断言某份视图确实会算出非有限读数（前置条件自检）。
@@ -154,7 +160,11 @@ fn max_views_zero_caches_everything() {
         e.rate(owner, 1.0, 0);
         e.on_view(owner, view_of(9, 1.0), 0, i as u64);
     }
-    assert_eq!(e.stats().2, N as usize, "0 必须表示无上限：{N} 条全部进缓存");
+    assert_eq!(
+        e.stats().2,
+        N as usize,
+        "0 必须表示无上限：{N} 条全部进缓存"
+    );
     assert_eq!(e.rejected_count(), 0, "无上限时不得有任何丢弃");
     assert_eq!(e.rejected_breakdown(), (0, 0));
     assert!(e.query(target, 0) > 0.0, "引擎仍然正常工作");
@@ -187,10 +197,8 @@ fn max_views_zero_is_bitwise_identical_to_default_config() {
     let dp = ViewParams::default();
     for i in 0..40u32 {
         let owner = a.lookup(&key(i)).unwrap();
-        let v = CompressedView::from_pairs(
-            dp,
-            &[(key(i + 100), 0.5), (key(3), 1.0), (key(7), 0.25)],
-        );
+        let v =
+            CompressedView::from_pairs(dp, &[(key(i + 100), 0.5), (key(3), 1.0), (key(7), 0.25)]);
         a.on_view(owner, v.clone(), i as u64, 100 + i as u64);
         b.on_view(owner, v, i as u64, 100 + i as u64);
     }
@@ -500,10 +508,7 @@ fn dropped_nonfinite_view_leaves_no_trace_but_counts() {
 
     // 两台引擎现在各收同一批干净观点。
     for (i, (a, b)) in owners.iter().enumerate() {
-        let v = CompressedView::from_pairs(
-            params(),
-            &[(key((i + 1) as u32), 1.0), (key(9), 0.75)],
-        );
+        let v = CompressedView::from_pairs(params(), &[(key((i + 1) as u32), 1.0), (key(9), 0.75)]);
         clean.on_view(*a, v.clone(), 0, 100);
         dirty.on_view(*b, v, 0, 100);
     }

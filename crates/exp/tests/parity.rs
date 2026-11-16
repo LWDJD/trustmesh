@@ -41,7 +41,11 @@ const HASHERS: usize = 5;
 const VIEW_SEED: u64 = 12345;
 
 fn params() -> ViewParams {
-    ViewParams { buckets: BUCKETS, hashers: HASHERS, seed: VIEW_SEED }
+    ViewParams {
+        buckets: BUCKETS,
+        hashers: HASHERS,
+        seed: VIEW_SEED,
+    }
 }
 
 /// 引擎等价配置：β = 0.3、H = 72、噪声底倍数 1.0、Mean 聚合。
@@ -140,7 +144,13 @@ fn build_nodes(world: &tm_sim::World, n: usize) -> Vec<Engine> {
 ///     export_view(r + 1)
 /// query(target, now = rounds)
 /// ```
-fn run_engine(mut nodes: Vec<Engine>, n: usize, rounds: usize, refresh_stride: usize, round_time_step: u64) -> Vec<Vec<f32>> {
+fn run_engine(
+    mut nodes: Vec<Engine>,
+    n: usize,
+    rounds: usize,
+    refresh_stride: usize,
+    round_time_step: u64,
+) -> Vec<Vec<f32>> {
     let step = round_time_step.max(1);
     let mut cur: Vec<CompressedView> = nodes.iter().map(|e| e.export_view(0)).collect();
     for r in 0..rounds {
@@ -151,7 +161,11 @@ fn run_engine(mut nodes: Vec<Engine>, n: usize, rounds: usize, refresh_stride: u
             let reqs = node.tick(now, n);
             // 最后一轮可以只刷新一部分来源：让另一半的 last_check 保持「旧一轮」，
             // 衰减因子就不再对全部来源相同，加权平均也就无法把它约掉。
-            let stride = if r + 1 == rounds { refresh_stride.max(1) } else { 1 };
+            let stride = if r + 1 == rounds {
+                refresh_stride.max(1)
+            } else {
+                1
+            };
             for req in &reqs {
                 let src = req.idx as usize;
                 if !src.is_multiple_of(stride) {
@@ -160,7 +174,10 @@ fn run_engine(mut nodes: Vec<Engine>, n: usize, rounds: usize, refresh_stride: u
                 node.on_view(req.idx, cur[src].clone(), now, now);
             }
         }
-        cur = nodes.iter().map(|e| e.export_view((r as u64 + 1) * step)).collect();
+        cur = nodes
+            .iter()
+            .map(|e| e.export_view((r as u64 + 1) * step))
+            .collect();
     }
     let now = rounds as u64 * step;
     (0..n)
@@ -185,12 +202,29 @@ fn build(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: u64) 
     world.run();
     let n = world.accounts().len();
 
-    let engine_rep = run_engine(build_nodes(&world, n), n, rounds, refresh_stride, round_time_step);
+    let engine_rep = run_engine(
+        build_nodes(&world, n),
+        n,
+        rounds,
+        refresh_stride,
+        round_time_step,
+    );
     let personal_only = run_personal_only(&build_nodes(&world, n), n, rounds);
-    let outcome = run_case_full(cfg, &pcfg(rounds, n, refresh_stride, round_time_step), &[], &[], &[]);
+    let outcome = run_case_full(
+        cfg,
+        &pcfg(rounds, n, refresh_stride, round_time_step),
+        &[],
+        &[],
+        &[],
+    );
     assert_eq!(n, outcome.rep.len(), "账户数必须一致（编号一一对应）");
 
-    Network { n, engine_rep, personal_only, framework_rep: outcome.rep }
+    Network {
+        n,
+        engine_rep,
+        personal_only,
+        framework_rep: outcome.rep,
+    }
 }
 
 /// 一组用例对「这个比较不是空对空」的最低要求（按场景不同而不同）。
@@ -202,16 +236,34 @@ struct Expect {
 }
 
 /// 默认：要求群体项真的参与了结果。
-const EXPECT_PROPAGATED: Expect = Expect { min_nonzero_frac: 0.25, min_group_gain: 0.01 };
+const EXPECT_PROPAGATED: Expect = Expect {
+    min_nonzero_frac: 0.25,
+    min_group_gain: 0.01,
+};
 /// 零轮场景：一条观点都没有，群体项本来就该是 0，只要求结果别退化成全零。
-const EXPECT_PERSONAL_ONLY: Expect = Expect { min_nonzero_frac: 0.0, min_group_gain: 0.0 };
+const EXPECT_PERSONAL_ONLY: Expect = Expect {
+    min_nonzero_frac: 0.0,
+    min_group_gain: 0.0,
+};
 
 /// 逐点比较并断言「差异有界、且这个比较不是空对空」。
 fn check(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: u64) -> f32 {
-    check_with(seed, rounds, refresh_stride, round_time_step, EXPECT_PROPAGATED)
+    check_with(
+        seed,
+        rounds,
+        refresh_stride,
+        round_time_step,
+        EXPECT_PROPAGATED,
+    )
 }
 
-fn check_with(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: u64, expect: Expect) -> f32 {
+fn check_with(
+    seed: u64,
+    rounds: usize,
+    refresh_stride: usize,
+    round_time_step: u64,
+    expect: Expect,
+) -> f32 {
     let net = build(seed, rounds, refresh_stride, round_time_step);
     let n = net.n;
     assert!(n > 0, "网络为空，比较无意义");
@@ -245,7 +297,10 @@ fn check_with(seed: u64, rounds: usize, refresh_stride: usize, round_time_step: 
         n * n
     );
     if expect.min_nonzero_frac > 0.0 {
-        assert!(max_value >= 0.05, "引擎侧最大声望只有 {max_value}，比较没有说服力");
+        assert!(
+            max_value >= 0.05,
+            "引擎侧最大声望只有 {max_value}，比较没有说服力"
+        );
     }
     if expect.min_group_gain > 0.0 {
         assert!(
@@ -339,7 +394,10 @@ fn personal_term_is_share_not_raw_score() {
         }
     }
     println!("（零轮用例里最大声望 {max_rep:.4}，上限 β = 0.3）");
-    assert!(max_rep <= 0.3 + 1e-4, "零轮时声望不该超过 β，实测 {max_rep}");
+    assert!(
+        max_rep <= 0.3 + 1e-4,
+        "零轮时声望不该超过 β，实测 {max_rep}"
+    );
 }
 
 /// 抽样只抽 1/4 清单：两边抽到的来源不同，无法逐点比，但结果必须仍在协议内。
@@ -357,7 +415,10 @@ fn partial_sampling_stays_within_contract() {
     for (ob, row) in outcome.rep.iter().enumerate() {
         let mut sum = 0.0f32;
         for (t, v) in row.iter().enumerate() {
-            assert!((0.0..=1.0).contains(v), "声望越界：观察者 {ob} → 目标 {t} = {v}");
+            assert!(
+                (0.0..=1.0).contains(v),
+                "声望越界：观察者 {ob} → 目标 {t} = {v}"
+            );
             sum += *v;
         }
         assert!(sum.is_finite(), "观察者 {ob} 的整行出现非有限值");

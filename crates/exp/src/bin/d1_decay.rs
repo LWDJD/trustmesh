@@ -49,8 +49,8 @@ const TARGET_OFF: f64 = 0.60;
 const RETURN_RATE: f64 = 0.10;
 const MIN_ALIVE: usize = 100; // 标定约束：不许把人口打死
 const SEEDS: [u64; 24] = [
-    11, 23, 37, 53, 71, 97, 113, 131, 149, 167, 181, 199,
-    211, 223, 239, 251, 263, 277, 283, 293, 307, 313, 331, 349,
+    11, 23, 37, 53, 71, 97, 113, 131, 149, 167, 181, 199, 211, 223, 239, 251, 263, 277, 283, 293,
+    307, 313, 331, 349,
 ];
 const SEEDS_SPEC: [u64; 3] = [11, 23, 37];
 const DS: [u64; 3] = [72, 216, 720];
@@ -66,9 +66,21 @@ struct Mode {
 }
 
 const MODES: [Mode; 3] = [
-    Mode { name: "std", enabled: true, floor: 0.0 },
-    Mode { name: "floor", enabled: true, floor: 0.5 },
-    Mode { name: "off", enabled: false, floor: 0.0 },
+    Mode {
+        name: "std",
+        enabled: true,
+        floor: 0.0,
+    },
+    Mode {
+        name: "floor",
+        enabled: true,
+        floor: 0.5,
+    },
+    Mode {
+        name: "off",
+        enabled: false,
+        floor: 0.0,
+    },
 ];
 
 fn key(i: usize) -> [u8; 32] {
@@ -88,7 +100,9 @@ fn make_cfg(d: u64, dorm: f64, seed: u64) -> SimConfig {
         sleep_hours: (d, d), // 离线时长恰为 D
         return_rate: RETURN_RATE,
         enable_rhythm: false,
-        attack_kind: AttackKind::Sleeper { normal_until: NORMAL_UNTIL },
+        attack_kind: AttackKind::Sleeper {
+            normal_until: NORMAL_UNTIL,
+        },
         attack_ratio: 1.0 / N_INIT as f64,
         ..Default::default()
     }
@@ -134,7 +148,9 @@ fn pctl(v: &[f64], p: f64) -> f64 {
         return f64::NAN;
     }
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let idx = ((xs.len() as f64 - 1.0) * p).round().clamp(0.0, xs.len() as f64 - 1.0) as usize;
+    let idx = ((xs.len() as f64 - 1.0) * p)
+        .round()
+        .clamp(0.0, xs.len() as f64 - 1.0) as usize;
     xs[idx]
 }
 
@@ -207,7 +223,12 @@ fn world_stat(cfg: &SimConfig) -> WorldStat {
     let mut w = World::new(cfg.clone());
     w.run();
     let t = STEPS as u64;
-    let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = w
+        .accounts()
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let online = alive.iter().filter(|&&i| w.was_online_at(i, t)).count();
     let off = if alive.is_empty() {
         0.0
@@ -219,30 +240,54 @@ fn world_stat(cfg: &SimConfig) -> WorldStat {
         .filter(|&i| {
             w.life_traces
                 .get(i)
-                .map(|tr| tr.events().iter().any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. })))
+                .map(|tr| {
+                    tr.events()
+                        .iter()
+                        .any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. }))
+                })
                 .unwrap_or(false)
         })
         .count();
-    WorldStat { off, alive: alive.len(), online, accts: n, ever, leaves: w.leaves, dorms: w.dormancy_events }
+    WorldStat {
+        off,
+        alive: alive.len(),
+        online,
+        accts: n,
+        ever,
+        leaves: w.leaves,
+        dorms: w.dormancy_events,
+    }
 }
 
 fn dorm_grid() -> Vec<f64> {
-    (0..=28).map(|k| 1e-5 * 5000f64.powf(k as f64 / 28.0)).collect() // 1e-5 .. 0.05
+    (0..=28)
+        .map(|k| 1e-5 * 5000f64.powf(k as f64 / 28.0))
+        .collect() // 1e-5 .. 0.05
 }
 
 /// 全景观测：每个 dormancy 取值下一个世界。
 fn landscape(d: u64, seed: u64) -> Vec<(f64, WorldStat)> {
-    dorm_grid().into_iter().map(|dorm| (dorm, world_stat(&make_cfg(d, dorm, seed)))).collect()
+    dorm_grid()
+        .into_iter()
+        .map(|dorm| (dorm, world_stat(&make_cfg(d, dorm, seed))))
+        .collect()
 }
 
 /// 在 29 点网格上标定：先要求 alive >= MIN_ALIVE，再取 |off-0.60| 最小；
 /// 若没有任何点满足 alive 约束，取存活最多的点。返回 (dorm, stat, 是否达成 60%, 全景)。
 fn calibrate(d: u64, seed: u64) -> (f64, WorldStat, bool, Vec<(f64, WorldStat)>) {
     let grid = landscape(d, seed);
-    let feasible: Vec<&(f64, WorldStat)> = grid.iter().filter(|(_, st)| st.alive >= MIN_ALIVE).collect();
+    let feasible: Vec<&(f64, WorldStat)> = grid
+        .iter()
+        .filter(|(_, st)| st.alive >= MIN_ALIVE)
+        .collect();
     let pool: Vec<(f64, WorldStat)> = if feasible.is_empty() {
         let mut v: Vec<(f64, WorldStat)> = grid.clone();
-        v.sort_by(|a, b| b.1.alive.cmp(&a.1.alive).then(a.1.off.partial_cmp(&b.1.off).unwrap()));
+        v.sort_by(|a, b| {
+            b.1.alive
+                .cmp(&a.1.alive)
+                .then(a.1.off.partial_cmp(&b.1.off).unwrap())
+        });
         vec![v[0]]
     } else {
         feasible.into_iter().copied().collect()
@@ -252,7 +297,9 @@ fn calibrate(d: u64, seed: u64) -> (f64, WorldStat, bool, Vec<(f64, WorldStat)>)
         let err = (st.off - TARGET_OFF).abs();
         let better = match &best {
             None => true,
-            Some((be, _, bs)) => err < *be - 1e-9 || ((err - *be).abs() <= 1e-9 && st.alive > bs.alive),
+            Some((be, _, bs)) => {
+                err < *be - 1e-9 || ((err - *be).abs() <= 1e-9 && st.alive > bs.alive)
+            }
         };
         if better {
             best = Some((err, dorm, st));
@@ -389,7 +436,14 @@ impl Cell {
             ("fresh_n".into(), self.fresh_n.to_string()),
             ("stale_n".into(), self.stale_n.to_string()),
             ("post_n".into(), self.post_n.to_string()),
-            ("landed".into(), if self.landed() { "1".into() } else { "0".into() }),
+            (
+                "landed".into(),
+                if self.landed() {
+                    "1".into()
+                } else {
+                    "0".into()
+                },
+            ),
             ("p_exp".into(), f(self.p_exp)),
             ("p_pre".into(), f(self.p_pre)),
             ("p_fresh".into(), f(self.p_fresh)),
@@ -433,13 +487,21 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
     let n = world.accounts().len();
     let accs = world.accounts();
 
-    let is_slp: Vec<bool> = accs.iter().map(|a| matches!(a.kind, Kind::Sleeper { .. })).collect();
-    let is_prom: Vec<bool> = accs.iter().map(|a| matches!(a.kind, Kind::Promoted)).collect();
+    let is_slp: Vec<bool> = accs
+        .iter()
+        .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
+        .collect();
+    let is_prom: Vec<bool> = accs
+        .iter()
+        .map(|a| matches!(a.kind, Kind::Promoted))
+        .collect();
     // 诚实 = 既非潜伏者也非收益方（绝不用 is_attacker 二分）
     let is_hon: Vec<bool> = (0..n).map(|i| !is_slp[i] && !is_prom[i]).collect();
 
     let alive: Vec<usize> = (0..n).filter(|&i| accs[i].is_alive()).collect();
-    let hon_alive: Vec<usize> = (0..n).filter(|&i| is_hon[i] && accs[i].is_alive()).collect();
+    let hon_alive: Vec<usize> = (0..n)
+        .filter(|&i| is_hon[i] && accs[i].is_alive())
+        .collect();
     let sleepers: Vec<usize> = (0..n).filter(|&i| is_slp[i]).collect();
     let promoted: Vec<usize> = (0..n).filter(|&i| is_prom[i]).collect();
 
@@ -451,7 +513,11 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
     let ecfg = EngineConfig {
         beta: BETA as f32,
         half_life: HALF_LIFE,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: mode.enabled,
@@ -504,7 +570,10 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
             let reqs = nodes[a].as_mut().unwrap().tick(now, k);
             for req in reqs {
                 if let Some(Some(v)) = views.get(req.idx as usize) {
-                    nodes[a].as_mut().unwrap().on_view(req.idx, v.clone(), now, now);
+                    nodes[a]
+                        .as_mut()
+                        .unwrap()
+                        .on_view(req.idx, v.clone(), now, now);
                 }
             }
             prev_on[a] = true;
@@ -512,7 +581,11 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
     }
 
     // ── 观察者：存活 + 诚实 + 结束时在线 ──
-    let obs: Vec<usize> = alive.iter().copied().filter(|&i| is_hon[i] && online_end[i]).collect();
+    let obs: Vec<usize> = alive
+        .iter()
+        .copied()
+        .filter(|&i| is_hon[i] && online_end[i])
+        .collect();
 
     let mut recs: Vec<ObsRec> = Vec::new();
     let mut zero_base = 0usize;
@@ -583,12 +656,20 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
         let g_base = if hon_alive.is_empty() {
             f64::NAN
         } else {
-            hon_alive.iter().map(|&h| group_of(&e, h, t_end)).sum::<f64>() / hon_alive.len() as f64
+            hon_alive
+                .iter()
+                .map(|&h| group_of(&e, h, t_end))
+                .sum::<f64>()
+                / hon_alive.len() as f64
         };
         let g_p = if promoted.is_empty() {
             f64::NAN
         } else {
-            promoted.iter().map(|&i| group_of(&e, i, t_end)).sum::<f64>() / promoted.len() as f64
+            promoted
+                .iter()
+                .map(|&i| group_of(&e, i, t_end))
+                .sum::<f64>()
+                / promoted.len() as f64
         };
 
         let has_copy = age.is_some();
@@ -605,12 +686,20 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
             fresh: post && a0 <= HALF_LIFE,
             bucket: if has_copy { bucket } else { BUCKETS.len() },
             p_ratio: p_abs / base,
-            p_g_ratio: if g_base.is_nan() || g_base <= 0.0 { f64::NAN } else { g_p / g_base },
+            p_g_ratio: if g_base.is_nan() || g_base <= 0.0 {
+                f64::NAN
+            } else {
+                g_p / g_base
+            },
             s_ratio: s_abs / base,
             p_abs,
             base,
             wshare: if w_total > 0.0 { w_slp / w_total } else { 0.0 },
-            factor: if has_copy { e.decay_factor(a0) as f64 } else { f64::NAN },
+            factor: if has_copy {
+                e.decay_factor(a0) as f64
+            } else {
+                f64::NAN
+            },
             cf_ratio: f64::NAN,
         };
 
@@ -656,7 +745,8 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
     let fresh = sel(&|r| r.fresh);
     let stale = sel(&|r| r.post && !r.fresh);
     let none = sel(&|r| !r.has_copy);
-    let v = |xs: &[ObsRec], f: fn(&ObsRec) -> f64| -> Vec<f64> { xs.iter().map(|r| f(r)).collect() };
+    let v =
+        |xs: &[ObsRec], f: fn(&ObsRec) -> f64| -> Vec<f64> { xs.iter().map(|r| f(r)).collect() };
 
     let p_all = v(&recs, |r| r.p_ratio);
     let p_exp = mean(&v(&exp, |r| r.p_ratio));
@@ -666,7 +756,11 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
     let p_none = mean(&v(&none, |r| r.p_ratio));
     let s_all = v(&recs, |r| r.s_ratio);
 
-    let cfs: Vec<ObsRec> = recs.iter().copied().filter(|r| !r.cf_ratio.is_nan()).collect();
+    let cfs: Vec<ObsRec> = recs
+        .iter()
+        .copied()
+        .filter(|r| !r.cf_ratio.is_nan())
+        .collect();
 
     let off = if alive.is_empty() {
         0.0
@@ -679,7 +773,11 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
             world
                 .life_traces
                 .get(i)
-                .map(|tr| tr.events().iter().any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. })))
+                .map(|tr| {
+                    tr.events()
+                        .iter()
+                        .any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. }))
+                })
                 .unwrap_or(false)
         })
         .count();
@@ -687,12 +785,19 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
     let slp_offdur = if sleepers.is_empty() {
         f64::NAN
     } else {
-        sleepers.iter().map(|&i| world.offline_duration(i, t_end) as f64).sum::<f64>()
+        sleepers
+            .iter()
+            .map(|&i| world.offline_duration(i, t_end) as f64)
+            .sum::<f64>()
             / sleepers.len() as f64
     };
     let slp_on80 = sleepers
         .iter()
-        .map(|&i| (0..=rn).filter(|&r| r * tick >= NORMAL_UNTIL && online[i][r as usize]).count())
+        .map(|&i| {
+            (0..=rn)
+                .filter(|&r| r * tick >= NORMAL_UNTIL && online[i][r as usize])
+                .count()
+        })
         .sum::<usize>();
 
     Cell {
@@ -733,7 +838,11 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
         s_ratio_mean: mean(&s_all),
         s_abs_mean: mean(&v(&recs, |r| r.s_ratio * r.base)),
         exp_n: exp.len(),
-        exp_frac: if recs.is_empty() { f64::NAN } else { exp.len() as f64 / recs.len() as f64 },
+        exp_frac: if recs.is_empty() {
+            f64::NAN
+        } else {
+            exp.len() as f64 / recs.len() as f64
+        },
         pre_n: pre.len(),
         fresh_n: fresh.len(),
         stale_n: stale.len(),
@@ -743,14 +852,29 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
         p_fresh,
         p_stale,
         p_none,
-        lev_exp: if p_none > 0.0 { p_exp / p_none } else { f64::NAN },
-        lev_fresh: if p_none > 0.0 { p_fresh / p_none } else { f64::NAN },
-        lev_stale: if p_none > 0.0 { p_stale / p_none } else { f64::NAN },
+        lev_exp: if p_none > 0.0 {
+            p_exp / p_none
+        } else {
+            f64::NAN
+        },
+        lev_fresh: if p_none > 0.0 {
+            p_fresh / p_none
+        } else {
+            f64::NAN
+        },
+        lev_stale: if p_none > 0.0 {
+            p_stale / p_none
+        } else {
+            f64::NAN
+        },
         s_exp: mean(&v(&exp, |r| r.s_ratio)),
         s_none: mean(&v(&none, |r| r.s_ratio)),
         age_mean: mean(&v(&exp, |r| r.age as f64)),
         age_med: median(&v(&exp, |r| r.age as f64)),
-        age_max: v(&exp, |r| r.age as f64).iter().copied().fold(f64::NAN, f64::max),
+        age_max: v(&exp, |r| r.age as f64)
+            .iter()
+            .copied()
+            .fold(f64::NAN, f64::max),
         wshare_mean: mean(&v(&exp, |r| r.wshare)),
         wshare_stale: mean(&v(&stale, |r| r.wshare)),
         factor_mean: mean(&v(&exp, |r| r.factor)),
@@ -759,7 +883,11 @@ fn run_cell(mode: Mode, d: u64, seed: u64, dorm: f64) -> Cell {
         cf_delta_mean: if cfs.is_empty() {
             f64::NAN
         } else {
-            mean(&cfs.iter().map(|r| r.p_ratio - r.cf_ratio).collect::<Vec<_>>())
+            mean(
+                &cfs.iter()
+                    .map(|r| r.p_ratio - r.cf_ratio)
+                    .collect::<Vec<_>>(),
+            )
         },
         obs: recs,
     }
@@ -783,7 +911,12 @@ fn par_map<T: Send>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> 
             });
         }
     });
-    slots.into_inner().unwrap().into_iter().map(|x| x.unwrap()).collect()
+    slots
+        .into_inner()
+        .unwrap()
+        .into_iter()
+        .map(|x| x.unwrap())
+        .collect()
 }
 
 // ───────────────────────── 汇总表 ─────────────────────────
@@ -827,8 +960,14 @@ fn t_main(cells: &[Cell], seeds: &[u64]) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for m in MODES {
         for &d in &DS {
-            let g: Vec<&Cell> = pick(cells, seeds).into_iter().filter(|c| c.mode == m.name && c.d == d).collect();
-            let pooled: Vec<f64> = g.iter().flat_map(|c| c.obs.iter().map(|r| r.p_ratio)).collect();
+            let g: Vec<&Cell> = pick(cells, seeds)
+                .into_iter()
+                .filter(|c| c.mode == m.name && c.d == d)
+                .collect();
+            let pooled: Vec<f64> = g
+                .iter()
+                .flat_map(|c| c.obs.iter().map(|r| r.p_ratio))
+                .collect();
             rows.push(vec![
                 m.name.to_string(),
                 format!("{}", d),
@@ -838,8 +977,16 @@ fn t_main(cells: &[Cell], seeds: &[u64]) -> String {
                 ms(&col(&g, |c| c.p_g_ratio_mean)),
                 ms(&col(&g, |c| c.s_ratio_mean)),
                 format!("{}/{}", g.iter().filter(|c| c.landed()).count(), g.len()),
-                format!("{}/{}", g.iter().map(|c| c.prom_alive).sum::<usize>(), g.len()),
-                format!("{}/{}", g.iter().map(|c| c.prom_left).sum::<usize>(), g.len()),
+                format!(
+                    "{}/{}",
+                    g.iter().map(|c| c.prom_alive).sum::<usize>(),
+                    g.len()
+                ),
+                format!(
+                    "{}/{}",
+                    g.iter().map(|c| c.prom_left).sum::<usize>(),
+                    g.len()
+                ),
                 ms(&col(&g, |c| c.alive as f64)),
                 ms(&col(&g, |c| c.off)),
                 ms(&col(&g, |c| c.n_obs as f64)),
@@ -848,8 +995,19 @@ fn t_main(cells: &[Cell], seeds: &[u64]) -> String {
     }
     md_table(
         &[
-            "模式", "D(h)", "收益方/基线 均值±sd", "池化中位", "暴露占比", "群体项比", "潜伏者/基线",
-            "攻击落地格", "收益方存活/格", "收益方已离开/格", "存活账户", "结束离线", "观察者数",
+            "模式",
+            "D(h)",
+            "收益方/基线 均值±sd",
+            "池化中位",
+            "暴露占比",
+            "群体项比",
+            "潜伏者/基线",
+            "攻击落地格",
+            "收益方存活/格",
+            "收益方已离开/格",
+            "存活账户",
+            "结束离线",
+            "观察者数",
         ],
         &rows,
     )
@@ -859,7 +1017,10 @@ fn t_group(cells: &[Cell], seeds: &[u64]) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for m in MODES {
         for &d in &DS {
-            let g: Vec<&Cell> = pick(cells, seeds).into_iter().filter(|c| c.mode == m.name && c.d == d).collect();
+            let g: Vec<&Cell> = pick(cells, seeds)
+                .into_iter()
+                .filter(|c| c.mode == m.name && c.d == d)
+                .collect();
             rows.push(vec![
                 m.name.to_string(),
                 format!("{}", d),
@@ -877,8 +1038,17 @@ fn t_group(cells: &[Cell], seeds: &[u64]) -> String {
     }
     md_table(
         &[
-            "模式", "D(h)", "暴露 n/格", "暴露组 收益方/基线", "未暴露 n/格", "未暴露组", "杠杆(暴露/未暴露)",
-            "突变前副本 n/格", "突变前副本组", "暴露组 潜伏者/基线", "未暴露组 潜伏者/基线",
+            "模式",
+            "D(h)",
+            "暴露 n/格",
+            "暴露组 收益方/基线",
+            "未暴露 n/格",
+            "未暴露组",
+            "杠杆(暴露/未暴露)",
+            "突变前副本 n/格",
+            "突变前副本组",
+            "暴露组 潜伏者/基线",
+            "未暴露组 潜伏者/基线",
         ],
         &rows,
     )
@@ -888,7 +1058,10 @@ fn t_fresh(cells: &[Cell], seeds: &[u64]) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for m in MODES {
         for &d in &DS {
-            let g: Vec<&Cell> = pick(cells, seeds).into_iter().filter(|c| c.mode == m.name && c.d == d).collect();
+            let g: Vec<&Cell> = pick(cells, seeds)
+                .into_iter()
+                .filter(|c| c.mode == m.name && c.d == d)
+                .collect();
             rows.push(vec![
                 m.name.to_string(),
                 format!("{}", d),
@@ -907,8 +1080,18 @@ fn t_fresh(cells: &[Cell], seeds: &[u64]) -> String {
     }
     md_table(
         &[
-            "模式", "D(h)", "新鲜 n/格", "新鲜组 比", "新鲜杠杆", "陈旧 n/格", "陈旧组 比", "陈旧杠杆",
-            "副本年龄中位(h)", "副本最大年龄(h)", "潜伏者副本权重占比", "副本平均衰减因子",
+            "模式",
+            "D(h)",
+            "新鲜 n/格",
+            "新鲜组 比",
+            "新鲜杠杆",
+            "陈旧 n/格",
+            "陈旧组 比",
+            "陈旧杠杆",
+            "副本年龄中位(h)",
+            "副本最大年龄(h)",
+            "潜伏者副本权重占比",
+            "副本平均衰减因子",
         ],
         &rows,
     )
@@ -920,7 +1103,10 @@ fn t_profile(cells: &[Cell], seeds: &[u64]) -> String {
     for m in MODES {
         let gs: Vec<&&Cell> = sel.iter().filter(|c| c.mode == m.name).collect();
         for (bi, &(lo, hi)) in BUCKETS.iter().enumerate() {
-            let xs: Vec<&ObsRec> = gs.iter().flat_map(|c| c.obs.iter().filter(|r| r.post && r.bucket == bi)).collect();
+            let xs: Vec<&ObsRec> = gs
+                .iter()
+                .flat_map(|c| c.obs.iter().filter(|r| r.post && r.bucket == bi))
+                .collect();
             if xs.is_empty() {
                 continue;
             }
@@ -939,7 +1125,10 @@ fn t_profile(cells: &[Cell], seeds: &[u64]) -> String {
             ]);
         }
         // 突变前抓到的副本（无载荷）
-        let xs: Vec<&ObsRec> = gs.iter().flat_map(|c| c.obs.iter().filter(|r| r.has_copy && !r.post)).collect();
+        let xs: Vec<&ObsRec> = gs
+            .iter()
+            .flat_map(|c| c.obs.iter().filter(|r| r.has_copy && !r.post))
+            .collect();
         if !xs.is_empty() {
             let pr: Vec<f64> = xs.iter().map(|r| r.p_ratio).collect();
             let ws: Vec<f64> = xs.iter().map(|r| r.wshare).collect();
@@ -954,7 +1143,10 @@ fn t_profile(cells: &[Cell], seeds: &[u64]) -> String {
                 "—".to_string(),
             ]);
         }
-        let xs: Vec<&ObsRec> = gs.iter().flat_map(|c| c.obs.iter().filter(|r| !r.has_copy)).collect();
+        let xs: Vec<&ObsRec> = gs
+            .iter()
+            .flat_map(|c| c.obs.iter().filter(|r| !r.has_copy))
+            .collect();
         let pr: Vec<f64> = xs.iter().map(|r| r.p_ratio).collect();
         rows.push(vec![
             m.name.to_string(),
@@ -968,7 +1160,16 @@ fn t_profile(cells: &[Cell], seeds: &[u64]) -> String {
         ]);
     }
     md_table(
-        &["模式", "副本年龄(h)", "n", "收益方/基线 均值", "中位", "p90", "副本权重占比", "剔除副本后落差"],
+        &[
+            "模式",
+            "副本年龄(h)",
+            "n",
+            "收益方/基线 均值",
+            "中位",
+            "p90",
+            "副本权重占比",
+            "剔除副本后落差",
+        ],
         &rows,
     )
 }
@@ -994,19 +1195,47 @@ fn t_overview(cells: &[Cell], seeds: &[u64]) -> String {
             format!("{:.3}", pr(&ex)),
             format!("{:.3}", pr(&st)),
             format!("{:.3}", pr(&no)),
-            format!("{:.2}", if pr(&no) > 0.0 { pr(&ex) / pr(&no) } else { f64::NAN }),
-            format!("{:.2}", if pr(&no) > 0.0 { pr(&st) / pr(&no) } else { f64::NAN }),
+            format!(
+                "{:.2}",
+                if pr(&no) > 0.0 {
+                    pr(&ex) / pr(&no)
+                } else {
+                    f64::NAN
+                }
+            ),
+            format!(
+                "{:.2}",
+                if pr(&no) > 0.0 {
+                    pr(&st) / pr(&no)
+                } else {
+                    f64::NAN
+                }
+            ),
             format!("{:.3}", corr(&age, &prx)),
             format!("{:.3}", corr(&ws, &prx)),
             format!("{:.3}", mean(&cf)),
-            format!("{:.3}", mean(&ex.iter().map(|r| r.factor).collect::<Vec<_>>())),
+            format!(
+                "{:.3}",
+                mean(&ex.iter().map(|r| r.factor).collect::<Vec<_>>())
+            ),
             format!("{:.3}", mean(&ws)),
         ]);
     }
     md_table(
         &[
-            "模式", "观察者", "暴露", "暴露组", "陈旧暴露组", "未暴露组", "杠杆(暴露/未暴露)", "杠杆(陈旧/未暴露)",
-            "corr(年龄, 比)", "corr(权重占比, 比)", "反事实落差", "平均衰减因子", "副本权重占比",
+            "模式",
+            "观察者",
+            "暴露",
+            "暴露组",
+            "陈旧暴露组",
+            "未暴露组",
+            "杠杆(暴露/未暴露)",
+            "杠杆(陈旧/未暴露)",
+            "corr(年龄, 比)",
+            "corr(权重占比, 比)",
+            "反事实落差",
+            "平均衰减因子",
+            "副本权重占比",
         ],
         &rows,
     )
@@ -1015,7 +1244,10 @@ fn t_overview(cells: &[Cell], seeds: &[u64]) -> String {
 fn t_landed(cells: &[Cell], seeds: &[u64]) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     for m in MODES {
-        let g: Vec<&Cell> = pick(cells, seeds).into_iter().filter(|c| c.mode == m.name && c.landed()).collect();
+        let g: Vec<&Cell> = pick(cells, seeds)
+            .into_iter()
+            .filter(|c| c.mode == m.name && c.landed())
+            .collect();
         let xs: Vec<&ObsRec> = g.iter().flat_map(|c| c.obs.iter()).collect();
         let ex: Vec<&ObsRec> = xs.iter().copied().filter(|r| r.post).collect();
         let st: Vec<&ObsRec> = ex.iter().copied().filter(|r| !r.fresh).collect();
@@ -1028,13 +1260,37 @@ fn t_landed(cells: &[Cell], seeds: &[u64]) -> String {
             format!("{:.3}", pr(&ex)),
             format!("{:.3}", pr(&st)),
             format!("{:.3}", pr(&no)),
-            format!("{:.2}", if pr(&no) > 0.0 { pr(&ex) / pr(&no) } else { f64::NAN }),
-            format!("{:.2}", if pr(&no) > 0.0 { pr(&st) / pr(&no) } else { f64::NAN }),
+            format!(
+                "{:.2}",
+                if pr(&no) > 0.0 {
+                    pr(&ex) / pr(&no)
+                } else {
+                    f64::NAN
+                }
+            ),
+            format!(
+                "{:.2}",
+                if pr(&no) > 0.0 {
+                    pr(&st) / pr(&no)
+                } else {
+                    f64::NAN
+                }
+            ),
             format!("{:.3}", pr(&xs)),
         ]);
     }
     md_table(
-        &["模式", "落地格数", "暴露", "暴露组", "陈旧暴露组", "未暴露组", "杠杆(暴露/未暴露)", "杠杆(陈旧/未暴露)", "全体均值"],
+        &[
+            "模式",
+            "落地格数",
+            "暴露",
+            "暴露组",
+            "陈旧暴露组",
+            "未暴露组",
+            "杠杆(暴露/未暴露)",
+            "杠杆(陈旧/未暴露)",
+            "全体均值",
+        ],
         &rows,
     )
 }
@@ -1067,8 +1323,26 @@ fn t_detail(cells: &[Cell]) -> String {
     }
     md_table(
         &[
-            "模式", "D", "seed", "dorm", "离线", "存活", "n_obs", "比均值", "比中位", "载荷副本", "暴露组", "陈旧组",
-            "未暴露", "杠杆", "陈旧杠杆", "潜伏者比", "收益方存活", "年龄中位", "权重占比", "反事实落差",
+            "模式",
+            "D",
+            "seed",
+            "dorm",
+            "离线",
+            "存活",
+            "n_obs",
+            "比均值",
+            "比中位",
+            "载荷副本",
+            "暴露组",
+            "陈旧组",
+            "未暴露",
+            "杠杆",
+            "陈旧杠杆",
+            "潜伏者比",
+            "收益方存活",
+            "年龄中位",
+            "权重占比",
+            "反事实落差",
         ],
         &rows,
     )
@@ -1105,7 +1379,17 @@ fn t_paired(cells: &[Cell], seeds: &[u64]) -> String {
         }
     }
     md_table(
-        &["D(h)", "seed", "载荷副本 n", "副本年龄中位", "标准 暴露组", "有下限 暴露组", "关闭 暴露组", "关闭−标准", "未暴露组"],
+        &[
+            "D(h)",
+            "seed",
+            "载荷副本 n",
+            "副本年龄中位",
+            "标准 暴露组",
+            "有下限 暴露组",
+            "关闭 暴露组",
+            "关闭−标准",
+            "未暴露组",
+        ],
         &rows,
     )
 }
@@ -1114,14 +1398,20 @@ fn t_channel(cells: &[Cell], seeds: &[u64]) -> String {
     // 三模式共用同一个世界，潜伏者的在线时间表在三种模式下相同，故只统计 std 格，避免三重计数。
     let mut rows: Vec<Vec<String>> = Vec::new();
     for &d in &DS {
-        let g: Vec<&Cell> = cells.iter().filter(|c| c.d == d && c.mode == "std" && seeds.contains(&c.seed)).collect();
+        let g: Vec<&Cell> = cells
+            .iter()
+            .filter(|c| c.d == d && c.mode == "std" && seeds.contains(&c.seed))
+            .collect();
         let n = g.len().max(1);
         let offdur: Vec<f64> = g.iter().map(|c| c.slp_offdur).collect();
         rows.push(vec![
             format!("{}", d),
             format!("{}", g.len()),
             format!("{}", g.iter().filter(|c| c.slp_on80 > 0).count()),
-            format!("{:.1}", g.iter().map(|c| c.post_n).sum::<usize>() as f64 / n as f64),
+            format!(
+                "{:.1}",
+                g.iter().map(|c| c.post_n).sum::<usize>() as f64 / n as f64
+            ),
             format!("{}", g.iter().filter(|c| c.landed()).count()),
             format!("{}", g.iter().filter(|c| c.slp_alive > 0).count()),
             format!("{}", g.iter().filter(|c| c.slp_off_end > 0).count()),
@@ -1129,14 +1419,27 @@ fn t_channel(cells: &[Cell], seeds: &[u64]) -> String {
         ]);
     }
     md_table(
-        &["D(h)", "格数(每模式)", "潜伏者 80h 后曾在线", "载荷副本 个/格", "落地格", "潜伏者存活格", "潜伏者结束离线格", "潜伏者离线时长中位(h)"],
+        &[
+            "D(h)",
+            "格数(每模式)",
+            "潜伏者 80h 后曾在线",
+            "载荷副本 个/格",
+            "落地格",
+            "潜伏者存活格",
+            "潜伏者结束离线格",
+            "潜伏者离线时长中位(h)",
+        ],
         &rows,
     )
 }
 
 fn t_land72(cals: &[(u64, u64, f64, WorldStat, bool, Vec<(f64, WorldStat)>)]) -> String {
     let d = 72u64;
-    let grids: Vec<&Vec<(f64, WorldStat)>> = cals.iter().filter(|c| c.0 == d && SEEDS_SPEC.contains(&c.1)).map(|c| &c.5).collect();
+    let grids: Vec<&Vec<(f64, WorldStat)>> = cals
+        .iter()
+        .filter(|c| c.0 == d && SEEDS_SPEC.contains(&c.1))
+        .map(|c| &c.5)
+        .collect();
     let mut rows: Vec<Vec<String>> = Vec::new();
     if grids.is_empty() {
         return String::new();
@@ -1148,7 +1451,10 @@ fn t_land72(cals: &[(u64, u64, f64, WorldStat, bool, Vec<(f64, WorldStat)>)]) ->
         }
         rows.push(r);
     }
-    md_table(&["dormancy_rate", "seed 11 离线/存活", "seed 23", "seed 37"], &rows)
+    md_table(
+        &["dormancy_rate", "seed 11 离线/存活", "seed 23", "seed 37"],
+        &rows,
+    )
 }
 
 // ───────────────────────── main ─────────────────────────
@@ -1166,7 +1472,10 @@ fn main() {
 
     if smoke {
         let (dorm, st, ok, _) = calibrate(216, 11);
-        println!("# smoke D=216 seed=11 dorm={:.6} off={:.4} alive={} online={} ok={}", dorm, st.off, st.alive, st.online, ok);
+        println!(
+            "# smoke D=216 seed=11 dorm={:.6} off={:.4} alive={} online={} ok={}",
+            dorm, st.off, st.alive, st.online, ok
+        );
         let c = run_cell(MODES[0], 216, 11, dorm);
         let keys: Vec<String> = c.pairs().into_iter().map(|(k, _)| k).collect();
         println!("#HEAD,{}", keys.join(","));
@@ -1176,22 +1485,43 @@ fn main() {
         return;
     }
 
-    let tasks: Vec<(u64, u64)> = DS.iter().flat_map(|&d| SEEDS.iter().map(move |&s| (d, s))).collect();
-    println!("# D1 三衰减模式 x 离线时长 x 潜伏攻击 · n={} steps={} rounds={} samples={}", N_INIT, STEPS, ROUNDS, SAMPLES);
+    let tasks: Vec<(u64, u64)> = DS
+        .iter()
+        .flat_map(|&d| SEEDS.iter().map(move |&s| (d, s)))
+        .collect();
+    println!(
+        "# D1 三衰减模式 x 离线时长 x 潜伏攻击 · n={} steps={} rounds={} samples={}",
+        N_INIT, STEPS, ROUNDS, SAMPLES
+    );
     println!("# 口径：诚实=非 Sleeper 非 Promoted；潜伏者=Sleeper；收益方=Promoted（分开统计）");
-    println!("# 标定：每 (D,seed) 在 29 点对数网格上取 alive>={} 且 |off-{:.2}| 最小的 dormancy_rate", MIN_ALIVE, TARGET_OFF);
+    println!(
+        "# 标定：每 (D,seed) 在 29 点对数网格上取 alive>={} 且 |off-{:.2}| 最小的 dormancy_rate",
+        MIN_ALIVE, TARGET_OFF
+    );
 
     let cals = par_map(tasks.len(), threads, |i| {
         let (d, s) = tasks[i];
         let (dorm, st, ok, grid) = calibrate(d, s);
-        eprintln!("[cal] D={} seed={} dorm={:.6} off={:.4} alive={} online={} ok={}", d, s, dorm, st.off, st.alive, st.online, ok);
+        eprintln!(
+            "[cal] D={} seed={} dorm={:.6} off={:.4} alive={} online={} ok={}",
+            d, s, dorm, st.off, st.alive, st.online, ok
+        );
         (d, s, dorm, st, ok, grid)
     });
 
     for (d, s, dorm, st, ok, _) in &cals {
         println!(
             "CAL,{},{},{:.6},{:.4},{},{},{},{},{},{},{}",
-            d, s, dorm, st.off, st.accts, st.alive, st.online, st.ever, st.leaves, st.dorms,
+            d,
+            s,
+            dorm,
+            st.off,
+            st.accts,
+            st.alive,
+            st.online,
+            st.ever,
+            st.leaves,
+            st.dorms,
             if *ok { 1 } else { 0 }
         );
     }
@@ -1216,7 +1546,11 @@ fn main() {
     // 阶段 2：54 格
     let spec: Vec<(u64, u64, Mode)> = DS
         .iter()
-        .flat_map(|&d| SEEDS.iter().flat_map(move |&s| MODES.iter().map(move |&m| (d, s, m))))
+        .flat_map(|&d| {
+            SEEDS
+                .iter()
+                .flat_map(move |&s| MODES.iter().map(move |&m| (d, s, m)))
+        })
         .collect();
     let cells = par_map(spec.len(), threads, |i| {
         let (d, s, m) = spec[i];
@@ -1258,16 +1592,27 @@ fn main() {
             let cf: Vec<f64> = xs.iter().map(|r| r.cf_ratio).collect();
             println!(
                 "BUCK,{},{},{},{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4}",
-                c.mode, c.d, c.seed, lo,
+                c.mode,
+                c.d,
+                c.seed,
+                lo,
                 if hi == u64::MAX { 9999 } else { hi },
-                xs.len(), mean(&pr), median(&pr), mean(&ws), mean(&fa), mean(&cf)
+                xs.len(),
+                mean(&pr),
+                median(&pr),
+                mean(&ws),
+                mean(&fa),
+                mean(&cf)
             );
         }
     }
 
     println!("#CFHEAD,mode,d,seed,n,cf_ratio_mean,cf_delta_mean");
     for c in &cells {
-        println!("CF,{},{},{},{},{:.4},{:.4}", c.mode, c.d, c.seed, c.cf_n, c.cf_ratio_mean, c.cf_delta_mean);
+        println!(
+            "CF,{},{},{},{},{:.4},{:.4}",
+            c.mode, c.d, c.seed, c.cf_n, c.cf_ratio_mean, c.cf_delta_mean
+        );
     }
 
     // ───────────────────────── 汇总 ─────────────────────────
@@ -1275,21 +1620,34 @@ fn main() {
 
     {
         let mut rows: Vec<Vec<String>> = Vec::new();
-        let dts = [0u64, 12, 24, 48, 72, 96, 120, 168, 216, 240, 336, 480, 720, 1440, 2880];
+        let dts = [
+            0u64, 12, 24, 48, 72, 96, 120, 168, 216, 240, 336, 480, 720, 1440, 2880,
+        ];
         for dt in dts {
-            let mut r = vec![format!("{}", dt), format!("{:.4}", 0.5f64.powf(dt as f64 / HALF_LIFE as f64))];
+            let mut r = vec![
+                format!("{}", dt),
+                format!("{:.4}", 0.5f64.powf(dt as f64 / HALF_LIFE as f64)),
+            ];
             for m in MODES {
                 let f = if !m.enabled {
                     1.0
                 } else {
-                    0.5f64.powf(dt as f64 / HALF_LIFE as f64).max(m.floor as f64)
+                    0.5f64
+                        .powf(dt as f64 / HALF_LIFE as f64)
+                        .max(m.floor as f64)
                 };
                 r.push(format!("{:.4}", f));
             }
             rows.push(r);
         }
         println!("### 表 A · 三种模式的衰减因子（Engine::decay_factor）\n");
-        println!("{}", md_table(&["Δt(h)", "理论 0.5^(Δt/72)", "标准", "有下限(0.5)", "关闭"], &rows));
+        println!(
+            "{}",
+            md_table(
+                &["Δt(h)", "理论 0.5^(Δt/72)", "标准", "有下限(0.5)", "关闭"],
+                &rows
+            )
+        );
     }
 
     {
@@ -1305,14 +1663,32 @@ fn main() {
                 format!("{}", st.accts),
                 format!("{}", st.leaves),
                 format!("{}", st.dorms),
-                if *ok { "是".to_string() } else { "否（人口约束）".to_string() },
+                if *ok {
+                    "是".to_string()
+                } else {
+                    "否（人口约束）".to_string()
+                },
             ]);
         }
-        println!("\n### 表 B · dormancy 标定（每 (D,seed) 独立标定；约束 alive>={}）\n", MIN_ALIVE);
+        println!(
+            "\n### 表 B · dormancy 标定（每 (D,seed) 独立标定；约束 alive>={}）\n",
+            MIN_ALIVE
+        );
         println!(
             "{}",
             md_table(
-                &["D(h)", "seed", "dormancy_rate", "结束离线", "存活", "在线", "账户总数", "离开", "休眠事件", "达成 60%"],
+                &[
+                    "D(h)",
+                    "seed",
+                    "dormancy_rate",
+                    "结束离线",
+                    "存活",
+                    "在线",
+                    "账户总数",
+                    "离开",
+                    "休眠事件",
+                    "达成 60%"
+                ],
                 &rows
             )
         );
@@ -1357,7 +1733,11 @@ fn main() {
     println!("{}", t_channel(&cells, &SEEDS));
 
     println!("\n### 表 6 · 规格 27 格逐格明细（全 216 格的原始行在 d1_result.txt 的 ROW 段）\n");
-    let spec_cells: Vec<Cell> = cells.iter().filter(|c| SEEDS_SPEC.contains(&c.seed)).cloned().collect();
+    let spec_cells: Vec<Cell> = cells
+        .iter()
+        .filter(|c| SEEDS_SPEC.contains(&c.seed))
+        .cloned()
+        .collect();
     println!("{}", t_detail(&spec_cells));
 
     println!("\n# elapsed {:.1}s", t0.elapsed().as_secs_f64());

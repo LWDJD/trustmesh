@@ -154,7 +154,11 @@ fn d4_characterization_periodic_replay_pushes_group_term_to_one() {
     for round in 0..40u64 {
         let now = 288 + round * 72;
         e.on_view(a, view_of(key(9), 1.0), 0, now); // 重放，内容与 published_at 都不变
-        assert_eq!(e.view_age(a, now), Some(0), "第 {round} 轮重放：年龄被钉回 0");
+        assert_eq!(
+            e.view_age(a, now),
+            Some(0),
+            "第 {round} 轮重放：年龄被钉回 0"
+        );
         let g = group_term(&e, target, now);
         // 期望值：A 权重 = 1（刚刷新），H 权重 = 0.5^round。
         let expected = (1.0f32) / (1.0 + 0.5f32.powi(round as i32));
@@ -162,10 +166,7 @@ fn d4_characterization_periodic_replay_pushes_group_term_to_one() {
             (g - expected).abs() < 1e-4,
             "第 {round} 轮：群体项应为 {expected}，实际 {g}"
         );
-        assert!(
-            g >= last,
-            "每轮重放只会让攻击者份额单调上升：{last} -> {g}"
-        );
+        assert!(g >= last, "每轮重放只会让攻击者份额单调上升：{last} -> {g}");
         last = g;
     }
     assert!(

@@ -253,7 +253,12 @@ fn main() {
     }
     fs::write(&path, &blob).expect("写快照文件失败");
     let on_disk = fs::metadata(&path).expect("读文件元数据失败").len();
-    println!("\n快照字节数：{} 字节（{} KiB），已写入 {}", blob.len(), blob.len() / 1024, path.display());
+    println!(
+        "\n快照字节数：{} 字节（{} KiB），已写入 {}",
+        blob.len(),
+        blob.len() / 1024,
+        path.display()
+    );
     println!(
         "落盘校验：文件实际 {} 字节，每节点平均 {:.1} KiB",
         on_disk,
@@ -272,7 +277,11 @@ fn main() {
             .unwrap_or_else(|| panic!("第 {i} 台引擎恢复失败（参数指纹或观点字节不匹配）"));
         restored.push(e);
     }
-    println!("\n读回 {} 字节，{} 台引擎全部 restore 成功（cfg 与导出时一致）", read_back.len(), restored.len());
+    println!(
+        "\n读回 {} 字节，{} 台引擎全部 restore 成功（cfg 与导出时一致）",
+        read_back.len(),
+        restored.len()
+    );
 
     // ---------- 4. 逐位对比 query ----------
     let times = [0u64, now / 2, now, now * 10, now * 10_000];
@@ -287,14 +296,22 @@ fn main() {
     }
     println!(
         "\nquery 位模式对比：{} 个节点 × {} 个时刻 × {} 个目标 = {} 个对比点",
-        N, times.len(), N, points
+        N,
+        times.len(),
+        N,
+        points
     );
-    println!("round-trip 后的最大位差 = {}（0 表示逐位完全相同）", max_bits);
+    println!(
+        "round-trip 后的最大位差 = {}（0 表示逐位完全相同）",
+        max_bits
+    );
     println!("最大绝对差 = {:.9e}", max_abs);
 
     // ---------- 5. shadow 分布对比 ----------
     let shadows_ok = (0..N).all(|i| shadow_identical(&nodes[i], &restored[i], now));
-    let identical = (0..N).filter(|&i| shadow_identical(&nodes[i], &restored[i], now)).count();
+    let identical = (0..N)
+        .filter(|&i| shadow_identical(&nodes[i], &restored[i], now))
+        .count();
     println!(
         "\n恢复前后 shadow 分布（每个观察者对外可见的信任分布）：{}",
         if shadows_ok {
@@ -375,11 +392,17 @@ fn main() {
     println!("快照字节数              = {} 字节", blob.len());
     println!("round-trip 后的最大位差 = {}", max_bits);
     println!("继续 2 轮后的最大位差   = {}", max_bits_after);
-    println!("恢复前后 shadow 分布    = {}", if shadows_ok { "一致" } else { "不一致" });
+    println!(
+        "恢复前后 shadow 分布    = {}",
+        if shadows_ok { "一致" } else { "不一致" }
+    );
     println!("query 对比点            = {} 个", points);
     println!("最大绝对差              = {:.9e}", max_abs);
     let ok = max_bits == 0 && max_bits_after == 0 && shadows_ok && rejected_cfg && rejected_bytes;
-    println!("整体判定                = {}", if ok { "PASS" } else { "FAIL" });
+    println!(
+        "整体判定                = {}",
+        if ok { "PASS" } else { "FAIL" }
+    );
     if !ok {
         std::process::exit(1);
     }

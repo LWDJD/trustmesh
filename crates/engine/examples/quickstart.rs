@@ -35,8 +35,8 @@ fn main() {
     let view_params = ViewParams::new(2048, 5, 0);
 
     let cfg = EngineConfig {
-        beta: 0.3,           // 个人判断 30% + 群体共识 70%（作者定，别改）
-        half_life: 72,       // 小时。这是「伤害时效」，不是反女巫机制
+        beta: 0.3,     // 个人判断 30% + 群体共识 70%（作者定，别改）
+        half_life: 72, // 小时。这是「伤害时效」，不是反女巫机制
         view_params,
         ..EngineConfig::default()
     };
@@ -112,10 +112,15 @@ fn main() {
     let period = 12; // 小时
     let stats = engines[0].freshness_stats(now);
     println!();
-    println!("alice 的正分清单 {n_list} 条，已缓存 {} 条观点", stats.count);
+    println!(
+        "alice 的正分清单 {n_list} 条，已缓存 {} 条观点",
+        stats.count
+    );
     println!(
         "其中 {} 条在半个半衰期（{}h）内仍算新鲜；年龄中位数 {}h",
-        stats.fresh_within_half_life, half_life / 2, stats.median_age
+        stats.fresh_within_half_life,
+        half_life / 2,
+        stats.median_age
     );
     // 硬约束：刷新周期 (n_list/k)·T ≤ H/2 ⟹ k ≥ 2·n_list·T/H
     let need_k = if half_life > 0 {
@@ -128,8 +133,10 @@ fn main() {
     // ---- 第 5 步：跨平台可复现的检查 ----
     // 同一个 seed、同样的输入，任何平台上 query 的结果必须逐位相同。
     println!();
-    println!("alice 眼中 bob = {:.8}（f32 位模式 0x{:08x}）",
+    println!(
+        "alice 眼中 bob = {:.8}（f32 位模式 0x{:08x}）",
         engines[0].query(1, now),
-        engines[0].query(1, now).to_bits());
+        engines[0].query(1, now).to_bits()
+    );
     println!("这个位模式在 x86_64 / aarch64 / wasm32 上都应该是同一个值。");
 }

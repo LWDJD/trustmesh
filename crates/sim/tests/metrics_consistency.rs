@@ -82,7 +82,11 @@ fn 分类统计与账户表一致() {
         assert_eq!(class.ratings_in, 收到条数, "{} 收到条数不对", class.label);
         if 收到条数 > 0 {
             let 均分 = (收到合计 / 收到条数 as f64) as f32;
-            assert!((class.mean_received - 均分).abs() < 1e-5, "{} 均分不对", class.label);
+            assert!(
+                (class.mean_received - 均分).abs() < 1e-5,
+                "{} 均分不对",
+                class.label
+            );
         }
         let 给出条数: usize = 成员.iter().map(|a| a.ratings.len()).sum();
         assert_eq!(class.ratings_out, 给出条数, "{} 给出条数不对", class.label);
@@ -116,18 +120,25 @@ fn 社团统计与账户表一致() {
     assert_eq!(s.community.follow_edges, 内 + 间);
     assert_eq!(s.community.follow_intra, 内);
     assert_eq!(s.community.follow_inter, 间);
-    assert_eq!(s.community.rating_intra + s.community.rating_inter, s.rating_edges);
+    assert_eq!(
+        s.community.rating_intra + s.community.rating_inter,
+        s.rating_edges
+    );
     assert_eq!(s.community.count, w.communities.len());
     if 内 > 0 {
-        assert!(
-            (s.community.follow_intra_share - 内 as f32 / (内 + 间) as f32).abs() < 1e-6
-        );
+        assert!((s.community.follow_intra_share - 内 as f32 / (内 + 间) as f32).abs() < 1e-6);
     }
     if s.community.rating_intra > 0 {
-        assert!((s.community.intra_mean - (内合计 / s.community.rating_intra as f64) as f32).abs() < 1e-5);
+        assert!(
+            (s.community.intra_mean - (内合计 / s.community.rating_intra as f64) as f32).abs()
+                < 1e-5
+        );
     }
     if s.community.rating_inter > 0 {
-        assert!((s.community.inter_mean - (间合计 / s.community.rating_inter as f64) as f32).abs() < 1e-5);
+        assert!(
+            (s.community.inter_mean - (间合计 / s.community.rating_inter as f64) as f32).abs()
+                < 1e-5
+        );
     }
 }
 
@@ -160,7 +171,10 @@ fn 评分明细与账户行一致() {
     // 每条评分都必须落在已关注的人身上，且没有自评
     for (s, u, _) in w.ratings() {
         assert_ne!(s, u, "出现了自评");
-        assert!(w.accounts[s].follows.contains(&u), "{s} 给没关注的 {u} 打了分");
+        assert!(
+            w.accounts[s].follows.contains(&u),
+            "{s} 给没关注的 {u} 打了分"
+        );
     }
     // 每条关注都不指向已离开的人（离开之后不再新增关注）
     for a in &w.accounts {

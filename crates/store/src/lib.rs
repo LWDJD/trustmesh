@@ -349,7 +349,11 @@ impl PositiveList {
             return;
         }
         // 允许任意正数（应用层给的 0~n 原始数值），只挡住无穷大/超大值。
-        let score = if score.is_finite() { score.min(MAX_SCORE) } else { MAX_SCORE };
+        let score = if score.is_finite() {
+            score.min(MAX_SCORE)
+        } else {
+            MAX_SCORE
+        };
         match self.entries.get_mut(&idx) {
             // 已有条目：只更新分数与时间，连败计数原样保留。
             Some(entry) => {
@@ -2229,7 +2233,10 @@ mod tests {
         let from_items: Vec<(AccountIdx, Score, Time)> =
             items.iter().map(|&(i, s, t, _)| (i, s, t)).collect();
         assert_eq!(from_iter, from_items);
-        assert_eq!(list.indices(), items.iter().map(|i| i.0).collect::<Vec<_>>());
+        assert_eq!(
+            list.indices(),
+            items.iter().map(|i| i.0).collect::<Vec<_>>()
+        );
     }
 
     /// from_items 是 items 的精确逆操作：三件套 + 连败计数全部原样回来。
@@ -2268,12 +2275,12 @@ mod tests {
     fn from_items_applies_same_storage_rules_as_set() {
         let restored = PositiveList::from_items(&[
             (1, 0.5, 10, 0),
-            (2, 0.0, 10, 0),          // 0 = 没表态 -> 丢弃
-            (3, -1.0, 10, 7),         // 负数 -> 丢弃
-            (4, f32::NAN, 10, 0),     // NaN -> 丢弃
-            (5, f32::INFINITY, 10, 0),// 无穷 -> 截到 MAX_SCORE
-            (6, 1.0e10, 10, 0),       // 超大 -> 截到 MAX_SCORE
-            (7, 2.5, 10, 0),          // 0~n 的原始数值原样保留
+            (2, 0.0, 10, 0),           // 0 = 没表态 -> 丢弃
+            (3, -1.0, 10, 7),          // 负数 -> 丢弃
+            (4, f32::NAN, 10, 0),      // NaN -> 丢弃
+            (5, f32::INFINITY, 10, 0), // 无穷 -> 截到 MAX_SCORE
+            (6, 1.0e10, 10, 0),        // 超大 -> 截到 MAX_SCORE
+            (7, 2.5, 10, 0),           // 0~n 的原始数值原样保留
         ]);
         assert_eq!(restored.len(), 4, "三条非法条目必须被丢弃");
         assert!(!restored.has(2) && !restored.has(3) && !restored.has(4));
@@ -2322,7 +2329,10 @@ mod tests {
             assert_eq!(a.next_u64(), b.next_u64());
         }
         // 种子 0 经 new 被换成常量，from_state 拿到的正是那个常量。
-        assert_eq!(Rng::new(0).state(), Rng::from_state(Rng::new(0).state()).state());
+        assert_eq!(
+            Rng::new(0).state(),
+            Rng::from_state(Rng::new(0).state()).state()
+        );
     }
 
     /// from_state(0) 不 panic、也不会让拒绝采样死循环：0 换成内置常量。

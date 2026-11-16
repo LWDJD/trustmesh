@@ -71,7 +71,11 @@ fn group_denominator_counts_rated_sources_without_views() {
     e.on_view(sources[0], view(&[(1, 1.0)]), 0, 0);
 
     let dist = e.trust_distribution(0);
-    let dt = dist.iter().find(|(i, _)| *i == target).map(|(_, v)| *v).unwrap();
+    let dt = dist
+        .iter()
+        .find(|(i, _)| *i == target)
+        .map(|(_, v)| *v)
+        .unwrap();
     let dh = dist
         .iter()
         .find(|(i, _)| *i == sources[1])
@@ -120,7 +124,10 @@ fn full_coverage_is_bit_identical() {
     }
     e.tick(37, 10);
 
-    let q0: Vec<(u32, u32)> = targets.iter().map(|&i| (i, e.query(i, 0).to_bits())).collect();
+    let q0: Vec<(u32, u32)> = targets
+        .iter()
+        .map(|&i| (i, e.query(i, 0).to_bits()))
+        .collect();
     assert_eq!(
         q0,
         vec![
@@ -133,7 +140,10 @@ fn full_coverage_is_bit_identical() {
         "满覆盖时结果必须逐位不变"
     );
     // 全体来源一起变旧时，指数衰减是公因子，群体项不变。
-    let q37: Vec<(u32, u32)> = targets.iter().map(|&i| (i, e.query(i, 37).to_bits())).collect();
+    let q37: Vec<(u32, u32)> = targets
+        .iter()
+        .map(|&i| (i, e.query(i, 37).to_bits()))
+        .collect();
     assert_eq!(q37, q0, "满覆盖时全体变旧是恒等变换");
 
     let dist: Vec<(u32, u32)> = e
@@ -207,8 +217,14 @@ fn mixed_claims_still_sum_to_one() {
     assert!((sum - 1.0).abs() < 1e-6, "Σv 应为 1，实际 {sum}");
     let hot = e.query(targets[0], 0) / 0.7;
     let cold = e.query(targets[1], 0) / 0.7;
-    assert!((hot - 1.0 / 1.875).abs() < 1e-6, "超量声明只拿 min(c,1)/T，实际 {hot}");
-    assert!((cold - 0.125 / 1.875).abs() < 1e-6, "合规声明仍是 c/T，实际 {cold}");
+    assert!(
+        (hot - 1.0 / 1.875).abs() < 1e-6,
+        "超量声明只拿 min(c,1)/T，实际 {hot}"
+    );
+    assert!(
+        (cold - 0.125 / 1.875).abs() < 1e-6,
+        "合规声明仍是 c/T，实际 {cold}"
+    );
     assert!(hot > cold, "超量声明最多拿满 1 份，但仍是全场最高");
 }
 
@@ -343,7 +359,10 @@ fn combined_attack_stays_within_budget() {
 
     // 全局归一化仍然成立。
     let dist_sum: f32 = e.trust_distribution(0).iter().map(|(_, v)| *v).sum();
-    assert!((dist_sum - 1.0).abs() < 1e-4, "分布总和应为 1，实际 {dist_sum}");
+    assert!(
+        (dist_sum - 1.0).abs() < 1e-4,
+        "分布总和应为 1，实际 {dist_sum}"
+    );
 
     // 被背书的目标没有压过「我亲自评分、没人背书」的账户。
     let endorsed = e.query(early[0], 0);
@@ -353,7 +372,6 @@ fn combined_attack_stays_within_budget() {
         "背书不该压过个人评分：{endorsed} vs {personal_only}"
     );
 }
-
 
 /// 改前：50 条声明全部指向「on_view 时还不存在」的账户，total_mass 只有
 /// 1e-6 的下限；这些账户一登记，每条声明都饱和到 1.0，Σv = 50。
@@ -390,6 +408,12 @@ fn mass_snapshot_boundary_only_drops_later_accounts() {
 
     let sum_early: f32 = early.iter().map(|&t| e.query(t, 0) / 0.7).sum();
     let sum_late: f32 = late.iter().map(|&t| e.query(t, 0) / 0.7).sum();
-    assert!((sum_early - 1.0).abs() < 1e-5, "先登记的 25 个 Σv 仍为 1，实际 {sum_early}");
-    assert!(sum_late.abs() < 1e-9, "后登记的 25 个应为 0，实际 {sum_late}");
+    assert!(
+        (sum_early - 1.0).abs() < 1e-5,
+        "先登记的 25 个 Σv 仍为 1，实际 {sum_early}"
+    );
+    assert!(
+        sum_late.abs() < 1e-9,
+        "后登记的 25 个应为 0，实际 {sum_late}"
+    );
 }

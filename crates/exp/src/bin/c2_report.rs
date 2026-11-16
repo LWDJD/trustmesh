@@ -236,7 +236,11 @@ fn run(
     target: usize,
     a: Args,
     probe: bool,
-) -> (Vec<Option<Engine>>, Option<BTreeMap<u32, CompressedView>>, ReportStats) {
+) -> (
+    Vec<Option<Engine>>,
+    Option<BTreeMap<u32, CompressedView>>,
+    ReportStats,
+) {
     let cfg = engine_cfg();
     let mut nodes: Vec<Option<Engine>> = (0..d.n)
         .map(|i| {
@@ -272,10 +276,8 @@ fn run(
             let reqs = nodes[i].as_mut().unwrap().tick(0, a.samples);
             if mode == ReportMode::EveryTick && is_observer[i] {
                 stats.calls += 1;
-                stats.lowered += nodes[i]
-                    .as_mut()
-                    .unwrap()
-                    .report_bad_account(target as u32) as u64;
+                stats.lowered +=
+                    nodes[i].as_mut().unwrap().report_bad_account(target as u32) as u64;
             }
             for req in reqs {
                 let src = req.idx as usize;
@@ -384,7 +386,11 @@ struct Metrics {
     n_obs: usize,
 }
 
-fn collect_discounts(e: &Engine, d: &Dump, o: usize) -> (f64, f64, f64, f64, f64, usize, usize, usize) {
+fn collect_discounts(
+    e: &Engine,
+    d: &Dump,
+    o: usize,
+) -> (f64, f64, f64, f64, f64, usize, usize, usize) {
     let mut pun_sum = 0.0;
     let mut pun_n = 0usize;
     let mut hs_sum = 0.0;
@@ -412,7 +418,16 @@ fn collect_discounts(e: &Engine, d: &Dump, o: usize) -> (f64, f64, f64, f64, f64
             }
         }
     }
-    (pun_sum, pun_n as f64, hs_sum, hs_n as f64, as_sum, as_n, hs_fp, 0)
+    (
+        pun_sum,
+        pun_n as f64,
+        hs_sum,
+        hs_n as f64,
+        as_sum,
+        as_n,
+        hs_fp,
+        0,
+    )
 }
 
 fn measure(nodes: &[Option<Engine>], d: &Dump) -> Metrics {
@@ -564,7 +579,12 @@ struct PersistRow {
     bit_same: bool,
 }
 
-fn persistence(nodes: &mut [Option<Engine>], d: &Dump, probe: usize, m0: &Metrics) -> Vec<PersistRow> {
+fn persistence(
+    nodes: &mut [Option<Engine>],
+    d: &Dump,
+    probe: usize,
+    m0: &Metrics,
+) -> Vec<PersistRow> {
     let source_bits = |nodes: &[Option<Engine>]| -> Vec<u32> {
         let e = match nodes.get(probe).and_then(|x| x.as_ref()) {
             Some(e) => e,
@@ -590,8 +610,16 @@ fn persistence(nodes: &mut [Option<Engine>], d: &Dump, probe: usize, m0: &Metric
         let bit_same = before == source_bits(nodes);
         out.push(PersistRow {
             ticks,
-            s3_prom: if m.s3_prom.is_finite() { m.s3_prom } else { m0.s3_prom },
-            s3_att: if m.s3_att.is_finite() { m.s3_att } else { m0.s3_att },
+            s3_prom: if m.s3_prom.is_finite() {
+                m.s3_prom
+            } else {
+                m0.s3_prom
+            },
+            s3_att: if m.s3_att.is_finite() {
+                m.s3_att
+            } else {
+                m0.s3_att
+            },
             mean_disc: m.honest_mean_disc,
             fp: m.honest_fp,
             bit_same,
@@ -849,7 +877,10 @@ fn main() {
     }
 
     // 持续攻击曲线：同一批 seed 上对照报告 / 不报告。
-    println!("\n## 持续攻击：S3 随轮次（{} seed 均值）\n", args.curve_seeds);
+    println!(
+        "\n## 持续攻击：S3 随轮次（{} seed 均值）\n",
+        args.curve_seeds
+    );
     println!("| 轮次 | S3 收益方（无报告） | S3 收益方（每tick报告） | 平均折扣（报告） | 诚实<0.9（报告） |");
     println!("|---:|---:|---:|---:|---:|");
     for r in 0..curve_rep.len() {

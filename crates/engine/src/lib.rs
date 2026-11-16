@@ -230,7 +230,6 @@ pub struct FreshnessStats {
     pub max_age: Time,
 }
 
-
 /// 一次性批量刷新用的请求项。
 pub struct FetchRequest {
     /// 内部编号

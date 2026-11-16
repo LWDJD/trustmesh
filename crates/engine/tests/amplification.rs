@@ -176,7 +176,12 @@ fn a_single_source_can_never_exceed_one_full_share() {
 
     let mut e = engine_with(known, rated);
     let vals = vec![(key(0), 1e9f32)];
-    e.on_view(0, CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &vals), 0, 0);
+    e.on_view(
+        0,
+        CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &vals),
+        0,
+        0,
+    );
 
     // 来源 0 自己的份额是 1/4；它给 0 号（自己）的读数最多 1 ⇒ 群体项 <= 1
     // 于是 query(0) <= β·(1/4) + (1−β)·1
@@ -200,7 +205,12 @@ fn infinite_amplification_is_treated_as_no_statement() {
 
     let mut e = engine_with(known, rated);
     let vals: Vec<([u8; 32], f32)> = (0..known).map(|i| (key(i), f32::INFINITY)).collect();
-    e.on_view(0, CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &vals), 0, 0);
+    e.on_view(
+        0,
+        CompressedView::from_pairs(ViewParams::new(2048, 5, 0), &vals),
+        0,
+        0,
+    );
 
     // 不管怎么算，读数必须是有限的、且在 [0,1]
     for t in 0..known {

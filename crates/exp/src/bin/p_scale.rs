@@ -189,7 +189,8 @@ fn run_one(n: usize, seed: u64) -> Row {
     for r in 0..rounds {
         let now = now0 + r * hpr;
         // 导出（每份观点）
-        let mut published: Vec<Option<CompressedView>> = (0..total_accounts).map(|_| None).collect();
+        let mut published: Vec<Option<CompressedView>> =
+            (0..total_accounts).map(|_| None).collect();
         let t = Instant::now();
         for &a in &alive {
             if let Some(e) = engines[a].as_ref() {
@@ -285,7 +286,11 @@ fn run_one(n: usize, seed: u64) -> Row {
         } else {
             0.0
         },
-        us_query: if count > 0 { ms_query_total * 1000.0 / count as f64 } else { 0.0 },
+        us_query: if count > 0 {
+            ms_query_total * 1000.0 / count as f64
+        } else {
+            0.0
+        },
         views_cached,
         view_bytes,
         view_footprint_mb: views_cached as f64 * view_bytes as f64 / (1024.0 * 1024.0),
@@ -328,7 +333,8 @@ fn measure_s1_s2(
                 .filter(|&i| matches!(ace[i].kind, tm_sim::Kind::Sybil { .. }))
                 .collect();
             if !sybils.is_empty() {
-                let m: f64 = sybils.iter().map(|&i| dist[i] as f64).sum::<f64>() / sybils.len() as f64;
+                let m: f64 =
+                    sybils.iter().map(|&i| dist[i] as f64).sum::<f64>() / sybils.len() as f64;
                 s1_vals.push(m / hm);
             }
             for &i in &sybils {

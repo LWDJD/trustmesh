@@ -119,7 +119,10 @@ impl Verdict {
     /// 再「修」也不会有改善，需要换 β 或改分母口径（那是设计决策，不是 bug）。
     #[must_use]
     pub fn acceptable(self) -> bool {
-        matches!(self, Self::Pass | Self::StructurallyImpossible | Self::NotApplicable)
+        matches!(
+            self,
+            Self::Pass | Self::StructurallyImpossible | Self::NotApplicable
+        )
     }
 
     /// 简短中文标签，便于报告输出。
@@ -301,7 +304,11 @@ mod tests {
     fn judge_s3_uses_relative_not_absolute() {
         // 绝对比值 1.82 > 1，但因为地板是 3.33，相对值 0.546 ⇒ 通过。
         let (v, rel) = judge_s3(1.8207, 0.3);
-        assert_eq!(v, Verdict::Pass, "相对 {rel} 应判通过（绝对比值 1.82 不影响判定）");
+        assert_eq!(
+            v,
+            Verdict::Pass,
+            "相对 {rel} 应判通过（绝对比值 1.82 不影响判定）"
+        );
         assert!(rel < 1.0);
     }
 

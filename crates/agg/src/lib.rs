@@ -427,7 +427,10 @@ mod tests {
             for &h in &[0u64, 1, 72, 1000] {
                 let v = decay(dt, h);
                 assert!(v > 0.0, "dt = {dt}, H = {h} 时衰减值归零了");
-                assert!(!v.is_nan() && !v.is_infinite(), "dt = {dt}, H = {h} 时非有限");
+                assert!(
+                    !v.is_nan() && !v.is_infinite(),
+                    "dt = {dt}, H = {h} 时非有限"
+                );
                 assert!(v <= 1.0);
             }
         }
@@ -435,7 +438,10 @@ mod tests {
         assert_eq!(decay(5000, 1), DECAY_FLOOR);
         assert_eq!(decay(u64::MAX, 1), DECAY_FLOOR);
         let floor = DECAY_FLOOR;
-        assert!(floor > 0.0 && floor.is_finite(), "DECAY_FLOOR 必须是正的有限数");
+        assert!(
+            floor > 0.0 && floor.is_finite(),
+            "DECAY_FLOOR 必须是正的有限数"
+        );
         // 但还留在 f32 次正规区间内的值不该被兜底抬高成 1.4e-45
         let tiny = decay(144, 1); // 2^-144 ≈ 4.5e-44，f32 可表示
         assert!(tiny > floor, "得到 {tiny}");
@@ -540,7 +546,10 @@ mod tests {
         let one = [(3.0f32, 0.25f32)];
         assert!(close(aggregate(&one, AggMode::Mean).unwrap(), 0.25));
         assert!(close(aggregate(&one, AggMode::Median).unwrap(), 0.25));
-        assert!(close(aggregate(&one, AggMode::WeightedMedian).unwrap(), 0.25));
+        assert!(close(
+            aggregate(&one, AggMode::WeightedMedian).unwrap(),
+            0.25
+        ));
         assert!(close(aggregate(&one, AggMode::Trimmed(0.4)).unwrap(), 0.25));
     }
 
@@ -557,9 +566,9 @@ mod tests {
     fn mean_drops_nonpositive_and_nonfinite_weights() {
         let items = [
             (1.0f32, 0.2f32),
-            (0.0, 1.0),        // 权重 0：没表态，剔除
-            (-5.0, 1.0),       // 负权重：协议里不存在，剔除
-            (f32::NAN, 1.0),   // NaN 权重：剔除
+            (0.0, 1.0),           // 权重 0：没表态，剔除
+            (-5.0, 1.0),          // 负权重：协议里不存在，剔除
+            (f32::NAN, 1.0),      // NaN 权重：剔除
             (f32::INFINITY, 1.0), // inf 权重：剔除
             (1.0, 0.4),
         ];
@@ -611,14 +620,20 @@ mod tests {
     fn weighted_median_basic() {
         // 累积权重 1, 3（总 3，半 1.5）⇒ 第二次跨过 ⇒ 0.9
         let items = [(1.0f32, 0.1f32), (2.0, 0.9)];
-        assert!(close(aggregate(&items, AggMode::WeightedMedian).unwrap(), 0.9));
+        assert!(close(
+            aggregate(&items, AggMode::WeightedMedian).unwrap(),
+            0.9
+        ));
     }
 
     #[test]
     fn weighted_median_ties_go_to_lower_value() {
         // 各占一半：下侧中位数判给小值
         let items = [(1.0f32, 0.1f32), (1.0, 0.9)];
-        assert!(close(aggregate(&items, AggMode::WeightedMedian).unwrap(), 0.1));
+        assert!(close(
+            aggregate(&items, AggMode::WeightedMedian).unwrap(),
+            0.1
+        ));
     }
 
     #[test]
@@ -656,7 +671,10 @@ mod tests {
         // 两个等权条目，p = 0.25 ⇒ 低端裁 0.5、高端裁 0.5，
         // 0.0 剩下 0.5 权重、1.0 剩下 0.5 权重 ⇒ 0.5
         let items = [(1.0f32, 0.0f32), (1.0, 1.0)];
-        assert!(close(aggregate(&items, AggMode::Trimmed(0.25)).unwrap(), 0.5));
+        assert!(close(
+            aggregate(&items, AggMode::Trimmed(0.25)).unwrap(),
+            0.5
+        ));
     }
 
     #[test]
@@ -695,12 +713,7 @@ mod tests {
     #[test]
     fn four_modes_disagree_on_same_data() {
         // 一个高权重的极端值 0.9（权重 5），三个低权重的小值
-        let items = [
-            (1.0f32, 0.0f32),
-            (1.0, 0.2),
-            (1.0, 0.4),
-            (5.0, 0.9),
-        ];
+        let items = [(1.0f32, 0.0f32), (1.0, 0.2), (1.0, 0.4), (5.0, 0.9)];
         let mean = aggregate(&items, AggMode::Mean).unwrap();
         let median = aggregate(&items, AggMode::Median).unwrap();
         let wmed = aggregate(&items, AggMode::WeightedMedian).unwrap();

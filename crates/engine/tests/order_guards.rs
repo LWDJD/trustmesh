@@ -110,7 +110,9 @@ fn build_scene(seed: u64, with_tick: bool) -> Engine {
 
 /// 全部 15 个账户（编号 0..14）的 query 位模式。
 fn query_bits(e: &Engine, now: u64) -> Vec<u32> {
-    (0..TARGETS + SOURCES).map(|i| e.query(i, now).to_bits()).collect()
+    (0..TARGETS + SOURCES)
+        .map(|i| e.query(i, now).to_bits())
+        .collect()
 }
 
 fn dist_bits(e: &Engine, now: u64) -> Vec<(u32, u32)> {
@@ -123,17 +125,15 @@ fn dist_bits(e: &Engine, now: u64) -> Vec<(u32, u32)> {
 /// 实测位表：`now = 0`。前 9 个是目标（群体项 + 个人项），后 6 个是来源
 /// （只有个人项，所以和 `now = 100` 的同一组数值逐位相同）。
 const BITS_AT_0: [u32; 15] = [
-    1033811531, 1038234877, 1038837698, 1038386754, 1036123223, 1034803456, 1031943099,
-    1024214302, 1006937445, 1039723457, 1034026755, 1029004380, 1020097889, 1014816573,
-    1004356438,
+    1033811531, 1038234877, 1038837698, 1038386754, 1036123223, 1034803456, 1031943099, 1024214302,
+    1006937445, 1039723457, 1034026755, 1029004380, 1020097889, 1014816573, 1004356438,
 ];
 
 /// 实测位表：`now = 100`。来源的 on_view 时间在 55..89，全部已经衰减过，
 /// 目标读数因此与 `now = 0` 不同。
 const BITS_AT_100: [u32; 15] = [
-    1033518854, 1037896684, 1038724924, 1038459445, 1036176835, 1035082054, 1032204773,
-    1024436963, 1006663360, 1039723457, 1034026755, 1029004380, 1020097889, 1014816573,
-    1004356438,
+    1033518854, 1037896684, 1038724924, 1038459445, 1036176835, 1035082054, 1032204773, 1024436963,
+    1006663360, 1039723457, 1034026755, 1029004380, 1020097889, 1014816573, 1004356438,
 ];
 
 /// `trust_distribution(100)` 的实测位表：15 个值全部 `query > 0`，
@@ -224,7 +224,11 @@ fn queries_and_stats_do_not_depend_on_rng() {
             BITS_AT_100,
             "seed {seed} 的 query@100 位表"
         );
-        assert_eq!(dist_bits(&plain, 100), DIST_AT_100, "seed {seed} 的分布位表");
+        assert_eq!(
+            dist_bits(&plain, 100),
+            DIST_AT_100,
+            "seed {seed} 的分布位表"
+        );
         assert_eq!(
             plain.freshness_stats(100),
             FRESH_AT_100,
@@ -357,7 +361,12 @@ fn build_with_ops(order: &[Op]) -> Engine {
         if op.kind == 0 {
             e.rate(owner, RATINGS[op.src as usize], 0);
         } else {
-            e.on_view(owner, view_of_source(op.src as usize), 0, ON_VIEW_AT[op.src as usize]);
+            e.on_view(
+                owner,
+                view_of_source(op.src as usize),
+                0,
+                ON_VIEW_AT[op.src as usize],
+            );
         }
     }
     e
@@ -431,10 +440,7 @@ fn rate_and_on_view_commute_after_intern() {
     assert_eq!(base.dist100, DIST_AT_100, "基准顺序必须复现 ① 的分布位表");
 
     // 逆序：on_view 逆序在前，rate 逆序在后（连「同一个来源的两步」都反了）。
-    let mut reversed: Vec<Op> = (0..SOURCES)
-        .rev()
-        .map(|src| Op { src, kind: 1 })
-        .collect();
+    let mut reversed: Vec<Op> = (0..SOURCES).rev().map(|src| Op { src, kind: 1 }).collect();
     reversed.extend((0..SOURCES).rev().map(|src| Op { src, kind: 0 }));
     assert_eq!(
         signature(&build_with_ops(&reversed)),

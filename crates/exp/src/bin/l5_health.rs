@@ -59,7 +59,11 @@ fn offline_frac(seed: u64, dormancy: f64, sleep: (u64, u64)) -> (f64, usize, usi
     let mut w = World::new(cfg_with(seed, dormancy, sleep));
     w.run();
     let accs = w.accounts();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     if alive.is_empty() {
         return (0.0, 0, 0);
     }
@@ -95,7 +99,11 @@ fn calibrate(target: f64, seed: u64, sleep: (u64, u64)) -> (f64, f64) {
 fn midrank(xs: &[f64]) -> Vec<f64> {
     let n = xs.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| xs[a].partial_cmp(&xs[b]).unwrap_or(std::cmp::Ordering::Equal));
+    idx.sort_by(|&a, &b| {
+        xs[a]
+            .partial_cmp(&xs[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut r = vec![0.0f64; n];
     let mut i = 0usize;
     while i < n {
@@ -146,7 +154,11 @@ fn gini(xs: &[f64]) -> Option<f64> {
     if xs.len() < 2 {
         return None;
     }
-    let mut v: Vec<f64> = xs.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
+    let mut v: Vec<f64> = xs
+        .iter()
+        .copied()
+        .filter(|x| x.is_finite() && *x >= 0.0)
+        .collect();
     if v.len() < 2 {
         return None;
     }
@@ -235,7 +247,9 @@ fn dist_share(dist: &[(u32, f32)], i: usize) -> f64 {
 fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)) -> Run {
     let mut cfg = cfg_with(seed, dormancy, sleep);
     if s > 0 {
-        cfg.attack_kind = AttackKind::Sleeper { normal_until: NORMAL_UNTIL };
+        cfg.attack_kind = AttackKind::Sleeper {
+            normal_until: NORMAL_UNTIL,
+        };
         cfg.attack_ratio = s as f64 / N as f64;
     } else {
         cfg.attack_kind = AttackKind::None;
@@ -256,7 +270,11 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
         .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
         .collect();
     let is_prom: Vec<bool> = accs.iter().map(|a| a.kind == Kind::Promoted).collect();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let alive_set: HashSet<usize> = alive.iter().copied().collect();
     let now = STEPS as u64;
 
@@ -264,7 +282,11 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
         .iter()
         .filter(|&&i| !world.was_online_at(i, now))
         .count();
-    let p_actual = if alive.is_empty() { 0.0 } else { off as f64 / alive.len() as f64 };
+    let p_actual = if alive.is_empty() {
+        0.0
+    } else {
+        off as f64 / alive.len() as f64
+    };
 
     let online: Vec<Vec<bool>> = (0..n)
         .map(|i| {
@@ -277,7 +299,11 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
     let ecfg = EngineConfig {
         beta: 0.3,
         half_life: 72,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
@@ -397,15 +423,21 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
         );
         if !sleeper_all.is_empty() && n_hon_all > 0 {
             sleeper_mass_all_v.push(
-                sleeper_all.iter().map(|&i| dist_share(&dist, i)).sum::<f64>(),
+                sleeper_all
+                    .iter()
+                    .map(|&i| dist_share(&dist, i))
+                    .sum::<f64>(),
             );
             let hm_all: f64 = (0..n)
                 .filter(|&i| !is_att[i] && !is_prom[i])
                 .map(|i| dist_share(&dist, i))
                 .sum::<f64>()
                 / n_hon_all as f64;
-            let sm_all: f64 =
-                sleeper_all.iter().map(|&i| dist_share(&dist, i)).sum::<f64>() / n_att_all as f64;
+            let sm_all: f64 = sleeper_all
+                .iter()
+                .map(|&i| dist_share(&dist, i))
+                .sum::<f64>()
+                / n_att_all as f64;
             win_all_n += 1;
             if hm_all > sm_all {
                 win_allc += 1;
@@ -588,7 +620,11 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
         sp_n: sp_vec.len(),
         sp_on: mean(&sp_on_vec),
         sp_on_n: sp_on_vec.len(),
-        win: if win_n > 0 { win as f64 / win_n as f64 } else { f64::NAN },
+        win: if win_n > 0 {
+            win as f64 / win_n as f64
+        } else {
+            f64::NAN
+        },
         win_n,
         win_on: if win_on_n > 0 {
             win_on as f64 / win_on_n as f64
@@ -611,14 +647,26 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
         support: mean(&support),
         sleeper_mass: mean(&sleeper_mass),
         sleeper_mass_all: mean(&sleeper_mass_all_v),
-        sleeper_visible: if win_n > 0 { visible_n as f64 / win_n as f64 } else { f64::NAN },
+        sleeper_visible: if win_n > 0 {
+            visible_n as f64 / win_n as f64
+        } else {
+            f64::NAN
+        },
         dead_mass: mean(&dead_mass_v),
-        win_all: if win_all_n > 0 { win_allc as f64 / win_all_n as f64 } else { f64::NAN },
+        win_all: if win_all_n > 0 {
+            win_allc as f64 / win_all_n as f64
+        } else {
+            f64::NAN
+        },
         rel_all: mean(&rel_all_v),
         rel: mean(&rel),
         target_mass: mean(&target_mass),
         prom_mass: mean(&prom_mass_v),
-        prom_pct: if prom_pct_v.is_empty() { f64::NAN } else { mean(&prom_pct_v) },
+        prom_pct: if prom_pct_v.is_empty() {
+            f64::NAN
+        } else {
+            mean(&prom_pct_v)
+        },
         prom_seen: if prom_obs_n > 0 {
             prom_seen_n as f64 / prom_obs_n as f64
         } else {
@@ -685,8 +733,19 @@ fn table_core(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize], title: &str)
     println!("\n## {title}（{} seed，均值 ± 样本标准差）", seeds.len());
     println!(
         "{:>4} {:>4} {:>7} {:>16} {:>16} {:>16} {:>16} {:>16} {:>16} {:>17} {:>17} {:>8} {:>8}",
-        "p%", "s", "off%", "Spearman", "Spearman0", "只靠自己", "胜率", "基尼", "可达性",
-        "潜伏者份额", "潜/诚人均", "被看见", "死账户"
+        "p%",
+        "s",
+        "off%",
+        "Spearman",
+        "Spearman0",
+        "只靠自己",
+        "胜率",
+        "基尼",
+        "可达性",
+        "潜伏者份额",
+        "潜/诚人均",
+        "被看见",
+        "死账户"
     );
     for &p in ps {
         for &s in ss {
@@ -734,7 +793,10 @@ fn table_core(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize], title: &str)
 }
 
 fn table_online(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize], title: &str) {
-    println!("\n## {title}（只看末轮在线的诚实观察者，{} seed，均值）", seeds.len());
+    println!(
+        "\n## {title}（只看末轮在线的诚实观察者，{} seed，均值）",
+        seeds.len()
+    );
     println!(
         "{:>4} {:>4} {:>10} {:>16} {:>16} {:>16} {:>16} {:>10}",
         "p%", "s", "在线观察者", "Spearman", "胜率", "基尼", "可达性", "被看见"
@@ -771,7 +833,10 @@ fn table_online(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize], title: &st
 }
 
 fn table_allwin(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize]) {
-    println!("\n## 附加 B：把已离开账户也计入分母的胜率（{} seed，均值）", seeds.len());
+    println!(
+        "\n## 附加 B：把已离开账户也计入分母的胜率（{} seed，均值）",
+        seeds.len()
+    );
     println!(
         "{:>4} {:>4} {:>16} {:>17} {:>10}",
         "p%", "s", "胜率(全体)", "潜/诚人均(全体)", "潜份额(全体)"
@@ -803,7 +868,16 @@ fn table_aux(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize]) {
     println!("\n## 附加 C：计数（{} seed 均值）", seeds.len());
     println!(
         "{:>4} {:>4} {:>8} {:>8} {:>9} {:>8} {:>8} {:>9} {:>11} {:>10}",
-        "p%", "s", "账户数", "存活", "观察者", "末轮在线", "缓存视图", "支持集", "总和误差", "dormancy"
+        "p%",
+        "s",
+        "账户数",
+        "存活",
+        "观察者",
+        "末轮在线",
+        "缓存视图",
+        "支持集",
+        "总和误差",
+        "dormancy"
     );
     for &p in ps {
         for &s in ss {
@@ -833,8 +907,17 @@ fn table_prom(all: &[Run], seeds: &[u64], ps: &[f64], ss: &[usize]) {
     println!("\n## 表 D：收益方 Promoted（{} seed，均值）", seeds.len());
     println!(
         "{:>4} {:>4} {:>9} {:>10} {:>16} {:>13} {:>13} {:>10} {:>9} {:>10} {:>10}",
-        "p%", "s", "潜伏存活", "潜伏/存活", "潜伏者份额", "潜伏人均份额", "收益方份额",
-        "收益方分位", "收益方被看见", "收益方质量", "质量分位"
+        "p%",
+        "s",
+        "潜伏存活",
+        "潜伏/存活",
+        "潜伏者份额",
+        "潜伏人均份额",
+        "收益方份额",
+        "收益方分位",
+        "收益方被看见",
+        "收益方质量",
+        "质量分位"
     );
     for &p in ps {
         for &s in ss {
@@ -908,7 +991,10 @@ fn main() {
             let (rate, achieved) = calibrate(p, seed, sleep);
             println!(
                 "calib p={:.0}% seed={} -> dormancy_rate={:.7} 实测离线={:.1}%",
-                p * 100.0, seed, rate, achieved * 100.0
+                p * 100.0,
+                seed,
+                rate,
+                achieved * 100.0
             );
             for &s in &ss {
                 all.push(run_case(seed, s, p, rate, sleep));
@@ -954,7 +1040,11 @@ fn main() {
         );
     }
 
-    let fixed: Vec<u64> = SEEDS.iter().copied().filter(|s| seeds.contains(s)).collect();
+    let fixed: Vec<u64> = SEEDS
+        .iter()
+        .copied()
+        .filter(|s| seeds.contains(s))
+        .collect();
     table_core(&all, &fixed, &ps, &ss, "主表 A：固化 3 seed {11,23,37}");
     if seeds.len() > fixed.len() {
         table_core(&all, &seeds, &ps, &ss, "主表 B：全部 seed");

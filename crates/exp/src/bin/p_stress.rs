@@ -192,7 +192,13 @@ struct Args {
 impl Args {
     fn parse() -> Self {
         let mut a = Args {
-            only: vec!["a".into(), "b".into(), "c".into(), "d".into(), "bench".into()],
+            only: vec![
+                "a".into(),
+                "b".into(),
+                "c".into(),
+                "d".into(),
+                "bench".into(),
+            ],
             owners: 10_000,
             cap: 1_000,
             updates: 1_000_000,
@@ -245,7 +251,10 @@ struct Outcome {
 fn scenario_a(args: &Args) -> Outcome {
     const TARGET_COUNT: u32 = 100;
 
-    println!("\n──────── 场景 A：{:} 个不同 owner，max_views = {} ────────", args.owners, args.cap);
+    println!(
+        "\n──────── 场景 A：{:} 个不同 owner，max_views = {} ────────",
+        args.owners, args.cap
+    );
     let mut e = Engine::with_seed(ecfg(args.params_ac, args.cap), 7);
     let targets: Vec<AccountIdx> = (0..TARGET_COUNT)
         .map(|i| e.intern(key(TARGET_BASE + i)))
@@ -342,19 +351,35 @@ fn scenario_a(args: &Args) -> Outcome {
     let pruned = e.prune_stale(args.owners as u64, 0);
     assert_eq!(pruned, args.cap);
     for &o in owners.iter().rev().take(args.cap) {
-        e.on_view(o, view_for(args.params_ac, &targets, 0.5), 0, args.owners as u64);
+        e.on_view(
+            o,
+            view_for(args.params_ac, &targets, 0.5),
+            0,
+            args.owners as u64,
+        );
     }
     assert_eq!(e.stats().2, expected, "清空之后必须能重新收满");
     let reused_rejected = e.rejected_count();
-    println!("  prune_stale 之后重新收满：缓存 = {}，累计丢弃 = {reused_rejected}", e.stats().2);
+    println!(
+        "  prune_stale 之后重新收满：缓存 = {}，累计丢弃 = {reused_rejected}",
+        e.stats().2
+    );
 
     // 引擎能用：信任分布非空、全部有限
     let dist = e.trust_distribution(args.owners as u64);
     assert!(!dist.is_empty(), "被容量保护之后引擎仍必须产出分布");
-    assert!(dist.iter().all(|(_, v)| v.is_finite()), "分布不得含非有限值");
+    assert!(
+        dist.iter().all(|(_, v)| v.is_finite()),
+        "分布不得含非有限值"
+    );
 
     let est = estimate_views_bytes(args.cap, args.params_ac);
-    report_mem(&format!("场景 A（{} 次喂入后）", args.owners), rss0, rss1, est);
+    report_mem(
+        &format!("场景 A（{} 次喂入后）", args.owners),
+        rss0,
+        rss1,
+        est,
+    );
     if let (Some(a), Some(b)) = (rss0, rss1) {
         let delta = b.saturating_sub(a);
         // 内存只随「缓存条数 × 视图大小」增长，与喂入次数无关
@@ -387,7 +412,10 @@ fn scenario_a_control(args: &Args) {
     if args.control == 0 || !args.wants("a") {
         return;
     }
-    println!("\n──────── 场景 A 对照：max_views = 0（旧行为），喂 {} 个 owner ────────", args.control);
+    println!(
+        "\n──────── 场景 A 对照：max_views = 0（旧行为），喂 {} 个 owner ────────",
+        args.control
+    );
     let mut e = Engine::with_seed(ecfg(args.params_ac, 0), 7);
     for i in 0..100u32 {
         e.intern(key(TARGET_BASE + i));
@@ -396,12 +424,20 @@ fn scenario_a_control(args: &Args) {
     let t0 = Instant::now();
     for i in 0..args.control {
         let owner = e.intern(key(OWNER_BASE + i));
-        e.on_view(owner, view_for(args.params_ac, &[], 1.0), i as u64, i as u64);
+        e.on_view(
+            owner,
+            view_for(args.params_ac, &[], 1.0),
+            i as u64,
+            i as u64,
+        );
     }
     let elapsed = t0.elapsed();
     let rss1 = rss_bytes();
     let views = e.stats().2;
-    assert_eq!(views, args.control as usize, "max_views=0 时应当全部进缓存（旧行为）");
+    assert_eq!(
+        views, args.control as usize,
+        "max_views=0 时应当全部进缓存（旧行为）"
+    );
     assert_eq!(e.rejected_count(), 0, "max_views=0 时不得有任何丢弃");
     let per_owner = estimate_views_bytes(1, args.params_ac);
     let projected = estimate_views_bytes(args.owners as usize, args.params_ac);
@@ -439,7 +475,10 @@ fn scenario_a_control(args: &Args) {
 
 fn scenario_b(args: &Args) -> Outcome {
     const TARGET_COUNT: u32 = 100;
-    println!("\n──────── 场景 B：同一 owner 更新 {} 次 ────────", args.updates);
+    println!(
+        "\n──────── 场景 B：同一 owner 更新 {} 次 ────────",
+        args.updates
+    );
     let mut e = Engine::with_seed(ecfg(args.params_bd, 1), 11);
     let targets: Vec<AccountIdx> = (0..TARGET_COUNT)
         .map(|i| e.intern(key(TARGET_BASE + i)))
@@ -472,7 +511,11 @@ fn scenario_b(args: &Args) -> Outcome {
         e.on_view(owner, v, i / 1000, now);
         if i % 100_000 == 0 {
             assert_eq!(e.stats().2, 1, "更新既有条目不得增长缓存（第 {i} 次）");
-            assert_eq!(e.rejected_count(), 0, "更新既有条目永远不该被拒（第 {i} 次）");
+            assert_eq!(
+                e.rejected_count(),
+                0,
+                "更新既有条目永远不该被拒（第 {i} 次）"
+            );
         }
     }
     let elapsed = t0.elapsed();
@@ -483,12 +526,21 @@ fn scenario_b(args: &Args) -> Outcome {
         elapsed.as_secs_f64() * 1e6 / args.updates as f64,
         failures
     );
-    println!("  缓存条数 = {}，命中 = {}，丢弃 = {}", e.stats().2, e.stats().1, e.rejected_count());
+    println!(
+        "  缓存条数 = {}，命中 = {}，丢弃 = {}",
+        e.stats().2,
+        e.stats().1,
+        e.rejected_count()
+    );
     assert_eq!(e.stats().2, 1, "100 万次更新之后仍然只有 1 条缓存");
     assert_eq!(e.stats().1, args.updates, "每一次更新都必须计命中");
     assert_eq!(e.rejected_count(), 0, "更新既有条目永远不该被拒");
     assert_eq!(e.fail_streak(owner), 0, "最后一次成功刷新必须清零连败");
-    assert_eq!(e.view_age(owner, args.updates - 1), Some(0), "last_check 必须是最后一次");
+    assert_eq!(
+        e.view_age(owner, args.updates - 1),
+        Some(0),
+        "last_check 必须是最后一次"
+    );
     let q = e.query(targets[0], args.updates - 1);
     assert!(
         q.is_finite() && (0.0..=1.0).contains(&q),
@@ -498,7 +550,12 @@ fn scenario_b(args: &Args) -> Outcome {
     assert!(dist.iter().all(|(_, v)| v.is_finite()));
 
     let est = estimate_views_bytes(1, args.params_bd);
-    report_mem(&format!("场景 B（{} 次更新后）", args.updates), rss0, rss1, est);
+    report_mem(
+        &format!("场景 B（{} 次更新后）", args.updates),
+        rss0,
+        rss1,
+        est,
+    );
     if let (Some(a), Some(b)) = (rss0, rss1) {
         let delta = b.saturating_sub(a);
         assert!(
@@ -606,8 +663,7 @@ fn scenario_c(args: &Args) -> Outcome {
     );
     println!("  缓存条数 = {}（与干净引擎相同）", dirty.stats().2);
     assert_eq!(
-        cap_rej,
-        expected_capacity,
+        cap_rej, expected_capacity,
         "新增 owner 的脏视图必须先撞容量上限（那条判定在噪声底与质量扫描之前）"
     );
     assert_eq!(
@@ -645,7 +701,10 @@ fn scenario_c(args: &Args) -> Outcome {
     let final_clean: Vec<(u32, u32)> = (0..total_accounts)
         .map(|i| (i, clean.query(i, 5000).to_bits()))
         .collect();
-    assert_eq!(final_dirty, final_clean, "脏视图之后引擎必须与从未见过脏视图时逐位相同");
+    assert_eq!(
+        final_dirty, final_clean,
+        "脏视图之后引擎必须与从未见过脏视图时逐位相同"
+    );
     assert!(
         dirty.rejected_count() == dirty_feeds,
         "后续的正常观点不得被误杀（丢弃计数只能停在 {dirty_feeds}）"
@@ -747,11 +806,17 @@ fn scenario_d(args: &Args) -> Outcome {
             args.cap
         );
         let rejected_now = e.rejected_count();
-        assert!(rejected_now >= rejected_before, "第 {i} 次：丢弃计数不得回退");
+        assert!(
+            rejected_now >= rejected_before,
+            "第 {i} 次：丢弃计数不得回退"
+        );
         rejected_before = rejected_now;
         if i % 10_000 == 0 {
             let q = e.query(accounts[(i as usize / 10_000) % accounts.len()], now);
-            assert!(q.is_finite() && (0.0..=1.0).contains(&q), "第 {i} 次：查询异常 {q}");
+            assert!(
+                q.is_finite() && (0.0..=1.0).contains(&q),
+                "第 {i} 次：查询异常 {q}"
+            );
             let (req, hits, _, rated) = e.stats();
             // 每次 tick 最多讨 k=8 个，每次 probe 最多讨一整轮（<= 账户数），
             // 两者都是**累计**计数，所以上界是两类调用各自次数乘上自己的单次上限。
@@ -788,7 +853,10 @@ fn scenario_d(args: &Args) -> Outcome {
         "容量顶满之后必然有观点被拒，丢弃计数应当大于 0"
     );
     let dist = e.trust_distribution(args.updates / 100);
-    assert!(dist.iter().all(|(_, v)| v.is_finite()), "混合压测之后分布必须有限");
+    assert!(
+        dist.iter().all(|(_, v)| v.is_finite()),
+        "混合压测之后分布必须有限"
+    );
     let est = estimate_views_bytes(max_views_seen, args.params_bd);
     report_mem("场景 D", rss0, rss1, est);
     if let (Some(a), Some(b)) = (rss0, rss1) {
@@ -851,7 +919,10 @@ fn scenario_bench() -> Outcome {
         name: "bench",
         ops: 200,
         elapsed: Duration::ZERO,
-        extra: format!("default {:.1} µs、fast {:.1} µs", results[0].1, results[1].1),
+        extra: format!(
+            "default {:.1} µs、fast {:.1} µs",
+            results[0].1, results[1].1
+        ),
     }
 }
 
@@ -902,10 +973,7 @@ fn main() {
             "{:<16} {:>12} {:>14} {:>16} {}",
             o.name,
             o.ops,
-            format!(
-                "{:.3} s",
-                o.elapsed.as_secs_f64()
-            ),
+            format!("{:.3} s", o.elapsed.as_secs_f64()),
             format!("{throughput:.0} ops/s"),
             o.extra
         );

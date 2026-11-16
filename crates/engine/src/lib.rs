@@ -88,6 +88,9 @@
 
 mod badlist;
 pub mod criteria;
+mod snapshot;
+
+pub use snapshot::{EngineSnapshot, ViewSnapshot, SNAPSHOT_MAGIC, SNAPSHOT_VERSION};
 
 use std::collections::BTreeMap;
 

@@ -38,9 +38,10 @@ fn main() {
     for beta in [0.3f32, 0.5, 0.7, 0.9] {
         let pc = PropConfig {
             beta, samples: 16, rounds: 4, mode: AggMode::Mean,
-            use_noise_floor: true, exclude_zero: true,
+            use_noise_floor: true,
             banlist: false, ban_penalty: 0.5, ban_floor: 0.2, ban_exclude: 0.0, ban_lambda: 0.0,
             normalize_view: true, attacker_normalizes: true, receiver_normalizes: true,
+            ..PropConfig::default()
         };
         let o = run_case(cfg.clone(), &pc);
 

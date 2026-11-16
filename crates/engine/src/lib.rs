@@ -581,7 +581,7 @@ impl Engine {
     /// 真正被压低的来源数（`[0, 来源总数]`）。以下情况都返回 0 且不写表：
     /// 坏账户没有 intern 过、没有可参与群体项的来源、S+ 为空（大家态度一致）、
     /// 闭式解没有可压缩的差距、`penalty_strength = 0`，以及
-    /// **这次算出的 f 不低于已有折扣**（min 语义下重复报告不会更狠）。
+    /// **这次算出的折扣（按 f32 口径）不低于已有折扣**（min 语义下重复报告不会更狠）。
     ///
     /// # 注意
     ///
@@ -600,23 +600,46 @@ impl Engine {
         let now = self.clock;
 
         // 一遍扫描：把「参与群体项的来源」及其对 A 的读数固定下来。
-        // 参与条件与 query 完全一致：我给它正分、有观点缓存、权重 > 0。
-        let mut sources: Vec<SourceSnapshot> = Vec::with_capacity(self.views.len());
-        for (owner, stored) in &self.views {
-            let rating = match self.ratings.get(*owner) {
-                Some(s) if s.is_finite() && s > 0.0 => s,
-                _ => continue,
-            };
+        //
+        // **遍历的是正分清单（我评过谁），不是观点缓存（我手上有谁的观点）**，
+        // 与 query 的分母完全同一个集合。没有观点的来源也在这里出现，读数是
+        // None（弃权票）：它的份额照样进目标方程的分母，但不进 ā。
+        // 只遍历 views 的话，求出的 f 只让「表过态的那部分」回到 ā，
+        // 弃权份额会把结果再往下拖（实测 1/3 → 0.25）。
+        let mut sources: Vec<SourceSnapshot> = Vec::with_capacity(self.ratings.len());
+        for (owner, rating, _) in self.ratings.iter() {
+            if !rating.is_finite() || rating <= 0.0 {
+                continue;
+            }
             let share = f64::from(rating / total);
-            let decay = f64::from(self.decay_factor(elapsed(stored.last_check, now)));
+            // 有观点：衰减基准是 last_check（我上次**成功**取到它观点的时间）；
+            // 没有观点：没有衰减基准，因子按 1。这与 query 逐项一致。
+            let (decay, reading) = match self.views.get(&owner) {
+                Some(stored) => {
+                    let r = if idx < stored.mass_covers {
+                        Some(f64::from(self.reading_of(stored, &key)))
+                    } else {
+                        // 这份观点在 on_view 时只统计了 0..mass_covers 号账户；
+                        // A 之后才登记，它没进过 total_mass，用偏小的分母归一化
+                        // 会把它抬到 1.0。query 对这类账户按「没表态」处理，
+                        // 闭式解必须同样处理，否则读数和实测会在同一份字节上分叉。
+                        None
+                    };
+                    (
+                        f64::from(self.decay_factor(elapsed(stored.last_check, now))),
+                        r,
+                    )
+                }
+                None => (1.0, None),
+            };
             let weight = share * decay;
             if !weight.is_finite() || weight <= 0.0 {
                 continue;
             }
             sources.push(SourceSnapshot {
-                idx: *owner,
+                idx: owner,
                 weight,
-                reading: f64::from(self.reading_of(stored, &key)),
+                reading,
             });
         }
         if sources.len() < 2 {
@@ -626,7 +649,7 @@ impl Engine {
         }
 
         let weights: Vec<f64> = sources.iter().map(|s| s.weight).collect();
-        let readings: Vec<f64> = sources.iter().map(|s| s.reading).collect();
+        let readings: Vec<Option<f64>> = sources.iter().map(|s| s.reading).collect();
         let sol = badlist::solve_uniform(&weights, &readings);
         let f = badlist::apply_strength(sol.f, lambda);
         if f >= 1.0 {
@@ -637,14 +660,19 @@ impl Engine {
         // 不连乘、不复合：两个各罚 50% 仍然是 50%，不会变成 75%，
         // 重复报告同一个坏账户也不会越压越狠。
         let mut lowered = 0usize;
+        // 比较在 Score（f32）上做，而不是在 f64 上做：折扣表里存的本来就是 f32，
+        // 用 f64 比较时「闭式解算出 0.9999999999、转成 f32 恰好是 1.0」这类
+        // 浮点噪声会被当成一次压低，既污染折扣表（写进一个 1.0 的空条目），
+        // 又让返回值「真正被压低的来源数」多算一个。目标线已经达成时
+        // （G_A = ā）必须返回 0，这是这条接口唯一的可观测承诺。
+        let new_discount = f as Score;
         for (i, src) in sources.iter().enumerate() {
             if !sol.above[i] {
                 continue;
             }
-            let old = f64::from(self.penalty_of(src.idx));
-            if f < old {
-                // f 已由 apply_strength 夹到 [0,1]，直接转 Score。
-                self.penalties.insert(src.idx, f as Score);
+            let old = self.penalty_of(src.idx);
+            if new_discount < old {
+                self.penalties.insert(src.idx, new_discount);
                 lowered += 1;
             }
         }

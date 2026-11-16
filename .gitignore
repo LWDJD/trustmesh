@@ -1,5 +1,17 @@
+# 构建产物
 /target
 *.exe
 *.pdb
+
+# 本项目的临时工作目录（测试日志、实验输出、一次性探针工程等）
+# 为什么必须忽略：里面有各 crate 的 target/ 和几百 MB 构建产物，
+# 而且跑一次测试就会新增一堆日志，不忽略会让 git status 永远有一行 ?? .tmp/。
+.tmp/
+
+# 各 crate 下也会出现同名临时目录（历史写法 `$env:TMP="$PWD\.tmp"` 在循环里
+# 解析到 crate 目录，留下过 31 个空目录，见交接文档 §8.3）
+crates/*/.tmp/
+wt/*/crates/*/.tmp/
+
 .DS_Store
 Thumbs.db

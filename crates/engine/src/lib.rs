@@ -29,6 +29,7 @@
 //! 不调用报告接口时行为与改造前逐位一致。算法细节见 `src/badlist.rs`。
 
 mod badlist;
+pub mod criteria;
 
 use std::collections::BTreeMap;
 

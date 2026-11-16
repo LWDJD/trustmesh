@@ -59,6 +59,8 @@ fn ecfg(_arm: Arm) -> EngineConfig {
         decay_floor: 0.0,
         // badlist 默认关闭：本实验不涉及受害者反馈。
         penalty_strength: 1.0,
+        // 其余字段取默认值：尤其是 max_views = 0（无上限），与改造前逐位一致。
+        ..Default::default()
     }
 }
 

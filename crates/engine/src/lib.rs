@@ -413,8 +413,9 @@ impl Engine {
     ///    （`f32::max` 返回非 NaN 的那个操作数），所以「在 `.max()` 之后查
     ///    `is_finite()`」永远查不出 NaN——它只会把总质量塌到 1e-6 这个
     ///    「放大器」档位，让每条读数都被抬到 1.0（审计 A6 D4 记的同一个洞）；
-    /// 3. 求和本身也可能溢出成 +∞（已知账户很多、每个读数接近 1 也不会，
-    ///    但防御性地保留 `total_mass.is_finite()` 这一条）。
+    /// 3. 求和本身仍可能溢出成 +∞（每个读数都被 clamp 进 [0,1]，账户数要超过
+    ///    3.4e38 才可能，实际不可达），但保留 `total_mass.is_finite()` 这一条作为
+    ///    与 `all_finite` 互补的兜底。
     ///
     /// 注意正常路径上 `decode` 已经拒绝非有限负载，这里是**防御纵深**：
     /// 应用层可能用 [CompressedView::merge] 把 `0 × ∞` 之类的 NaN 合进视图，
@@ -464,9 +465,9 @@ impl Engine {
         }
         let total_mass = total_mass.max(1e-6);
         // —— 非有限读数防护 ——
-        // `max(1e-6)` 对 NaN 没有定义明确的结果（这里 total_mass 本身就是 NaN），
-        // +∞ 则会被原样留下、把每条读数都压成 0。与其归一化到 1e-6 让整份视图的
-        // 读数被放大到 1.0，不如整条丢弃：非有限值在协议里就是「无法解释的字节」。
+        // 判定必须在 `.max(1e-6)` **之外**留着 `all_finite`：NaN.max(1e-6) 等于 1e-6，
+        // 光看 total_mass 永远看不出 NaN。`total_mass.is_finite()` 只是为求和溢出兜底，
+        // 两者任一不成立就整条丢弃——非有限值在协议里就是「无法解释的字节」。
         if !all_finite || !total_mass.is_finite() {
             self.reject_view(owner, Rejection::NonFinite);
             return;

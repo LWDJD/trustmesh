@@ -104,7 +104,15 @@ use crate::{Engine, EngineConfig, StoredView};
 /// 版本号写在编码字节的第 8..12 字节：先读版本、再解析其余字段，
 /// 就是「自描述」。将来若要改布局，把版本号抬上去，旧 [EngineSnapshot::decode]
 /// 会明确返回 None，而不是按旧布局错读新文件。
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
+
+// 版本历史：
+//   1 —— 初版（accounts / ratings / round_members / round / views / penalties /
+//        clock / stat_requests / stat_hits / rng_state / view_params_digest）
+//   2 —— 尾部追加三个拒绝计数（stat_rejected_view / capacity / nonfinite）。
+//        这几个量是「可观测状态」：恢复后 stats 相关的读数必须与关机前一致，
+//        悄悄丢掉它们等于悄悄丢状态。旧版本字节会被 decode 明确拒绝（不做降级兼容），
+//        因为跨版本的字段缺失无法安全推断。
 
 /// 快照编码的魔数（8 字节 ASCII）：挡掉「随便一段字节」被当成快照。
 pub const SNAPSHOT_MAGIC: [u8; 8] = *b"TMSNAPSH";
@@ -150,8 +158,9 @@ fn fnv1a_update(mut hash: u64, value: u64) -> u64 {
     hash
 }
 
-/// 编码尾部长度：clock / stat_requests / stat_hits / rng_state，各 8 字节。
-const TAIL_BYTES: usize = 4 * 8;
+/// 编码尾部长度：clock / stat_requests / stat_hits / rng_state /
+/// stat_rejected_view / stat_rejected_capacity / stat_rejected_nonfinite，各 8 字节。
+const TAIL_BYTES: usize = 7 * 8;
 
 /// 一个账户公钥的字节数。
 const ACCOUNT_BYTES: usize = 32;
@@ -207,6 +216,15 @@ pub struct EngineSnapshot {
     pub stat_hits: u64,
     /// 抽样随机流的**内部状态**（不是种子）：装回去后序列从同一个位置继续。
     pub rng_state: u64,
+    /// 被整条丢弃的观点累计数（容量 + 非有限读数两类之和）。
+    ///
+    /// 这不是「运行状态」而是「可观测状态」：运维会看这个数判断有没有人在撑爆缓存。
+    /// 恢复后必须与关机前一致，否则「快照 = 完整状态」这个承诺就是假的。
+    pub stat_rejected_view: u64,
+    /// 其中因容量上限被丢的条数。
+    pub stat_rejected_capacity: u64,
+    /// 其中因读数非有限（NaN / ±∞）被丢的条数。
+    pub stat_rejected_nonfinite: u64,
     /// 视图参数指纹：这份快照是按哪套 ViewParams 拍下来的。
     ///
     /// 由 [Engine::snapshot] 从 cfg.view_params 算出，[Engine::restore] 时
@@ -293,6 +311,9 @@ impl fmt::Debug for EngineSnapshot {
             .field("stat_requests", &self.stat_requests)
             .field("stat_hits", &self.stat_hits)
             .field("rng_state", &self.rng_state)
+            .field("stat_rejected_view", &self.stat_rejected_view)
+            .field("stat_rejected_capacity", &self.stat_rejected_capacity)
+            .field("stat_rejected_nonfinite", &self.stat_rejected_nonfinite)
             .field("view_params_digest", &self.view_params_digest)
             .finish()
     }
@@ -409,6 +430,9 @@ impl EngineSnapshot {
         w.u64(self.stat_requests);
         w.u64(self.stat_hits);
         w.u64(self.rng_state);
+        w.u64(self.stat_rejected_view);
+        w.u64(self.stat_rejected_capacity);
+        w.u64(self.stat_rejected_nonfinite);
         w.finish()
     }
 
@@ -507,6 +531,9 @@ impl EngineSnapshot {
         let stat_requests = r.u64()?;
         let stat_hits = r.u64()?;
         let rng_state = r.u64()?;
+        let stat_rejected_view = r.u64()?;
+        let stat_rejected_capacity = r.u64()?;
+        let stat_rejected_nonfinite = r.u64()?;
         if r.remaining() != 0 {
             // 末尾多余字节：不是本库写出来的文件（也挡住了「截断后又拼回来」）。
             return None;
@@ -524,6 +551,9 @@ impl EngineSnapshot {
             stat_requests,
             stat_hits,
             rng_state,
+            stat_rejected_view,
+            stat_rejected_capacity,
+            stat_rejected_nonfinite,
             view_params_digest,
         };
         if !snap.validate() {
@@ -721,6 +751,9 @@ impl Engine {
             stat_requests: self.stat_requests,
             stat_hits: self.stat_hits,
             rng_state: self.rng.state(),
+            stat_rejected_view: self.stat_rejected_view,
+            stat_rejected_capacity: self.stat_rejected_capacity,
+            stat_rejected_nonfinite: self.stat_rejected_nonfinite,
             view_params_digest: view_params_digest(self.cfg.view_params),
         }
     }
@@ -790,6 +823,9 @@ impl Engine {
             rng: Rng::from_state(snap.rng_state),
             stat_requests: snap.stat_requests,
             stat_hits: snap.stat_hits,
+            stat_rejected_view: snap.stat_rejected_view,
+            stat_rejected_capacity: snap.stat_rejected_capacity,
+            stat_rejected_nonfinite: snap.stat_rejected_nonfinite,
         })
     }
 }
@@ -973,8 +1009,9 @@ mod tests {
         assert_eq!((snap.stat_requests, snap.stat_hits), (0, 0));
 
         let bytes = snap.encode();
-        // 头部 20 + 6 个计数 24 + 尾部 32 = 76 字节：空快照的固定开销。
-        assert_eq!(bytes.len(), 76);
+        // 头部 20 + 6 个计数 24 + 尾部 56（7 个 u64）= 100 字节：空快照的固定开销。
+        // 尾部从 32 涨到 56 是 v2 的事：新增三个拒绝计数（见 SNAPSHOT_VERSION 的版本历史）。
+        assert_eq!(bytes.len(), 100);
         assert_eq!(bytes.len(), snap.encoded_len());
         assert_eq!(
             EngineSnapshot::version_of(&bytes),

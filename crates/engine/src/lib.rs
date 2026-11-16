@@ -171,6 +171,13 @@ pub struct Engine {
     /// 统计：累计请求数 / 成功数
     stat_requests: u64,
     stat_hits: u64,
+    /// 最近一次 [Engine::tick] 传入的抽样预算 k（一次都没 tick 过时为 0）。
+    ///
+    /// 只用于 [Engine::freshness_budget] 的**观测**：它不参与抽样、不改任何
+    /// 评分或时间戳，也不影响后续任何计算结果。之所以由引擎记下来，
+    /// 是因为 refresh_period = ⌈n_list·T/k⌉ 必须用「**实际**用过的 k」，
+    /// 而不是调用方事后回忆的配置值。
+    last_k: usize,
 }
 
 impl Engine {
@@ -191,6 +198,7 @@ impl Engine {
             rng,
             stat_requests: 0,
             stat_hits: 0,
+            last_k: 0,
         }
     }
 
@@ -259,6 +267,9 @@ impl Engine {
         // 供之后应用层调用 report_bad_account / on_view 等接口使用。
         // 不调用报告接口时折扣表恒为空，随机数序列与引入本机制之前逐位一致。
         self.clock = now;
+        // 记下这一轮实际用的预算，供只读的 [Engine::freshness_budget] 体检。
+        // 这行不参与抽样：随机流、轮次位图、退避权重的推进与之前逐位一致。
+        self.last_k = k;
 
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);
@@ -823,6 +834,115 @@ impl Engine {
         let group = aggregate(&items, self.cfg.agg_mode);
 
         combine(self.cfg.beta, personal, group)
+    }
+
+    // ---------- 自适应抽样预算（只读观测，A10 §6.2 / §8） ----------
+
+    /// 按当前正分清单长度反解「每轮该抽多少条」。
+    ///
+    /// 直接调 [budget::recommended_k]，参数取自引擎自己：
+    /// 清单长度 = [PositiveList::len]，半衰期 = [EngineConfig::half_life]
+    /// （0 按 1 处理，与 `tm_agg::decay` 的约定一致）。
+    ///
+    /// 依据是 A10 的硬约束 `(n_list/k)·T ≤ H/2`：刷新周期一旦超过半个半衰期，
+    /// 时间衰减就退化成「谁被随机抽到谁说话」，群体项实际由最近被抽到的那几条决定
+    /// （实测 n=600、k=8、T=30h ⇒ 刷新周期 2250h、90.7% 的来源衰减因子 < 0.1、
+    /// ESS 600 → 55.8）。本方法给的就是满足该约束的**最小** k。
+    ///
+    /// * 清单为空返回 0（没有可抽的对象）；
+    /// * 返回值恒落在 `[1, n_list]`：超过清单长度的预算没有意义；
+    /// * 返回值等于 `n_list` 时说明**仅靠增大 k 已经不达标**：轮间隔 `period`
+    ///   本身超过了 H/2，只能缩短 `period`（见 [budget::BudgetVerdict::DecayDiluted]）。
+    ///
+    /// 只读：不修改任何状态，多次调用必然返回同一个值。
+    #[must_use]
+    pub fn recommended_k(&self, period: Time) -> usize {
+        budget::recommended_k(self.ratings.len(), period, self.cfg.half_life)
+    }
+
+    /// 体检当前的抽样预算：刷新周期够不够短、衰减还在不在起作用、观点覆盖够不够。
+    ///
+    /// # 参数
+    /// * `now` —— 计算观点年龄的时间基准（衰减基准是 [StoredView::last_check]，
+    ///   不是对方声明的 `published_at`）；
+    /// * `period` —— **应用层自己的轮次间隔**。引擎不维护定时器（[Engine::tick] /
+    ///   [Engine::probe] 的节奏本就由应用层决定），所以这个数只能由调用方给。
+    ///
+    /// 抽样预算 `k` 取 [Engine::last_budget_k]（最近一次 [Engine::tick] 实际传入的值）。
+    /// 一次都没 tick 过时 `k = 0`：刷新周期按无穷处理（[budget::refresh_period]），
+    /// 判定必然不是健康 —— 「还没开始抽」本来就不该被报成健康。
+    /// 如果需要体检「假设用某个 k」的方案，用 [budget::assess] 或
+    /// [budget::recommended_k] 直接算。
+    ///
+    /// # 口径（与 [Engine::query] 的群体项严格对齐）
+    /// * 来源集合 = **正分清单** `ratings`（不是 `views`）：撤销评分的来源还在
+    ///   缓存里，但它已经不在群体项里了，所以不算覆盖；
+    /// * 每个来源的权重 `w = 份额 × 衰减因子`，衰减因子取 [Engine::decay_factor]
+    ///   （因此 `decay_enabled = false` 时全体权重恒为 1，ESS 就是来源数）；
+    /// * **不含 badlist 折扣**：折扣是「这次先少听它一点」的事件态，不是部署参数
+    ///   的体检对象，而且默认表为空（此时两者逐位相同）；
+    /// * `coverage = |views ∩ ratings| / |ratings|`；`fresh_within_halflife` 的
+    ///   判定是 `age ≤ H`（H 按 0 → 1），与 [Engine::freshness_stats] 逐点同口径；
+    /// * `ess = (Σw)²/Σw²`，见 [budget::effective_sample_size]。
+    ///
+    /// # 判定
+    /// `Empty`（清单为空）→ `LowCoverage`（覆盖率 < 0.5）→ `DecayDiluted`
+    /// （刷新周期 > H/2，附推荐 k）→ `Healthy`。顺序是固定的：覆盖率不足时
+    /// 「把 k 调大」是隔靴搔痒，先把观点取回来才是第一优先级。
+    ///
+    /// 本方法是**纯观测**：不刷新 `last_check`、不动抽样轮次、不写折扣表，
+    /// 连续调用两次返回逐位相同的结构体。
+    #[must_use]
+    pub fn freshness_budget(&self, now: Time, period: Time) -> budget::FreshnessBudget {
+        let n_list = self.ratings.len();
+        let half_life = self.cfg.half_life;
+        // 与 freshness_stats 的口径一致：H = 0 按 1 处理，恰好 H 也算「新鲜」。
+        let half_life_norm = budget::normalized_half_life(half_life);
+
+        let mut weights: Vec<Score> = Vec::with_capacity(n_list);
+        let mut covered = 0usize;
+        let mut fresh = 0usize;
+        for (owner, _rating, _last) in self.ratings.iter() {
+            // 没有观点：这个来源投弃权票（份额计入群体项分母，但不进 ESS ——
+            // ESS 量的是「真正参与加权」的样本）。
+            let stored = match self.views.get(&owner) {
+                Some(v) => v,
+                None => continue,
+            };
+            covered += 1;
+            if let Some(share) = self.ratings.share(owner) {
+                let w = share * self.decay_factor(elapsed(stored.last_check, now));
+                if w.is_finite() && w > 0.0 {
+                    weights.push(w);
+                }
+            }
+            if elapsed(stored.last_check, now) <= half_life_norm {
+                fresh += 1;
+            }
+        }
+        let coverage = if n_list == 0 {
+            0.0
+        } else {
+            covered as f32 / n_list as f32
+        };
+        budget::assess(
+            n_list,
+            self.last_k,
+            period,
+            half_life,
+            coverage,
+            fresh,
+            budget::effective_sample_size(&weights),
+        )
+    }
+
+    /// 最近一次 [Engine::tick] 传入的抽样预算 k；一次都没 tick 过时为 0。
+    ///
+    /// 这是 [Engine::freshness_budget] 计算刷新周期用的那个值，单独暴露出来
+    /// 是为了让应用层能核对「体检用的确实是我实际在用的预算」。
+    #[must_use]
+    pub fn last_budget_k(&self) -> usize {
+        self.last_k
     }
 
     // ---------- 统计 ----------

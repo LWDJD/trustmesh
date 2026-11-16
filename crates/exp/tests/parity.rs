@@ -145,19 +145,19 @@ fn run_engine(mut nodes: Vec<Engine>, n: usize, rounds: usize, refresh_stride: u
     let mut cur: Vec<CompressedView> = nodes.iter().map(|e| e.export_view(0)).collect();
     for r in 0..rounds {
         let now = r as u64 * step;
-        for i in 0..n {
+        for node in nodes.iter_mut() {
             // k = n：一定 >= 每个观察者的清单长度，抽样必然覆盖全员，
             // 两边「第几轮拿到了谁的观点」逐条一致，随机性被完全消除。
-            let reqs = nodes[i].tick(now, n);
+            let reqs = node.tick(now, n);
             // 最后一轮可以只刷新一部分来源：让另一半的 last_check 保持「旧一轮」，
             // 衰减因子就不再对全部来源相同，加权平均也就无法把它约掉。
             let stride = if r + 1 == rounds { refresh_stride.max(1) } else { 1 };
             for req in &reqs {
                 let src = req.idx as usize;
-                if src % stride != 0 {
+                if !src.is_multiple_of(stride) {
                     continue;
                 }
-                nodes[i].on_view(req.idx, cur[src].clone(), now, now);
+                node.on_view(req.idx, cur[src].clone(), now, now);
             }
         }
         cur = nodes.iter().map(|e| e.export_view((r as u64 + 1) * step)).collect();

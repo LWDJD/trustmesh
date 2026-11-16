@@ -90,20 +90,20 @@ fn multi_node_exchange_keeps_sum_one() {
         .collect();
 
     // 环形互评：i 给 (i+1)%N 打 1.0
-    for i in 0..N {
-        nodes[i].rate(((i + 1) % N) as u32, 1.0, 0);
+    for (i, node) in nodes.iter_mut().enumerate() {
+        node.rate(((i + 1) % N) as u32, 1.0, 0);
     }
 
     for round in 0..3u64 {
         // 所有节点先导出观点快照
         let views: Vec<CompressedView> = nodes.iter().map(|e| e.export_view(round)).collect();
         // 再各自抽样并接收
-        for i in 0..N {
-            let reqs = nodes[i].tick(round, 4);
+        for (i, node) in nodes.iter_mut().enumerate() {
+            let reqs = node.tick(round, 4);
             assert!(!reqs.is_empty(), "节点 {i} 应有抽样请求");
             for r in reqs {
                 let src = r.idx as usize;
-                nodes[i].on_view(r.idx, views[src].clone(), round, round);
+                node.on_view(r.idx, views[src].clone(), round, round);
             }
         }
         // 每轮结束都校验守恒

@@ -92,11 +92,11 @@ cd crates/engine && cargo run --example quickstart
 | [`tm_store`](crates/store) | 账户表、正分清单、轮次抽样 + 退避、状态导出 | 157 |
 | [`tm_view`](crates/view) | Count Sketch 定长压缩观点（2048×5 f32 = 40 KB） | 51 |
 | [`tm_agg`](crates/agg) | 指数衰减、聚合（Mean/Median/WeightedMedian/Trimmed）、β 混合 | 63 |
-| [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 199 |
+| [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 206 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
 
-能力矩阵 **687 passed / 0 failed / 1 ignored**（七个 workspace）。
+能力矩阵 **694 passed / 0 failed / 1 ignored**（七个 workspace）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 

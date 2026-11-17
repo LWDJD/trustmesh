@@ -94,7 +94,7 @@ impl Mode {
             noise_multiplier: 1.0,
             decay_enabled: en,
             decay_floor: fl,
-        ..Default::default()
+            ..Default::default()
         }
     }
 }
@@ -122,7 +122,11 @@ fn offline_frac(seed: u64, dormancy: f64, sleep: (u64, u64), ret: f64) -> (f64, 
     let mut w = World::new(cfg_with(seed, dormancy, sleep, ret));
     w.run();
     let accs = w.accounts();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     if alive.is_empty() {
         return (0.0, 0, 0);
     }
@@ -209,7 +213,11 @@ fn sd(xs: &[f64]) -> f64 {
 fn midrank(xs: &[f64]) -> Vec<f64> {
     let n = xs.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| xs[a].partial_cmp(&xs[b]).unwrap_or(std::cmp::Ordering::Equal));
+    idx.sort_by(|&a, &b| {
+        xs[a]
+            .partial_cmp(&xs[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut r = vec![0.0f64; n];
     let mut i = 0usize;
     while i < n {
@@ -260,7 +268,11 @@ fn gini(xs: &[f64]) -> Option<f64> {
     if xs.len() < 2 {
         return None;
     }
-    let mut v: Vec<f64> = xs.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
+    let mut v: Vec<f64> = xs
+        .iter()
+        .copied()
+        .filter(|x| x.is_finite() && *x >= 0.0)
+        .collect();
     if v.len() < 2 {
         return None;
     }
@@ -334,7 +346,11 @@ fn build_world(seed: u64, s: usize, dormancy: f64, sleep: (u64, u64), ret: f64) 
         .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
         .collect();
     let is_prom: Vec<bool> = accs.iter().map(|a| a.kind == Kind::Promoted).collect();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let alive_set: HashSet<usize> = alive.iter().copied().collect();
     let now = STEPS as u64;
 
@@ -489,7 +505,12 @@ fn run_pipeline(wd: &WorldData, mode: Mode) -> Run {
         .filter(|&i| !wd.is_att[i] && !wd.is_prom[i])
         .collect();
     let sleeper_alive: Vec<usize> = wd.alive.iter().copied().filter(|&i| wd.is_att[i]).collect();
-    let promoted_alive: Vec<usize> = wd.alive.iter().copied().filter(|&i| wd.is_prom[i]).collect();
+    let promoted_alive: Vec<usize> = wd
+        .alive
+        .iter()
+        .copied()
+        .filter(|&i| wd.is_prom[i])
+        .collect();
     let promoted: Option<usize> = (0..n).find(|&i| wd.is_prom[i]);
 
     let mut sp_vec: Vec<f64> = Vec::new();
@@ -835,13 +856,7 @@ fn pm(v: &[f64], dec: usize) -> String {
     if v.is_empty() {
         return "—".to_string();
     }
-    format!(
-        "{:.*} ± {:.*}",
-        dec,
-        mean(&v),
-        dec,
-        sd(&v)
-    )
+    format!("{:.*} ± {:.*}", dec, mean(&v), dec, sd(&v))
 }
 
 fn ms(rs: &[&Run], f: fn(&Run) -> f64, dec: usize) -> String {
@@ -887,7 +902,10 @@ fn main() {
         "# 交换协议：{ROUNDS} 轮 × 每轮 {SAMPLES} 个来源（回归节点 ×3），半衰期 72h，beta=0.3，view 2048x5 seed=99"
     );
     println!("# 潜伏者突变时刻 normal_until={NORMAL_UNTIL}（steps/5）");
-    println!("# 离线目标 = {:.0}%（逐 seed 二分标定 dormancy_rate）", P_TARGET * 100.0);
+    println!(
+        "# 离线目标 = {:.0}%（逐 seed 二分标定 dormancy_rate）",
+        P_TARGET * 100.0
+    );
     println!("# seeds = {seeds:?}   s = {ss:?}\n");
 
     // ── 0. 三种模式的衰减因子本身 ──
@@ -910,7 +928,11 @@ fn main() {
             "| {} | {} | {} |",
             m.label(),
             if en { "true" } else { "false" },
-            if fl == 0.0 { "0.0".to_string() } else { format!("{fl:.1}") }
+            if fl == 0.0 {
+                "0.0".to_string()
+            } else {
+                format!("{fl:.1}")
+            }
         );
         for d in dts {
             print!(" {:.4} |", e.decay_factor(d));
@@ -935,8 +957,10 @@ fn main() {
         calib.push((seed, rate));
     }
     println!();
-    println!("粒度核对（同一 seed 在最优 dormancy 附近 ±2% 的离线比例，说明阶跃）：
-");
+    println!(
+        "粒度核对（同一 seed 在最优 dormancy 附近 ±2% 的离线比例，说明阶跃）：
+"
+    );
     println!("| seed | ×0.96 | ×0.98 | ×1.00 | ×1.02 | ×1.04 |");
     println!("|---:|---:|---:|---:|---:|---:|");
     for &(seed, rate) in &calib {
@@ -952,7 +976,10 @@ fn main() {
 
     // ── 2. 世界只跑一次，三种模式共享 ──
     let mut all: Vec<Run> = Vec::new();
-    println!("## 明细（每个 模式 × s × seed 一行，共 {} 次测量）\n", calib.len() * ss.len() * MODES.len());
+    println!(
+        "## 明细（每个 模式 × s × seed 一行，共 {} 次测量）\n",
+        calib.len() * ss.len() * MODES.len()
+    );
     println!("| 模式 | seed | s | off% | 账户 | 存活 | 观察者 | 末轮在线 | 潜伏存活 | Spearman | Spearman0 | 只靠自己 | Spearman(在线) | 胜率 | 基尼 | 可达性 | 可达性(在线) | 支持集 | 平均观点龄 | 平均因子 | 潜伏份额 | 潜/诚人均 | 被看见 | 收益方份额 | 收益方分位 | 收益方存活 | 死账户 | 总和误差 |");
     println!("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|");
     for (seed, rate) in &calib {
@@ -1123,7 +1150,9 @@ fn main() {
         "## 表 3：潜伏者（Sleeper）视角（{} seed 均值 ± sd；s=0 无定义）\n",
         seeds.len()
     );
-    println!("| 模式 | s | 胜率 | 胜率(在线) | 潜伏者份额 | 潜伏/诚实人均 | 被看见 | 最高潜伏者分位 |");
+    println!(
+        "| 模式 | s | 胜率 | 胜率(在线) | 潜伏者份额 | 潜伏/诚实人均 | 被看见 | 最高潜伏者分位 |"
+    );
     println!("|---|---:|---|---|---|---|---|---|");
     for m in MODES {
         for &s in &ss {
@@ -1275,7 +1304,9 @@ fn l5_reproduce() {
     const RET_L5: f64 = 0.05;
     let t0 = Instant::now();
 
-    println!("\n\n# 附：L5 基准复现（标准衰减，return_rate=0.05，4 p × 2 s × 8 seed，合并 32 世界）\n");
+    println!(
+        "\n\n# 附：L5 基准复现（标准衰减，return_rate=0.05，4 p × 2 s × 8 seed，合并 32 世界）\n"
+    );
     let mut rows: Vec<(f64, Run)> = Vec::new();
     for &p in &PS {
         for &seed in &SEEDS8 {
@@ -1286,7 +1317,11 @@ fn l5_reproduce() {
                 rows.push((p, r));
             }
         }
-        println!("  p={:.0}% 完成（{:.0}s）", p * 100.0, t0.elapsed().as_secs_f64());
+        println!(
+            "  p={:.0}% 完成（{:.0}s）",
+            p * 100.0,
+            t0.elapsed().as_secs_f64()
+        );
     }
 
     println!("\n## 表 7：L5 复现 —— 逐 p（8 seed 均值 ± sd）\n");
@@ -1316,7 +1351,11 @@ fn l5_reproduce() {
     println!("| s | Spearman | L5 报告值 | 差 | Spearman0 | 基尼 | 可达性 |");
     println!("|---:|---|---|---:|---|---|---|");
     for &s in &SS2 {
-        let rs: Vec<&Run> = rows.iter().filter(|(_, r)| r.s == s).map(|(_, r)| r).collect();
+        let rs: Vec<&Run> = rows
+            .iter()
+            .filter(|(_, r)| r.s == s)
+            .map(|(_, r)| r)
+            .collect();
         let se = |f: fn(&Run) -> f64| -> String {
             let v: Vec<f64> = rs.iter().map(|r| f(r)).filter(|x| !x.is_nan()).collect();
             format!(

@@ -34,9 +34,16 @@ impl Interest {
         let mut v: Vec<f32> = if values.is_empty() {
             vec![0.0; dims]
         } else {
-            values.iter().map(|&x| if x > 0.0 { x } else { 0.0 }).collect()
+            values
+                .iter()
+                .map(|&x| if x > 0.0 { x } else { 0.0 })
+                .collect()
         };
-        let norm = v.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt() as f32;
+        let norm = v
+            .iter()
+            .map(|&x| (x as f64) * (x as f64))
+            .sum::<f64>()
+            .sqrt() as f32;
         if norm > 0.0 && norm.is_finite() {
             for x in v.iter_mut() {
                 *x /= norm;

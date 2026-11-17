@@ -168,7 +168,10 @@ fn even_sample_median_does_not_overflow_large_view() {
     let odd = view.noise_floor(999, 1);
     let even = view.noise_floor(1000, 1);
     assert!(odd.median.is_finite(), "999 样本的中位数不应是 inf: {odd}");
-    assert!(even.median.is_finite(), "1000 样本的中位数不应是 inf: {even}");
+    assert!(
+        even.median.is_finite(),
+        "1000 样本的中位数不应是 inf: {even}"
+    );
     assert!(even.median > 0.0);
     let ratio = even.median / odd.median;
     assert!(

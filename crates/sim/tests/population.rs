@@ -77,7 +77,10 @@ fn 离开是永久的() {
         .map(|a| a.idx)
         .collect();
     assert!(!已离开.is_empty(), "离开率 0.5 时应该有人离开");
-    let 评分快照: Vec<usize> = 已离开.iter().map(|&i| w.accounts[i].ratings.len()).collect();
+    let 评分快照: Vec<usize> = 已离开
+        .iter()
+        .map(|&i| w.accounts[i].ratings.len())
+        .collect();
     let 状态快照: Vec<Life> = 已离开.iter().map(|&i| w.accounts[i].life).collect();
 
     w.run_steps(20);

@@ -50,7 +50,11 @@ fn ecfg() -> EngineConfig {
     EngineConfig {
         beta: 0.3,
         half_life: 72,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
@@ -70,7 +74,9 @@ fn cfg_of(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Sim
         sleep_hours: SLEEP,
         return_rate: RETURN_RATE,
         enable_rhythm: false,
-        attack_kind: AttackKind::Sleeper { normal_until: NORMAL_UNTIL },
+        attack_kind: AttackKind::Sleeper {
+            normal_until: NORMAL_UNTIL,
+        },
         attack_ratio: sleepers / N_INIT as f64,
         ..Default::default()
     }
@@ -82,7 +88,11 @@ fn offline_frac(dormancy: f64, seed: u64) -> f64 {
     let mut w = tm_sim::World::new(cfg_of(0.0, 0.0, dormancy, seed, 1.0));
     w.run();
     let accs = w.accounts();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     if alive.is_empty() {
         return 0.0;
     }
@@ -105,20 +115,31 @@ fn run_calibration() {
         if (f - 0.5).abs() < (best.1 - 0.5).abs() {
             best = (mid, f);
         }
-        if f < 0.5 { lo = mid } else { hi = mid }
+        if f < 0.5 {
+            lo = mid
+        } else {
+            hi = mid
+        }
     }
-    for &r in &[1.0e-4f64, 5.0e-4, 1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3, 6.0e-3, 1.0e-2] {
+    for &r in &[
+        1.0e-4f64, 5.0e-4, 1.0e-3, 2.0e-3, 3.0e-3, 4.0e-3, 6.0e-3, 1.0e-2,
+    ] {
         let fs: Vec<f64> = SEEDS.iter().map(|&s| offline_frac(r, s)).collect();
         println!(
             "rate={:.6} offline={:.4} (seed11={:.4} seed23={:.4} seed37={:.4})",
             r,
             fs.iter().sum::<f64>() / 3.0,
-            fs[0], fs[1], fs[2]
+            fs[0],
+            fs[1],
+            fs[2]
         );
     }
     let fs: Vec<f64> = SEEDS.iter().map(|&s| offline_frac(best.0, s)).collect();
     println!();
-    println!("# 选定 dormancy_rate = {:.8} -> 平均离线 {:.4}", best.0, best.1);
+    println!(
+        "# 选定 dormancy_rate = {:.8} -> 平均离线 {:.4}",
+        best.0, best.1
+    );
     for (i, &s) in SEEDS.iter().enumerate() {
         println!("#   seed={} offline={:.4}", s, fs[i]);
     }
@@ -172,12 +193,20 @@ fn run_one(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Ra
     let accs = world.accounts();
     // 坑 1：账户编号基数必须用 accounts().len()，alive_count() 更小会撞号。
     let n = accs.len();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let is_att: Vec<bool> = accs.iter().map(|a| a.kind.is_attacker()).collect();
     let joined: Vec<u64> = accs.iter().map(|a| a.joined_at).collect();
     let quality: Vec<f32> = accs.iter().map(|a| a.quality).collect();
     let online: Vec<Vec<bool>> = (0..n)
-        .map(|i| (0..=ROUNDS).map(|r| world.was_online_at(i, r * TICK)).collect())
+        .map(|i| {
+            (0..=ROUNDS)
+                .map(|r| world.was_online_at(i, r * TICK))
+                .collect()
+        })
         .collect();
 
     let sleeper = *world.attack.attackers.first().expect("必须有潜伏者");
@@ -198,8 +227,16 @@ fn run_one(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Ra
         .copied()
         .filter(|&i| (quality[i] - sl_q).abs() <= 0.05)
         .collect();
-    let alive_old: Vec<usize> = alive_honest.iter().copied().filter(|&i| joined[i] == 0).collect();
-    let alive_new: Vec<usize> = alive_honest.iter().copied().filter(|&i| joined[i] > 0).collect();
+    let alive_old: Vec<usize> = alive_honest
+        .iter()
+        .copied()
+        .filter(|&i| joined[i] == 0)
+        .collect();
+    let alive_new: Vec<usize> = alive_honest
+        .iter()
+        .copied()
+        .filter(|&i| joined[i] > 0)
+        .collect();
 
     // ── 运行时：每账户一个 Engine ──
     let mut nodes: Vec<Option<Engine>> = (0..n).map(|_| None).collect();
@@ -243,7 +280,10 @@ fn run_one(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Ra
             let reqs = { nodes[a].as_mut().unwrap().tick(now, SAMPLES) };
             for req in reqs {
                 if let Some(Some(v)) = views.get(req.idx as usize) {
-                    nodes[a].as_mut().unwrap().on_view(req.idx, v.clone(), now, now);
+                    nodes[a]
+                        .as_mut()
+                        .unwrap()
+                        .on_view(req.idx, v.clone(), now, now);
                 }
             }
         }
@@ -305,7 +345,11 @@ fn run_one(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Ra
         let sl = buf[sleeper] as f64;
         // 坑 2：潜伏者与诚实账户分开计数，绝不共用一个分母
         let h_sum: f64 = alive_honest.iter().map(|&i| buf[i] as f64).sum();
-        let h_mean = if alive_honest.is_empty() { 0.0 } else { h_sum / alive_honest.len() as f64 };
+        let h_mean = if alive_honest.is_empty() {
+            0.0
+        } else {
+            h_sum / alive_honest.len() as f64
+        };
         obs_n += 1;
         if sl > 0.0 {
             vis_n += 1;
@@ -371,7 +415,11 @@ fn run_one(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Ra
 }
 
 fn div(a: f64, b: f64) -> f64 {
-    if b.abs() < 1e-12 { 0.0 } else { a / b }
+    if b.abs() < 1e-12 {
+        0.0
+    } else {
+        a / b
+    }
 }
 
 // ════════════════════════ 输出 ════════════════════════
@@ -470,7 +518,9 @@ fn run_grid(extra: bool, start: usize, end: usize, out: Option<&str>) {
     let mut buf = String::new();
     buf.push_str(&format!("# L1 churn grid: n_initial={N_INIT} steps={STEPS} rounds={ROUNDS} tick={TICK} samples={SAMPLES}\n"));
     buf.push_str(&format!("# dormancy={DORMANCY} sleep={SLEEP:?} return_rate={RETURN_RATE} normal_until={NORMAL_UNTIL}\n"));
-    buf.push_str(&format!("# attack=Sleeper attack_ratio=1/{N_INIT} seeds3={SEEDS:?} extra={EXTRA_SEEDS:?}\n"));
+    buf.push_str(&format!(
+        "# attack=Sleeper attack_ratio=1/{N_INIT} seeds3={SEEDS:?} extra={EXTRA_SEEDS:?}\n"
+    ));
     buf.push_str("# RAW 字段：total,alive,online,offline%,sl_state,sl_left_at,sl_quality,obs,vis,sl_share,h_mean,ratio,ret_n,ret_sl,ret_h,ret_ratio,new_n,new_sl,new_h,new_ratio,old_n,old_sl,old_h,old_ratio,indeg,indeg_new,indeg_online,match_n,match_mean,match_ratio,coh_old,coh_new,coh_ratio,joiners,leavers\n");
     let mut idx = 0usize;
     for &j in &JOINS {
@@ -492,7 +542,10 @@ fn run_grid(extra: bool, start: usize, end: usize, out: Option<&str>) {
                 buf.push_str(&cell_line("12", j, l, &rows));
                 buf.push('\n');
             }
-            println!("cell {i} done: join={j} leave={l} in {:.0}s", cw.elapsed().as_secs_f64());
+            println!(
+                "cell {i} done: join={j} leave={l} in {:.0}s",
+                cw.elapsed().as_secs_f64()
+            );
         }
     }
     match out {
@@ -508,11 +561,30 @@ fn run_smoke(join: f64, leave: f64, seed: u64) {
     let accs = world.accounts();
     let sleeper = *world.attack.attackers.first().unwrap();
     let a = &accs[sleeper];
-    println!("sleeper idx={sleeper} kind={:?} quality={:.4} joined={}", a.kind, a.quality, a.joined_at);
-    println!("attack_active={} target={:?} life={:?}", a.attack_active, world.attack.target, a.life);
-    println!("follows={} ratings={} rated_self={}", a.follows.len(), a.ratings.len(), a.rating_of(sleeper).is_some());
-    println!("received_count={} received_sum={:.4}", a.received_count, a.received_sum);
-    println!("total={} alive={} online={}", accs.len(), world.alive_count(), world.online_count());
+    println!(
+        "sleeper idx={sleeper} kind={:?} quality={:.4} joined={}",
+        a.kind, a.quality, a.joined_at
+    );
+    println!(
+        "attack_active={} target={:?} life={:?}",
+        a.attack_active, world.attack.target, a.life
+    );
+    println!(
+        "follows={} ratings={} rated_self={}",
+        a.follows.len(),
+        a.ratings.len(),
+        a.rating_of(sleeper).is_some()
+    );
+    println!(
+        "received_count={} received_sum={:.4}",
+        a.received_count, a.received_sum
+    );
+    println!(
+        "total={} alive={} online={}",
+        accs.len(),
+        world.alive_count(),
+        world.online_count()
+    );
     let r = run_one(join, leave, DORMANCY, seed, 1.0);
     println!("{}", raw_line(join, leave, seed, &r));
 }

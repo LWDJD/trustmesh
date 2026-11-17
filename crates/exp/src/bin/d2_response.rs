@@ -130,9 +130,21 @@ struct Mode {
 }
 
 const MODES: [Mode; 3] = [
-    Mode { name: "std", decay_enabled: true, decay_floor: 0.0 },
-    Mode { name: "floor", decay_enabled: true, decay_floor: 0.5 },
-    Mode { name: "off", decay_enabled: false, decay_floor: 0.0 },
+    Mode {
+        name: "std",
+        decay_enabled: true,
+        decay_floor: 0.0,
+    },
+    Mode {
+        name: "floor",
+        decay_enabled: true,
+        decay_floor: 0.5,
+    },
+    Mode {
+        name: "off",
+        decay_enabled: false,
+        decay_floor: 0.0,
+    },
 ];
 
 fn ecfg(m: Mode) -> EngineConfig {
@@ -140,7 +152,11 @@ fn ecfg(m: Mode) -> EngineConfig {
     EngineConfig {
         beta: 0.3,
         half_life: HALF_LIFE,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: m.decay_enabled,
@@ -255,7 +271,12 @@ fn probe_world(seed: u64, n_sleep: usize, dorm: f64, pin: bool) -> WorldProbe {
     for r in 0..=ROUNDS {
         let t = r as u64 * ROUND_LEN;
         if t >= ATTACK_T {
-            let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+            let alive: Vec<usize> = w
+                .accounts()
+                .iter()
+                .filter(|a| a.is_alive())
+                .map(|a| a.idx)
+                .collect();
             let online = alive.iter().filter(|&&i| w.was_online_at(i, t)).count();
             if !alive.is_empty() {
                 offs.push((alive.len() - online) as f64 / alive.len() as f64);
@@ -296,16 +317,32 @@ fn probe_world(seed: u64, n_sleep: usize, dorm: f64, pin: bool) -> WorldProbe {
         }
     }
 
-    let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = w
+        .accounts()
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let online_end = alive.iter().filter(|&&i| w.was_online_at(i, STEPS)).count();
-    let sleep_alive: Vec<usize> = sleepers.iter().copied().filter(|&s| w.accounts[s].is_alive()).collect();
-    let sleep_online_end = sleep_alive.iter().filter(|&&s| w.was_online_at(s, STEPS)).count();
+    let sleep_alive: Vec<usize> = sleepers
+        .iter()
+        .copied()
+        .filter(|&s| w.accounts[s].is_alive())
+        .collect();
+    let sleep_online_end = sleep_alive
+        .iter()
+        .filter(|&&s| w.was_online_at(s, STEPS))
+        .count();
     let sleep_ever_dorm = sleepers
         .iter()
         .filter(|&&s| {
             w.life_traces
                 .get(s)
-                .map(|tr| tr.events().iter().any(|(_, l)| matches!(l, Life::Dormant { .. })))
+                .map(|tr| {
+                    tr.events()
+                        .iter()
+                        .any(|(_, l)| matches!(l, Life::Dormant { .. }))
+                })
                 .unwrap_or(false)
         })
         .count();
@@ -314,7 +351,11 @@ fn probe_world(seed: u64, n_sleep: usize, dorm: f64, pin: bool) -> WorldProbe {
         accounts: w.accounts.len(),
         alive: alive.len(),
         online_end,
-        off_end: if alive.is_empty() { 0.0 } else { (alive.len() - online_end) as f64 / alive.len() as f64 },
+        off_end: if alive.is_empty() {
+            0.0
+        } else {
+            (alive.len() - online_end) as f64 / alive.len() as f64
+        },
         off_mean: mean(&offs),
         prom_alive: prom.map(|p| w.accounts[p].is_alive()).unwrap_or(false),
         prom_online_end: prom.map(|p| w.was_online_at(p, STEPS)).unwrap_or(false),
@@ -345,8 +386,16 @@ fn calibrate(seed: u64, n_sleep: usize) -> (f64, WorldProbe) {
         xs.push((x, p.off_end));
     }
     let idx = xs.iter().position(|&(x, _)| x == best.0).unwrap_or(0);
-    let mut lo = if idx > 0 { xs[idx - 1].0 } else { xs[0].0 * 0.5 };
-    let mut hi = if idx + 1 < xs.len() { xs[idx + 1].0 } else { xs[xs.len() - 1].0 * 2.0 };
+    let mut lo = if idx > 0 {
+        xs[idx - 1].0
+    } else {
+        xs[0].0 * 0.5
+    };
+    let mut hi = if idx + 1 < xs.len() {
+        xs[idx + 1].0
+    } else {
+        xs[xs.len() - 1].0 * 2.0
+    };
     for _ in 0..8 {
         let mid = (lo * hi).sqrt();
         let p = probe_world(seed, n_sleep, mid, true);
@@ -415,7 +464,10 @@ struct RunOut {
 fn run_case(m: Mode, seed: u64, n_sleep: usize, dorm: f64, variant: Variant) -> RunOut {
     let mutate = variant.attacks();
     let mut world = World::new(sim_cfg(seed, n_sleep, dorm, mutate));
-    let target = world.attack.target.expect("Sleeper 场景必有 Promoted 收益方");
+    let target = world
+        .attack
+        .target
+        .expect("Sleeper 场景必有 Promoted 收益方");
     let sleepers: Vec<usize> = world
         .accounts()
         .iter()
@@ -460,7 +512,8 @@ fn run_case(m: Mode, seed: u64, n_sleep: usize, dorm: f64, variant: Variant) -> 
         }
 
         // 2. 同步正分清单（本轮 t 时刻世界状态）
-        let ratings: Vec<Vec<(usize, f32)>> = world.accounts().iter().map(|a| a.ratings.clone()).collect();
+        let ratings: Vec<Vec<(usize, f32)>> =
+            world.accounts().iter().map(|a| a.ratings.clone()).collect();
         for i in 0..n {
             if !alive[i] {
                 continue;
@@ -486,7 +539,9 @@ fn run_case(m: Mode, seed: u64, n_sleep: usize, dorm: f64, variant: Variant) -> 
                 // 关键：只把 attack_active 置 false 会被下一小时的 phase_attack 立刻重新拉起
                 // （Sleeper{normal_until} 到点后只要 !attack_active 就会再次突变）。
                 // 所以连 kind 里的 normal_until 一起推到 u64::MAX：永久洗白。
-                world.accounts[s].kind = Kind::Sleeper { normal_until: u64::MAX };
+                world.accounts[s].kind = Kind::Sleeper {
+                    normal_until: u64::MAX,
+                };
                 world.accounts[s].attack_active = false;
                 world.accounts[s].ratings.retain(|&(x, _)| x != target);
                 world.accounts[s].follows.retain(|&x| x != target);
@@ -576,9 +631,19 @@ fn measure(
     n: usize,
 ) -> Snap {
     let alive: Vec<bool> = world.accounts().iter().map(|a| a.is_alive()).collect();
-    let online: Vec<bool> = (0..n).map(|i| alive[i] && world.was_online_at(i, t)).collect();
-    let is_slp: Vec<bool> = world.accounts().iter().map(|a| matches!(a.kind, Kind::Sleeper { .. })).collect();
-    let is_prom: Vec<bool> = world.accounts().iter().map(|a| matches!(a.kind, Kind::Promoted)).collect();
+    let online: Vec<bool> = (0..n)
+        .map(|i| alive[i] && world.was_online_at(i, t))
+        .collect();
+    let is_slp: Vec<bool> = world
+        .accounts()
+        .iter()
+        .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
+        .collect();
+    let is_prom: Vec<bool> = world
+        .accounts()
+        .iter()
+        .map(|a| matches!(a.kind, Kind::Promoted))
+        .collect();
     // 诚实 = 既非潜伏者也非收益方
     let is_hon: Vec<bool> = (0..n).map(|i| !is_slp[i] && !is_prom[i]).collect();
 
@@ -631,7 +696,11 @@ fn measure(
         for &h in &hon_alive {
             hs += v_of[h];
         }
-        let base = if hon_alive.is_empty() { 0.0 } else { hs / hon_alive.len() as f64 };
+        let base = if hon_alive.is_empty() {
+            0.0
+        } else {
+            hs / hon_alive.len() as f64
+        };
         if base <= 1e-12 {
             zero_base += 1;
             continue;
@@ -648,7 +717,11 @@ fn measure(
         let group = ((pv - 0.3 * personal) / 0.7).max(0.0);
         p_groups.push(group / base);
         let better = (0..n).filter(|&i| i != target && v_of[i] > pv).count();
-        let pct = if n > 1 { 1.0 - better as f64 / (n - 1) as f64 } else { 0.0 };
+        let pct = if n > 1 {
+            1.0 - better as f64 / (n - 1) as f64
+        } else {
+            0.0
+        };
         p_pcts.push(pct);
         if pct >= 0.90 {
             top10 += 1;
@@ -727,7 +800,11 @@ fn measure(
         p_group: mean(&p_groups),
         p_group_med: median(p_groups.clone()),
         p_pct: mean(&p_pcts),
-        p_top10: if p_pcts.is_empty() { f64::NAN } else { top10 as f64 / p_pcts.len() as f64 },
+        p_top10: if p_pcts.is_empty() {
+            f64::NAN
+        } else {
+            top10 as f64 / p_pcts.len() as f64
+        },
         p_ratio_exp: mean(&ratios_exp),
         p_ratio_unexp: mean(&ratios_unexp),
         exposed: if n_exp + ratios_unexp.len() == 0 {
@@ -738,7 +815,11 @@ fn measure(
         s_ratio: mean(&s_ratios),
         s_share: mean(&s_shares),
         s_view: s_view_mean,
-        s_view_ratio: if mean(&bases) > 0.0 { s_view_mean / mean(&bases) } else { f64::NAN },
+        s_view_ratio: if mean(&bases) > 0.0 {
+            s_view_mean / mean(&bases)
+        } else {
+            f64::NAN
+        },
         s_alive: s_alive.len(),
         s_online,
         prom_alive: if alive[target] { 1 } else { 0 },
@@ -748,7 +829,11 @@ fn measure(
         s_age: mean(&ages_exp),
         cache_age: mean(&cache_age),
         cache_n: mean(&cache_n),
-        cache_stale: if cache_cnt == 0 { f64::NAN } else { cache_stale as f64 / cache_cnt as f64 },
+        cache_stale: if cache_cnt == 0 {
+            f64::NAN
+        } else {
+            cache_stale as f64 / cache_cnt as f64
+        },
     }
 }
 
@@ -760,14 +845,14 @@ struct Did {
     d_peak: f64,
     t_peak: u64,
     rise_f: [i64; RISE_FRACS.len()], // 峰值分数的 25/50/90%
-    rise_a: [i64; ABS_RISE.len()],    // 绝对 Δ = 0.20/0.40/0.60
-    fall_r: [i64; FALL_FRACS.len()],  // 回落到峰值的 50/20%
-    fall_a: [i64; ABS_FALL.len()],    // 绝对 Δ = 0.60/0.40/0.20
-    d: [f64; 5],                      // t=300/320/400/500/600
-    rel: [f64; 5],                    // d[k] / d_peak
-    plateau: f64,                     // t=520..600 的 Δ 均值
-    resid: f64,                       // plateau / d_peak
-    top10: [f64; 4],                  // pre / peak / 500 / 600
+    rise_a: [i64; ABS_RISE.len()],   // 绝对 Δ = 0.20/0.40/0.60
+    fall_r: [i64; FALL_FRACS.len()], // 回落到峰值的 50/20%
+    fall_a: [i64; ABS_FALL.len()],   // 绝对 Δ = 0.60/0.40/0.20
+    d: [f64; 5],                     // t=300/320/400/500/600
+    rel: [f64; 5],                   // d[k] / d_peak
+    plateau: f64,                    // t=520..600 的 Δ 均值
+    resid: f64,                      // plateau / d_peak
+    top10: [f64; 4],                 // pre / peak / 500 / 600
     s: [f64; 4],
     exp: [f64; 4],
 }
@@ -790,7 +875,10 @@ fn first_cross_did(d: &[(u64, f64)], lo: u64, hi: u64, target: f64, up: bool) ->
         if !ok {
             continue;
         }
-        let next = d.iter().find(|(tt, _)| *tt == t + ROUND_LEN).map(|(_, x)| *x);
+        let next = d
+            .iter()
+            .find(|(tt, _)| *tt == t + ROUND_LEN)
+            .map(|(_, x)| *x);
         let ok2 = match next {
             Some(nv) if nv.is_finite() => {
                 if up {
@@ -815,7 +903,12 @@ fn did(atk: &[Snap], ctl: &[Snap]) -> Did {
         .map(|s| (s.t, s.p_ratio - did_at(ctl, s.t, &|c| c.p_ratio)))
         .collect();
     let pre_ts = [60u64, 80, 100, 120];
-    o.d_pre = mean(&pre_ts.iter().map(|&t| did_at(atk, t, &|s| s.p_ratio) - did_at(ctl, t, &|s| s.p_ratio)).collect::<Vec<_>>());
+    o.d_pre = mean(
+        &pre_ts
+            .iter()
+            .map(|&t| did_at(atk, t, &|s| s.p_ratio) - did_at(ctl, t, &|s| s.p_ratio))
+            .collect::<Vec<_>>(),
+    );
     let mut peak = f64::NEG_INFINITY;
     let mut t_peak = 0u64;
     for &(t, v) in &curve {
@@ -827,7 +920,13 @@ fn did(atk: &[Snap], ctl: &[Snap]) -> Did {
     o.d_peak = peak;
     o.t_peak = t_peak;
     for (k, fr) in RISE_FRACS.iter().enumerate() {
-        o.rise_f[k] = first_cross_did(&curve, ATTACK_T + ROUND_LEN, WASH_T, o.d_pre + fr * (o.d_peak - o.d_pre), true);
+        o.rise_f[k] = first_cross_did(
+            &curve,
+            ATTACK_T + ROUND_LEN,
+            WASH_T,
+            o.d_pre + fr * (o.d_peak - o.d_pre),
+            true,
+        );
     }
     for (k, th) in ABS_RISE.iter().enumerate() {
         o.rise_a[k] = if *th < o.d_peak {
@@ -837,7 +936,13 @@ fn did(atk: &[Snap], ctl: &[Snap]) -> Did {
         };
     }
     for (k, fr) in FALL_FRACS.iter().enumerate() {
-        o.fall_r[k] = first_cross_did(&curve, WASH_T + ROUND_LEN, STEPS, o.d_pre + fr * (o.d_peak - o.d_pre), false);
+        o.fall_r[k] = first_cross_did(
+            &curve,
+            WASH_T + ROUND_LEN,
+            STEPS,
+            o.d_pre + fr * (o.d_peak - o.d_pre),
+            false,
+        );
     }
     for (k, th) in ABS_FALL.iter().enumerate() {
         o.fall_a[k] = if *th < o.d_peak {
@@ -848,7 +953,11 @@ fn did(atk: &[Snap], ctl: &[Snap]) -> Did {
     }
     for (k, t) in [300u64, 320, 400, 500, 600].iter().enumerate() {
         o.d[k] = did_at(atk, *t, &|s| s.p_ratio) - did_at(ctl, *t, &|s| s.p_ratio);
-        o.rel[k] = if o.d_peak.abs() > 1e-12 { o.d[k] / o.d_peak } else { f64::NAN };
+        o.rel[k] = if o.d_peak.abs() > 1e-12 {
+            o.d[k] / o.d_peak
+        } else {
+            f64::NAN
+        };
     }
     o.plateau = mean(
         &[520u64, 540, 560, 580, 600]
@@ -856,9 +965,19 @@ fn did(atk: &[Snap], ctl: &[Snap]) -> Did {
             .map(|&t| did_at(atk, t, &|s| s.p_ratio) - did_at(ctl, t, &|s| s.p_ratio))
             .collect::<Vec<_>>(),
     );
-    o.resid = if o.d_peak.abs() > 1e-12 { o.plateau / o.d_peak } else { f64::NAN };
+    o.resid = if o.d_peak.abs() > 1e-12 {
+        o.plateau / o.d_peak
+    } else {
+        f64::NAN
+    };
     for (k, t) in [0u64, 0, 500, 600].iter().enumerate() {
-        let tt = if k == 0 { 120 } else if k == 1 { t_peak } else { *t };
+        let tt = if k == 0 {
+            120
+        } else if k == 1 {
+            t_peak
+        } else {
+            *t
+        };
         o.top10[k] = did_at(atk, tt, &|s| s.p_top10) - did_at(ctl, tt, &|s| s.p_top10);
         o.s[k] = did_at(atk, tt, &|s| s.s_ratio) - did_at(ctl, tt, &|s| s.s_ratio);
         o.exp[k] = did_at(atk, tt, &|s| s.p_ratio_exp) - did_at(ctl, tt, &|s| s.p_ratio_exp);
@@ -898,7 +1017,11 @@ fn main() {
     if pilot && !args.iter().any(|a| a.starts_with("modes=")) {
         mode_names = vec!["std".to_string()];
     }
-    let modes: Vec<Mode> = MODES.iter().copied().filter(|m| mode_names.iter().any(|x| x == m.name)).collect();
+    let modes: Vec<Mode> = MODES
+        .iter()
+        .copied()
+        .filter(|m| mode_names.iter().any(|x| x == m.name))
+        .collect();
     let dorm_override: Option<f64> = args
         .iter()
         .find_map(|a| a.strip_prefix("dorm=").and_then(|x| x.parse().ok()));
@@ -928,10 +1051,16 @@ fn main() {
         "# join_rate=0.05 leave_rate=0 attack_kind=Sleeper{{normal_until:{}}} attack_ratio={}/{} 潜伏者={}",
         ATTACK_T, n_sleep, N_INIT, n_sleep
     );
-    println!("# 时间线：t=120 突变 → t=300 洗白（撤销 1.0 并取消关注）→ t=600 结束；快照每 20h 一次");
+    println!(
+        "# 时间线：t=120 突变 → t=300 洗白（撤销 1.0 并取消关注）→ t=600 结束；快照每 20h 一次"
+    );
     println!("# 观察者 = 存活 ∧ 诚实 ∧ 该轮在线；诚实 = 非 Sleeper 且非 Promoted");
     println!("# 实验控制：收益方全程钉住在线（见文件头）；对照臂 normal_until=u64::MAX（潜伏者永不突变）");
-    println!("# modes={:?} seeds={:?}", modes.iter().map(|m| m.name).collect::<Vec<_>>(), seeds);
+    println!(
+        "# modes={:?} seeds={:?}",
+        modes.iter().map(|m| m.name).collect::<Vec<_>>(),
+        seeds
+    );
 
     // 1. 衰减因子自检
     println!("\n== DECAY 三种模式的因子自检（Engine::decay_factor）==");
@@ -958,12 +1087,24 @@ fn main() {
     for &seed in &seeds {
         let (dorm, p) = calibrate(seed, n_sleep);
         let d = dorm_override.unwrap_or(dorm);
-        let p = if dorm_override.is_some() { probe_world(seed, n_sleep, d, true) } else { p };
+        let p = if dorm_override.is_some() {
+            probe_world(seed, n_sleep, d, true)
+        } else {
+            p
+        };
         dorms.push((seed, d));
         println!(
             "CAL,{},{},{:.6},{:.4},{:.4},{},{},{},{},{}",
-            seed, n_sleep, d, p.off_end, p.off_mean, p.accounts, p.alive, p.online_end,
-            p.prom_alive as i32, p.prom_online_end as i32
+            seed,
+            n_sleep,
+            d,
+            p.off_end,
+            p.off_mean,
+            p.accounts,
+            p.alive,
+            p.online_end,
+            p.prom_alive as i32,
+            p.prom_online_end as i32
         );
     }
 
@@ -974,10 +1115,21 @@ fn main() {
         let p = probe_world(seed, n_sleep, dorm, false);
         println!(
             "PROBE,{},{},{},{:.4},{},{},{},{},{},{},{},{},{},{:.1},{}",
-            seed, p.accounts, p.alive, p.off_end, p.prom_first_dorm,
-            p.prom_off[0], p.prom_off[1], p.prom_off[2],
-            p.prom_alive_at[0] as i32, p.prom_alive_at[1] as i32, p.prom_alive_at[2] as i32,
-            p.sleep_alive, p.sleep_online_end, p.sleep_off_mean, p.sleep_ever_dorm
+            seed,
+            p.accounts,
+            p.alive,
+            p.off_end,
+            p.prom_first_dorm,
+            p.prom_off[0],
+            p.prom_off[1],
+            p.prom_off[2],
+            p.prom_alive_at[0] as i32,
+            p.prom_alive_at[1] as i32,
+            p.prom_alive_at[2] as i32,
+            p.sleep_alive,
+            p.sleep_online_end,
+            p.sleep_off_mean,
+            p.sleep_ever_dorm
         );
     }
 
@@ -1045,7 +1197,8 @@ fn main() {
     }
 
     let get = |mode: &str, seed: u64, v: Variant| -> Option<&RunOut> {
-        runs.iter().find(|r| r.mode == mode && r.seed == seed && r.variant == v)
+        runs.iter()
+            .find(|r| r.mode == mode && r.seed == seed && r.variant == v)
     };
 
     // 5. 攻击臂原始曲线（不做差中差）
@@ -1053,7 +1206,12 @@ fn main() {
     println!("#HEAD,arm,mode,seed,t_deliver,n_deliv_max,n_deliv_at_wash,pre,peak,t_peak,rise50,rise90,fall50,fall90,r300,r320,r400,r500,r600,pre_top10,peak_top10,post_top10,pre_s,peak_s,post_s");
     for o in runs.iter().filter(|r| r.variant != Variant::Ctl) {
         let snaps = &o.snaps;
-        let pre = mean(&[60u64, 80, 100, 120].iter().map(|&t| did_at(snaps, t, &|s| s.p_ratio)).collect::<Vec<_>>());
+        let pre = mean(
+            &[60u64, 80, 100, 120]
+                .iter()
+                .map(|&t| did_at(snaps, t, &|s| s.p_ratio))
+                .collect::<Vec<_>>(),
+        );
         let mut peak = f64::NEG_INFINITY;
         let mut t_peak = 0u64;
         for s in snaps.iter().filter(|s| s.t > ATTACK_T && s.t <= WASH_T) {
@@ -1063,10 +1221,34 @@ fn main() {
             }
         }
         let curve: Vec<(u64, f64)> = snaps.iter().map(|s| (s.t, s.p_ratio)).collect();
-        let rise50 = first_cross_did(&curve, ATTACK_T + ROUND_LEN, WASH_T, pre + 0.5 * (peak - pre), true);
-        let rise90 = first_cross_did(&curve, ATTACK_T + ROUND_LEN, WASH_T, pre + 0.9 * (peak - pre), true);
-        let fall50 = first_cross_did(&curve, WASH_T + ROUND_LEN, STEPS, pre + 0.5 * (peak - pre), false);
-        let fall90 = first_cross_did(&curve, WASH_T + ROUND_LEN, STEPS, pre + 0.1 * (peak - pre), false);
+        let rise50 = first_cross_did(
+            &curve,
+            ATTACK_T + ROUND_LEN,
+            WASH_T,
+            pre + 0.5 * (peak - pre),
+            true,
+        );
+        let rise90 = first_cross_did(
+            &curve,
+            ATTACK_T + ROUND_LEN,
+            WASH_T,
+            pre + 0.9 * (peak - pre),
+            true,
+        );
+        let fall50 = first_cross_did(
+            &curve,
+            WASH_T + ROUND_LEN,
+            STEPS,
+            pre + 0.5 * (peak - pre),
+            false,
+        );
+        let fall90 = first_cross_did(
+            &curve,
+            WASH_T + ROUND_LEN,
+            STEPS,
+            pre + 0.1 * (peak - pre),
+            false,
+        );
         let g = |t: u64, ff: &dyn Fn(&Snap) -> f64| did_at(snaps, t, ff);
         let fields: Vec<String> = vec![
             "EDGE".into(),
@@ -1088,12 +1270,44 @@ fn main() {
             f(g(400, &|s| s.p_ratio), 6),
             f(g(500, &|s| s.p_ratio), 6),
             f(g(600, &|s| s.p_ratio), 6),
-            f(mean(&[60u64, 80, 100, 120].iter().map(|&t| g(t, &|s| s.p_top10)).collect::<Vec<_>>()), 6),
+            f(
+                mean(
+                    &[60u64, 80, 100, 120]
+                        .iter()
+                        .map(|&t| g(t, &|s| s.p_top10))
+                        .collect::<Vec<_>>(),
+                ),
+                6,
+            ),
             f(g(t_peak, &|s| s.p_top10), 6),
-            f(mean(&[500u64, 600].iter().map(|&t| g(t, &|s| s.p_top10)).collect::<Vec<_>>()), 6),
-            f(mean(&[60u64, 80, 100, 120].iter().map(|&t| g(t, &|s| s.s_ratio)).collect::<Vec<_>>()), 6),
+            f(
+                mean(
+                    &[500u64, 600]
+                        .iter()
+                        .map(|&t| g(t, &|s| s.p_top10))
+                        .collect::<Vec<_>>(),
+                ),
+                6,
+            ),
+            f(
+                mean(
+                    &[60u64, 80, 100, 120]
+                        .iter()
+                        .map(|&t| g(t, &|s| s.s_ratio))
+                        .collect::<Vec<_>>(),
+                ),
+                6,
+            ),
             f(g(t_peak, &|s| s.s_ratio), 6),
-            f(mean(&[500u64, 600].iter().map(|&t| g(t, &|s| s.s_ratio)).collect::<Vec<_>>()), 6),
+            f(
+                mean(
+                    &[500u64, 600]
+                        .iter()
+                        .map(|&t| g(t, &|s| s.s_ratio))
+                        .collect::<Vec<_>>(),
+                ),
+                6,
+            ),
         ];
         println!("{}", fields.join(","));
     }
@@ -1231,14 +1445,23 @@ fn main() {
     }
     for v in [Variant::Wash, Variant::Dark, Variant::Ctl] {
         for &m in &modes {
-            let sub: Vec<&RunOut> = runs.iter().filter(|o| o.mode == m.name && o.variant == v).collect();
+            let sub: Vec<&RunOut> = runs
+                .iter()
+                .filter(|o| o.mode == m.name && o.variant == v)
+                .collect();
             if sub.is_empty() {
                 continue;
             }
             for si in 0..SNAPS {
                 let t = si as u64 * ROUND_LEN;
                 let obs_vals: Vec<f64> = sub.iter().map(|o| o.snaps[si].obs as f64).collect();
-                let mut row = format!("AGG,{},{},{},{}", v.name(), m.name, t, f(mean(&obs_vals), 1));
+                let mut row = format!(
+                    "AGG,{},{},{},{}",
+                    v.name(),
+                    m.name,
+                    t,
+                    f(mean(&obs_vals), 1)
+                );
                 for (_, getv) in cols {
                     let vals: Vec<f64> = sub.iter().map(|o| getv(&o.snaps[si])).collect();
                     let (mu, sd) = mean_sd(&vals);
@@ -1286,7 +1509,14 @@ fn main() {
             for (name, getv) in metrics {
                 let vals: Vec<f64> = sub.iter().map(|d| getv(d)).collect();
                 let (mu, sd) = mean_sd(&vals);
-                println!("DIDEDGE,{},{},{},{:.4},{:.4}", v.name(), m.name, name, mu, sd);
+                println!(
+                    "DIDEDGE,{},{},{},{:.4},{:.4}",
+                    v.name(),
+                    m.name,
+                    name,
+                    mu,
+                    sd
+                );
             }
         }
     }
@@ -1322,7 +1552,14 @@ fn main() {
                         _ => f64::NAN,
                     }
                 };
-                println!("PAIRED,{},{},{},{:.2},{:.2}", v.name(), seed, name, d(&flo, &std), d(&off, &std));
+                println!(
+                    "PAIRED,{},{},{},{:.2},{:.2}",
+                    v.name(),
+                    seed,
+                    name,
+                    d(&flo, &std),
+                    d(&off, &std)
+                );
             }
         }
     }

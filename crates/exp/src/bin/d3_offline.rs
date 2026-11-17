@@ -63,16 +63,32 @@ struct Mode {
 }
 
 const MODES: [Mode; 3] = [
-    Mode { name: "std", enabled: true, floor: 0.0 },
-    Mode { name: "floor", enabled: true, floor: 0.5 },
-    Mode { name: "off", enabled: false, floor: 0.0 },
+    Mode {
+        name: "std",
+        enabled: true,
+        floor: 0.0,
+    },
+    Mode {
+        name: "floor",
+        enabled: true,
+        floor: 0.5,
+    },
+    Mode {
+        name: "off",
+        enabled: false,
+        floor: 0.0,
+    },
 ];
 
 fn ecfg(m: Mode) -> EngineConfig {
     EngineConfig {
         beta: 0.3,
         half_life: HALF_LIFE,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: m.enabled,
@@ -139,7 +155,11 @@ fn world_stat(dorm: f64, seed: u64) -> WorldStat {
     } else {
         (alive.len() - online) as f64 / alive.len() as f64
     };
-    let p_all_off = if n == 0 { f64::NAN } else { (n - online) as f64 / n as f64 };
+    let p_all_off = if n == 0 {
+        f64::NAN
+    } else {
+        (n - online) as f64 / n as f64
+    };
     WorldStat {
         p_alive_off,
         p_all_off,
@@ -185,8 +205,16 @@ fn calibrate(target: f64, seeds: &[u64]) -> (f64, Vec<WorldStat>) {
         return (best.0, vec![WorldStat::default(); seeds.len()]);
     }
     let idx = xs.iter().position(|&(d, _)| d == best.0).unwrap_or(0);
-    let mut lo = if idx > 0 { xs[idx - 1].0 } else { xs[0].0 * 0.5 };
-    let mut hi = if idx + 1 < xs.len() { xs[idx + 1].0 } else { *xs.last().map(|x| &x.0).unwrap() * 2.0 };
+    let mut lo = if idx > 0 {
+        xs[idx - 1].0
+    } else {
+        xs[0].0 * 0.5
+    };
+    let mut hi = if idx + 1 < xs.len() {
+        xs[idx + 1].0
+    } else {
+        *xs.last().map(|x| &x.0).unwrap() * 2.0
+    };
     for _ in 0..8 {
         let mid = (lo * hi).sqrt();
         let (p, sts) = eval(mid);
@@ -206,34 +234,52 @@ fn calibrate(target: f64, seeds: &[u64]) -> (f64, Vec<WorldStat>) {
 
 fn mean(v: &[f64]) -> f64 {
     let f: Vec<f64> = v.iter().copied().filter(|x| x.is_finite()).collect();
-    if f.is_empty() { f64::NAN } else { f.iter().sum::<f64>() / f.len() as f64 }
+    if f.is_empty() {
+        f64::NAN
+    } else {
+        f.iter().sum::<f64>() / f.len() as f64
+    }
 }
 
 fn mean_sd(v: &[f64]) -> (f64, f64) {
     let f: Vec<f64> = v.iter().copied().filter(|x| x.is_finite()).collect();
     let n = f.len() as f64;
-    if f.is_empty() { return (f64::NAN, f64::NAN); }
+    if f.is_empty() {
+        return (f64::NAN, f64::NAN);
+    }
     let m = f.iter().sum::<f64>() / n;
-    if f.len() < 2 { return (m, 0.0); }
+    if f.len() < 2 {
+        return (m, 0.0);
+    }
     let var = f.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (n - 1.0);
     (m, var.sqrt())
 }
 
 fn median_u64(v: &[u64]) -> f64 {
-    if v.is_empty() { return f64::NAN; }
+    if v.is_empty() {
+        return f64::NAN;
+    }
     let mut x = v.to_vec();
     x.sort_unstable();
     let n = x.len();
-    if n % 2 == 1 { x[n / 2] as f64 } else { 0.5 * (x[n / 2 - 1] as f64 + x[n / 2] as f64) }
+    if n % 2 == 1 {
+        x[n / 2] as f64
+    } else {
+        0.5 * (x[n / 2 - 1] as f64 + x[n / 2] as f64)
+    }
 }
 
 /// 基尼系数（总体口径）：G = 2·Σ i·x_(i) / (n·Σx) − (n+1)/n，x 升序、i 从 1 起。
 fn gini(v: &[f64]) -> f64 {
     let mut x: Vec<f64> = v.iter().copied().filter(|a| a.is_finite()).collect();
     let n = x.len();
-    if n < 2 { return f64::NAN; }
+    if n < 2 {
+        return f64::NAN;
+    }
     let tot: f64 = x.iter().sum();
-    if tot <= 0.0 { return f64::NAN; }
+    if tot <= 0.0 {
+        return f64::NAN;
+    }
     x.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mut acc = 0.0f64;
     for (i, &xi) in x.iter().enumerate() {
@@ -265,7 +311,9 @@ fn ranks(v: &[f64]) -> Vec<f64> {
 
 fn pearson(x: &[f64], y: &[f64]) -> f64 {
     let n = x.len().min(y.len());
-    if n < 3 { return f64::NAN; }
+    if n < 3 {
+        return f64::NAN;
+    }
     let mx = mean(&x[..n]);
     let my = mean(&y[..n]);
     let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
@@ -276,13 +324,19 @@ fn pearson(x: &[f64], y: &[f64]) -> f64 {
         sxx += dx * dx;
         syy += dy * dy;
     }
-    if sxx <= 0.0 || syy <= 0.0 { f64::NAN } else { sxy / (sxx * syy).sqrt() }
+    if sxx <= 0.0 || syy <= 0.0 {
+        f64::NAN
+    } else {
+        sxy / (sxx * syy).sqrt()
+    }
 }
 
 /// Spearman ρ = 平均秩上的 Pearson。
 fn spearman(x: &[f64], y: &[f64]) -> f64 {
     let n = x.len().min(y.len());
-    if n < 3 { return f64::NAN; }
+    if n < 3 {
+        return f64::NAN;
+    }
     pearson(&ranks(&x[..n]), &ranks(&y[..n]))
 }
 
@@ -356,7 +410,9 @@ fn run_cell(m: Mode, p_target: f64, seed: u64, dorm: f64) -> Row {
             nodes.resize_with(n, || None);
         }
         let alive: Vec<bool> = (0..n).map(|i| world.accounts()[i].is_alive()).collect();
-        let online: Vec<bool> = (0..n).map(|i| alive[i] && world.was_online_at(i, t)).collect();
+        let online: Vec<bool> = (0..n)
+            .map(|i| alive[i] && world.was_online_at(i, t))
+            .collect();
 
         // 1. 引擎：存活账户才有 runtime（编号只增不减）
         for i in 0..n {
@@ -380,8 +436,9 @@ fn run_cell(m: Mode, p_target: f64, seed: u64, dorm: f64) -> Row {
         }
 
         // 2. 正分清单按轮同步（世界在 t 时刻的真实状态）
-        let ratings: Vec<Vec<(usize, f32)>> =
-            (0..n).map(|i| world.accounts()[i].ratings.clone()).collect();
+        let ratings: Vec<Vec<(usize, f32)>> = (0..n)
+            .map(|i| world.accounts()[i].ratings.clone())
+            .collect();
         for i in 0..n {
             if !alive[i] {
                 continue;
@@ -429,13 +486,19 @@ fn run_cell(m: Mode, p_target: f64, seed: u64, dorm: f64) -> Row {
     let accs = world.accounts();
     let alive: Vec<usize> = (0..n).filter(|&i| accs[i].is_alive()).collect();
     let left: Vec<usize> = (0..n).filter(|&i| accs[i].is_left()).collect();
-    let online: Vec<bool> = (0..n).map(|i| accs[i].is_alive() && world.was_online_at(i, t_end)).collect();
+    let online: Vec<bool> = (0..n)
+        .map(|i| accs[i].is_alive() && world.was_online_at(i, t_end))
+        .collect();
     let alive_off: Vec<usize> = alive.iter().copied().filter(|&i| !online[i]).collect();
     let alive_on: Vec<usize> = alive.iter().copied().filter(|&i| online[i]).collect();
 
     // 口径：三类账户分开，绝不用 is_attacker 二分
-    let is_slp: Vec<bool> = (0..n).map(|i| matches!(accs[i].kind, Kind::Sleeper { .. })).collect();
-    let is_prom: Vec<bool> = (0..n).map(|i| matches!(accs[i].kind, Kind::Promoted)).collect();
+    let is_slp: Vec<bool> = (0..n)
+        .map(|i| matches!(accs[i].kind, Kind::Sleeper { .. }))
+        .collect();
+    let is_prom: Vec<bool> = (0..n)
+        .map(|i| matches!(accs[i].kind, Kind::Promoted))
+        .collect();
     let is_hon: Vec<bool> = (0..n).map(|i| !is_slp[i] && !is_prom[i]).collect();
     let hon_alive: Vec<usize> = alive.iter().copied().filter(|&i| is_hon[i]).collect();
     let hon_on: Vec<usize> = alive_on.iter().copied().filter(|&i| is_hon[i]).collect();
@@ -449,7 +512,11 @@ fn run_cell(m: Mode, p_target: f64, seed: u64, dorm: f64) -> Row {
     } else {
         alive_off.len() as f64 / alive.len() as f64
     };
-    let p_all = if n == 0 { f64::NAN } else { (n - alive_on.len()) as f64 / n as f64 };
+    let p_all = if n == 0 {
+        f64::NAN
+    } else {
+        (n - alive_on.len()) as f64 / n as f64
+    };
 
     let k_top = ((n as f64 * TOP_FRAC).round() as usize).max(1);
 
@@ -596,7 +663,11 @@ fn run_cell(m: Mode, p_target: f64, seed: u64, dorm: f64) -> Row {
                 }
             }
         }
-        if c == 0 { f64::NAN } else { hit as f64 / c as f64 }
+        if c == 0 {
+            f64::NAN
+        } else {
+            hit as f64 / c as f64
+        }
     };
 
     Row {
@@ -646,28 +717,81 @@ fn run_cell(m: Mode, p_target: f64, seed: u64, dorm: f64) -> Row {
 // ───────────────────────── 输出 ─────────────────────────
 
 fn f6(x: f64) -> String {
-    if x.is_finite() { format!("{:.6}", x) } else { "nan".to_string() }
+    if x.is_finite() {
+        format!("{:.6}", x)
+    } else {
+        "nan".to_string()
+    }
 }
 
 const COLS: [&str; 31] = [
-    "p_meas", "p_all", "accounts", "alive", "online", "left", "dormant", "n_obs", "zero_base",
-    "left_share", "left_pers", "left_grp", "dorm_share", "dorm_pers", "dorm_grp", "online_share",
-    "gini", "dist_nnz", "rho_all", "rho_on", "reach_all", "reach_on", "reach_dorm", "age_all",
-    "age_left", "age_dorm", "age_on", "n_cached", "eff_src", "w_old", "hit_rate",
+    "p_meas",
+    "p_all",
+    "accounts",
+    "alive",
+    "online",
+    "left",
+    "dormant",
+    "n_obs",
+    "zero_base",
+    "left_share",
+    "left_pers",
+    "left_grp",
+    "dorm_share",
+    "dorm_pers",
+    "dorm_grp",
+    "online_share",
+    "gini",
+    "dist_nnz",
+    "rho_all",
+    "rho_on",
+    "reach_all",
+    "reach_on",
+    "reach_dorm",
+    "age_all",
+    "age_left",
+    "age_dorm",
+    "age_on",
+    "n_cached",
+    "eff_src",
+    "w_old",
+    "hit_rate",
 ];
 
 impl Row {
     fn vals(&self) -> Vec<String> {
         vec![
-            f6(self.p_meas), f6(self.p_all), self.accounts.to_string(), self.alive.to_string(),
-            self.online.to_string(), self.left.to_string(), self.dormant.to_string(),
-            self.n_obs.to_string(), self.zero_base.to_string(),
-            f6(self.left_share), f6(self.left_pers), f6(self.left_grp),
-            f6(self.dorm_share), f6(self.dorm_pers), f6(self.dorm_grp), f6(self.online_share),
-            f6(self.gini), f6(self.dist_nnz), f6(self.rho_all), f6(self.rho_on),
-            f6(self.reach_all), f6(self.reach_on), f6(self.reach_dorm), f6(self.age_all),
-            f6(self.age_left), f6(self.age_dorm), f6(self.age_on), f6(self.n_cached),
-            f6(self.eff_src), f6(self.w_old), f6(self.hit_rate),
+            f6(self.p_meas),
+            f6(self.p_all),
+            self.accounts.to_string(),
+            self.alive.to_string(),
+            self.online.to_string(),
+            self.left.to_string(),
+            self.dormant.to_string(),
+            self.n_obs.to_string(),
+            self.zero_base.to_string(),
+            f6(self.left_share),
+            f6(self.left_pers),
+            f6(self.left_grp),
+            f6(self.dorm_share),
+            f6(self.dorm_pers),
+            f6(self.dorm_grp),
+            f6(self.online_share),
+            f6(self.gini),
+            f6(self.dist_nnz),
+            f6(self.rho_all),
+            f6(self.rho_on),
+            f6(self.reach_all),
+            f6(self.reach_on),
+            f6(self.reach_dorm),
+            f6(self.age_all),
+            f6(self.age_left),
+            f6(self.age_dorm),
+            f6(self.age_on),
+            f6(self.n_cached),
+            f6(self.eff_src),
+            f6(self.w_old),
+            f6(self.hit_rate),
         ]
     }
 }
@@ -687,11 +811,13 @@ fn decay_table() {
     }
 }
 
-
 /// 只在世界层做的队伍画像：t=400 时「在线 / 休眠 / 已离开」三组分别是谁。
 /// 用来解释 p=90% 时在线集合的构成（是不是只剩新加入的账户）。
 fn who() {
-    println!("\n== WHO t={} 时三组账户的构成（年龄 = t − joined_at）==", STEPS);
+    println!(
+        "\n== WHO t={} 时三组账户的构成（年龄 = t − joined_at）==",
+        STEPS
+    );
     println!("WHO,p_target,seed,group,n,med_age_h,mean_quality,mean_raters,frac_rated");
     for &p in &PS {
         let (rate, _) = calibrate(p, &SEEDS);
@@ -705,7 +831,8 @@ fn who() {
                     raters[tgt] += 1;
                 }
             }
-            let mut groups: Vec<(&str, Vec<usize>)> = vec![("online", vec![]), ("dormant", vec![]), ("left", vec![])];
+            let mut groups: Vec<(&str, Vec<usize>)> =
+                vec![("online", vec![]), ("dormant", vec![]), ("left", vec![])];
             for i in 0..n {
                 let a = &w.accounts()[i];
                 if a.is_left() {
@@ -721,13 +848,30 @@ fn who() {
                     println!("WHO,{:.2},{},{},0,nan,nan,nan,nan", p, seed, name);
                     continue;
                 }
-                let mut ages: Vec<u64> = set.iter().map(|&i| STEPS - w.accounts()[i].joined_at).collect();
+                let mut ages: Vec<u64> = set
+                    .iter()
+                    .map(|&i| STEPS - w.accounts()[i].joined_at)
+                    .collect();
                 ages.sort_unstable();
                 let med = ages[ages.len() / 2] as f64;
-                let q = set.iter().map(|&i| w.accounts()[i].quality as f64).sum::<f64>() / set.len() as f64;
+                let q = set
+                    .iter()
+                    .map(|&i| w.accounts()[i].quality as f64)
+                    .sum::<f64>()
+                    / set.len() as f64;
                 let r = set.iter().map(|&i| raters[i] as f64).sum::<f64>() / set.len() as f64;
                 let fr = set.iter().filter(|&&i| raters[i] > 0).count() as f64 / set.len() as f64;
-                println!("WHO,{:.2},{},{},{},{:.0},{:.4},{:.2},{:.4}", p, seed, name, set.len(), med, q, r, fr);
+                println!(
+                    "WHO,{:.2},{},{},{},{:.0},{:.4},{:.2},{:.4}",
+                    p,
+                    seed,
+                    name,
+                    set.len(),
+                    med,
+                    q,
+                    r,
+                    fr
+                );
             }
         }
     }
@@ -740,13 +884,26 @@ fn main() {
     let t0 = std::time::Instant::now();
 
     println!("# D3 · 长期离线账户对网络的影响（三种衰减模式）");
-    println!("# n_initial={} steps={} seeds={:?} join_rate=0.05 leave_rate=0.001 return_rate={}",
-        N_INIT, STEPS, SEEDS, RETURN_RATE);
-    println!("# sleep_hours={:?} enable_rhythm=false attack_kind=None（无攻击者）", SLEEP);
-    println!("# 引擎 beta=0.3 half_life={} buckets=2048 hashers=5 agg=Mean samples={} 轮长={}h 轮数={}",
-        HALF_LIFE, SAMPLES, ROUND_LEN, STEPS / ROUND_LEN);
+    println!(
+        "# n_initial={} steps={} seeds={:?} join_rate=0.05 leave_rate=0.001 return_rate={}",
+        N_INIT, STEPS, SEEDS, RETURN_RATE
+    );
+    println!(
+        "# sleep_hours={:?} enable_rhythm=false attack_kind=None（无攻击者）",
+        SLEEP
+    );
+    println!(
+        "# 引擎 beta=0.3 half_life={} buckets=2048 hashers=5 agg=Mean samples={} 轮长={}h 轮数={}",
+        HALF_LIFE,
+        SAMPLES,
+        ROUND_LEN,
+        STEPS / ROUND_LEN
+    );
     println!("# 口径：诚实 = 非 Sleeper 且非 Promoted；本实验 sleeper=0 promoted=0（仍分开统计）");
-    println!("# p = 存活账户里不在线的比例（t={}）；p_all = 全部账户里不在线的比例（含已离开）", STEPS);
+    println!(
+        "# p = 存活账户里不在线的比例（t={}）；p_all = 全部账户里不在线的比例（含已离开）",
+        STEPS
+    );
 
     decay_table();
     if probe {
@@ -779,7 +936,11 @@ fn main() {
     }
 
     let ps: Vec<f64> = if smoke { vec![0.50] } else { PS.to_vec() };
-    let seeds: Vec<u64> = if smoke { vec![SEEDS[0]] } else { SEEDS.to_vec() };
+    let seeds: Vec<u64> = if smoke {
+        vec![SEEDS[0]]
+    } else {
+        SEEDS.to_vec()
+    };
 
     // ── 标定 ──
     println!("\n== CAL 标定（每个 p 一个 dormancy_rate，3 seed 共用；世界与引擎正交）==");
@@ -790,15 +951,26 @@ fn main() {
         for (j, st) in sts.iter().enumerate() {
             println!(
                 "CAL,{:.2},{:.8},{},{},{},{},{},{},{},{}",
-                p, rate, SEEDS[j], f6(st.p_alive_off), f6(st.p_all_off), st.accounts, st.alive,
-                st.online, st.left, st.dormant
+                p,
+                rate,
+                SEEDS[j],
+                f6(st.p_alive_off),
+                f6(st.p_all_off),
+                st.accounts,
+                st.alive,
+                st.online,
+                st.left,
+                st.dormant
             );
         }
         let pm = mean(&sts.iter().map(|s| s.p_alive_off).collect::<Vec<_>>());
         let pa = mean(&sts.iter().map(|s| s.p_all_off).collect::<Vec<_>>());
         println!(
             "CALSUM,{:.2},{:.8},{},{},{:.1},{:.1},{:.1},{:.1},{:.1}",
-            p, rate, f6(pm), f6(pa),
+            p,
+            rate,
+            f6(pm),
+            f6(pa),
             mean(&sts.iter().map(|s| s.accounts as f64).collect::<Vec<_>>()),
             mean(&sts.iter().map(|s| s.alive as f64).collect::<Vec<_>>()),
             mean(&sts.iter().map(|s| s.online as f64).collect::<Vec<_>>()),
@@ -806,7 +978,13 @@ fn main() {
             mean(&sts.iter().map(|s| s.dormant as f64).collect::<Vec<_>>()),
         );
         rates.push((p, rate, sts));
-        eprintln!("[cal p={:.0}%] rate={:.8} p={:.4} ({:.0}s)", p * 100.0, rate, pm, t0.elapsed().as_secs_f64());
+        eprintln!(
+            "[cal p={:.0}%] rate={:.8} p={:.4} ({:.0}s)",
+            p * 100.0,
+            rate,
+            pm,
+            t0.elapsed().as_secs_f64()
+        );
     }
 
     // ── 主网格 ──
@@ -819,12 +997,25 @@ fn main() {
             for &seed in &seeds {
                 let r = run_cell(m, p, seed, rate);
                 let mut v = r.vals();
-                let mut head = vec![r.mode.to_string(), format!("{:.2}", r.p_target), r.seed.to_string(), f6(r.dorm)];
+                let mut head = vec![
+                    r.mode.to_string(),
+                    format!("{:.2}", r.p_target),
+                    r.seed.to_string(),
+                    f6(r.dorm),
+                ];
                 head.extend(v.drain(..));
                 println!("MAIN,{}", head.join(","));
-                eprintln!("[{} p={:.0}% seed={}] obs={} left_s={:.3} dorm_s={:.3} rho={:.3} ({:.0}s)",
-                    m.name, p * 100.0, seed, r.n_obs, r.left_share, r.dorm_share, r.rho_all,
-                    t0.elapsed().as_secs_f64());
+                eprintln!(
+                    "[{} p={:.0}% seed={}] obs={} left_s={:.3} dorm_s={:.3} rho={:.3} ({:.0}s)",
+                    m.name,
+                    p * 100.0,
+                    seed,
+                    r.n_obs,
+                    r.left_share,
+                    r.dorm_share,
+                    r.rho_all,
+                    t0.elapsed().as_secs_f64()
+                );
                 rows.push(r);
             }
         }
@@ -836,17 +1027,35 @@ fn main() {
     for r in rows.iter() {
         println!(
             "POOL,{},{:.2},{},{},{},{},{},{},{},{}",
-            r.mode, r.p_target, r.seed, r.topk, r.n_hon_all, r.n_hon_on, r.n_obs, r.zero_base,
-            f6(r.dist_nnz), f6(r.n_views)
+            r.mode,
+            r.p_target,
+            r.seed,
+            r.topk,
+            r.n_hon_all,
+            r.n_hon_on,
+            r.n_obs,
+            r.zero_base,
+            f6(r.dist_nnz),
+            f6(r.n_views)
         );
     }
 
     // ── AGG：mode × p，3 seed 均值±样本标准差 ──
     println!("\n== AGG mode × p（3 seed 均值±样本标准差）==");
-    println!("AGG,mode,p_target,p_meas,{}", COLS[1..].iter().map(|c| format!("{}{}", c, "")).collect::<Vec<_>>().join(","));
+    println!(
+        "AGG,mode,p_target,p_meas,{}",
+        COLS[1..]
+            .iter()
+            .map(|c| format!("{}{}", c, ""))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     for &m in &MODES {
         for &p in &ps {
-            let sub: Vec<&Row> = rows.iter().filter(|r| r.mode == m.name && r.p_target == p).collect();
+            let sub: Vec<&Row> = rows
+                .iter()
+                .filter(|r| r.mode == m.name && r.p_target == p)
+                .collect();
             let pick = |f: &dyn Fn(&Row) -> f64| -> Vec<f64> { sub.iter().map(|r| f(r)).collect() };
             let g = |f: &dyn Fn(&Row) -> f64| -> String {
                 let (a, b) = mean_sd(&pick(f));
@@ -892,22 +1101,61 @@ fn main() {
     println!("\n== XSEC 每个 p 上三种模式的对照（3 seed 均值）==");
     println!("XSEC,p,metric,std,floor,off");
     for &p in &ps {
-        for (mi, label) in ["left_share", "left_pers", "left_grp", "dorm_share", "dorm_pers", "dorm_grp",
-                            "online_share", "gini", "rho_all", "rho_on", "reach_all", "reach_on",
-                            "age_all", "age_left", "age_dorm", "n_cached", "eff_src", "w_old", "hit_rate"].iter().enumerate() {
+        for (mi, label) in [
+            "left_share",
+            "left_pers",
+            "left_grp",
+            "dorm_share",
+            "dorm_pers",
+            "dorm_grp",
+            "online_share",
+            "gini",
+            "rho_all",
+            "rho_on",
+            "reach_all",
+            "reach_on",
+            "age_all",
+            "age_left",
+            "age_dorm",
+            "n_cached",
+            "eff_src",
+            "w_old",
+            "hit_rate",
+        ]
+        .iter()
+        .enumerate()
+        {
             let get = |r: &Row| -> f64 {
                 match mi {
-                    0 => r.left_share, 1 => r.left_pers, 2 => r.left_grp,
-                    3 => r.dorm_share, 4 => r.dorm_pers, 5 => r.dorm_grp,
-                    6 => r.online_share, 7 => r.gini, 8 => r.rho_all, 9 => r.rho_on,
-                    10 => r.reach_all, 11 => r.reach_on, 12 => r.age_all, 13 => r.age_left,
-                    14 => r.age_dorm, 15 => r.n_cached, 16 => r.eff_src, 17 => r.w_old, _ => r.hit_rate,
+                    0 => r.left_share,
+                    1 => r.left_pers,
+                    2 => r.left_grp,
+                    3 => r.dorm_share,
+                    4 => r.dorm_pers,
+                    5 => r.dorm_grp,
+                    6 => r.online_share,
+                    7 => r.gini,
+                    8 => r.rho_all,
+                    9 => r.rho_on,
+                    10 => r.reach_all,
+                    11 => r.reach_on,
+                    12 => r.age_all,
+                    13 => r.age_left,
+                    14 => r.age_dorm,
+                    15 => r.n_cached,
+                    16 => r.eff_src,
+                    17 => r.w_old,
+                    _ => r.hit_rate,
                 }
             };
             let xs: Vec<String> = MODES
                 .iter()
                 .map(|&m| {
-                    let sub: Vec<f64> = rows.iter().filter(|r| r.mode == m.name && r.p_target == p).map(get).collect();
+                    let sub: Vec<f64> = rows
+                        .iter()
+                        .filter(|r| r.mode == m.name && r.p_target == p)
+                        .map(get)
+                        .collect();
                     f6(mean(&sub))
                 })
                 .collect();
@@ -916,11 +1164,16 @@ fn main() {
     }
 
     // ── 配对校验：个人项在三种模式间必须逐位一致（衰减只作用于群体项）──
-    println!("\n== CHECK 个人项分解的模式不变性（同一 p,seed 的 left_pers / dorm_pers 最大值差）==");
+    println!(
+        "\n== CHECK 个人项分解的模式不变性（同一 p,seed 的 left_pers / dorm_pers 最大值差）=="
+    );
     println!("CHECK,p_target,seed,left_pers_maxdiff,dorm_pers_maxdiff,personal_sum_maxdiff");
     for &p in &ps {
         for &seed in &seeds {
-            let sub: Vec<&Row> = rows.iter().filter(|r| r.p_target == p && r.seed == seed).collect();
+            let sub: Vec<&Row> = rows
+                .iter()
+                .filter(|r| r.p_target == p && r.seed == seed)
+                .collect();
             if sub.len() < 3 {
                 continue;
             }
@@ -931,7 +1184,11 @@ fn main() {
             };
             println!(
                 "CHECK,{:.2},{},{},{},{}",
-                p, seed, f6(d(&|r| r.left_pers)), f6(d(&|r| r.dorm_pers)), f6(d(&|r| r.personal_sum))
+                p,
+                seed,
+                f6(d(&|r| r.left_pers)),
+                f6(d(&|r| r.dorm_pers)),
+                f6(d(&|r| r.personal_sum))
             );
         }
     }

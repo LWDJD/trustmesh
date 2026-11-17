@@ -13,7 +13,7 @@
 
 use tm_agg::decay;
 use tm_engine::{Engine, EngineConfig};
-use tm_store::{AccountKey, AccountIdx};
+use tm_store::{AccountIdx, AccountKey};
 use tm_view::{CompressedView, ViewParams};
 
 /// 构造一个容易区分、且不会互相撞车的公钥。
@@ -49,7 +49,10 @@ fn view_of(target: AccountKey, score: f32) -> CompressedView {
 /// 两条记录且两个 key 都已 intern 时 total_mass = t_score + o_score，
 /// 只要取和为 1.0，归一化后就得到精确的 t_score。
 fn view_two(target: AccountKey, t_score: f32, other: AccountKey, o_score: f32) -> CompressedView {
-    CompressedView::from_pairs(ViewParams::default(), &[(target, t_score), (other, o_score)])
+    CompressedView::from_pairs(
+        ViewParams::default(),
+        &[(target, t_score), (other, o_score)],
+    )
 }
 
 // ===========================================================================
@@ -146,7 +149,10 @@ fn stale_source_loses_relative_weight_to_fresh_source() {
 
     // 两人同样新鲜：group = (1×1.0 + 1×0.0) / 2 = 0.5，query = 0.7 × 0.5
     let at0 = e.query(target, 0);
-    assert!((at0 - 0.35).abs() < 1e-5, "两个同样新鲜的来源应各占一半：{at0}");
+    assert!(
+        (at0 - 0.35).abs() < 1e-5,
+        "两个同样新鲜的来源应各占一半：{at0}"
+    );
 
     let mut prev = at0;
     for &t in &[72u64, 144, 216, 360, 720, 1_440] {
@@ -165,7 +171,10 @@ fn stale_source_loses_relative_weight_to_fresh_source() {
             (f64::from(q) - expected).abs() < 1e-5,
             "t={t}: 期望 {expected}，实际 {q}"
         );
-        assert!(q < prev, "t={t}: 陈旧的来源必须持续让位（{q} 应小于 {prev}）");
+        assert!(
+            q < prev,
+            "t={t}: 陈旧的来源必须持续让位（{q} 应小于 {prev}）"
+        );
         prev = q;
     }
 
@@ -193,7 +202,10 @@ fn single_source_uniform_decay_leaves_query_unchanged() {
     e.on_view(friend, view_two(key(9), 0.6, key(50), 0.4), 0, 0);
 
     let q0 = e.query(target, 0);
-    assert!((q0 - 0.42).abs() < 1e-4, "0.3×0 + 0.7×0.6 = 0.42，实际 {q0}");
+    assert!(
+        (q0 - 0.42).abs() < 1e-4,
+        "0.3×0 + 0.7×0.6 = 0.42，实际 {q0}"
+    );
 
     for &t in &[0u64, 1, 36, 72, 720, 72_000, 1_000_000, u64::MAX] {
         let q = e.query(target, t);
@@ -249,11 +261,17 @@ fn extreme_age_decays_toward_zero_without_going_negative_or_nan() {
         assert!(q <= 0.7 + 1e-6, "k={k}: 不应超过新鲜来源的取值 {q}");
         prev2 = q;
     }
-    assert!((prev2 - 0.7).abs() < 1e-5, "新鲜来源应完全主导，实际 {prev2}");
+    assert!(
+        (prev2 - 0.7).abs() < 1e-5,
+        "新鲜来源应完全主导，实际 {prev2}"
+    );
 
     // 时间戳顶到 u64 上界也不能炸
     let huge = e.query(target, u64::MAX);
-    assert!(huge.is_finite() && (0.0..=1.0).contains(&huge), "极端时间戳：{huge}");
+    assert!(
+        huge.is_finite() && (0.0..=1.0).contains(&huge),
+        "极端时间戳：{huge}"
+    );
 }
 
 // ===========================================================================
@@ -316,7 +334,10 @@ fn prune_stale_removes_source_from_query() {
 
     // 48 小时后仍未超过 72 小时半衰期
     assert_eq!(e.prune_stale(48, 72), 0);
-    assert!((e.query(target, 48) - 0.42).abs() < 1e-4, "单来源时衰减不改变结果");
+    assert!(
+        (e.query(target, 48) - 0.42).abs() < 1e-4,
+        "单来源时衰减不改变结果"
+    );
 
     // 100 小时后按「超过 24 小时就算旧」清理
     assert_eq!(e.prune_stale(100, 24), 1);
@@ -529,8 +550,14 @@ fn time_rollback_is_clamped_to_zero_age() {
     same.on_view(stale2, view_of(key(9), 1.0), 0, 500);
     same.on_view(fresh2, view_of(key(9), 0.0), 0, 500);
     let q = e.query(target, 500);
-    assert!((q - same.query(target2, 500)).abs() < 1e-6, "回拨应按 dt=0 处理");
-    assert!((q - 0.35).abs() < 1e-5, "两条同样新鲜时 group = 0.5，实际 {q}");
+    assert!(
+        (q - same.query(target2, 500)).abs() < 1e-6,
+        "回拨应按 dt=0 处理"
+    );
+    assert!(
+        (q - 0.35).abs() < 1e-5,
+        "两条同样新鲜时 group = 0.5，实际 {q}"
+    );
 
     // 回拨时清理更保守：max_age = 0 也不会误删
     assert_eq!(e.prune_stale(500, 0), 0);

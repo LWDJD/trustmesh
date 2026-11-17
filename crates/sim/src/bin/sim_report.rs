@@ -28,8 +28,15 @@ fn run_base() {
     println!("{}", describe(&world));
     world.run();
     println!("{}", world.report().render());
-    println!("累计：加入 {} 人，流失 {} 人，休眠 {} 次", world.joins, world.leaves, world.dormancy_events);
-    println!("评分总量 {} 条，平均每人给出 {:.2} 条", world.rating_count(), world.rating_count() as f32 / world.accounts.len() as f32);
+    println!(
+        "累计：加入 {} 人，流失 {} 人，休眠 {} 次",
+        world.joins, world.leaves, world.dormancy_events
+    );
+    println!(
+        "评分总量 {} 条，平均每人给出 {:.2} 条",
+        world.rating_count(),
+        world.rating_count() as f32 / world.accounts.len() as f32
+    );
     println!();
 }
 
@@ -81,7 +88,9 @@ fn run_attack() {
 
 fn run_homophily() {
     println!("═══ 同质性扫描：社团内关注边占比 ═══");
-    println!("列说明：h = 同质性；intra/inter = 社团内/间关注边；share = 社团内占比；avg = 人均关注");
+    println!(
+        "列说明：h = 同质性；intra/inter = 社团内/间关注边；share = 社团内占比；avg = 人均关注"
+    );
     println!();
     println!(
         "{:<6} {:>8} {:>8} {:>8} {:>8}",
@@ -122,7 +131,12 @@ fn run_long() {
     let s = world.report();
     println!("耗时 {:.2}s", elapsed.as_secs_f64());
     println!("{}", s.render());
-    println!("最终账户 {}，评分 {}，内存约 {:.1} KB", s.accounts, s.rating_edges, world.rating_count() as f32 * 12.0 / 1024.0);
+    println!(
+        "最终账户 {}，评分 {}，内存约 {:.1} KB",
+        s.accounts,
+        s.rating_edges,
+        world.rating_count() as f32 * 12.0 / 1024.0
+    );
     println!();
 }
 

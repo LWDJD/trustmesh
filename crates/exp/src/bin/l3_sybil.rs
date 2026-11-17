@@ -51,7 +51,9 @@ fn cfg_of(seed: u64, sleepers: usize, dormancy: f64) -> SimConfig {
         attack_kind: if sleepers == 0 {
             AttackKind::None
         } else {
-            AttackKind::Sleeper { normal_until: NORMAL_UNTIL }
+            AttackKind::Sleeper {
+                normal_until: NORMAL_UNTIL,
+            }
         },
         attack_ratio: sleepers as f64 / N_INIT as f64,
         ..Default::default()
@@ -63,7 +65,11 @@ fn offline_frac(dormancy: f64, seed: u64, sleepers: usize) -> f64 {
     let mut w = tm_sim::World::new(cfg_of(seed, sleepers, dormancy));
     w.run();
     let accs = w.accounts();
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     if alive.is_empty() {
         return 0.0;
     }
@@ -152,7 +158,11 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
         .find(|a| a.kind == Kind::Promoted)
         .map(|a| a.idx);
 
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let honest_alive: Vec<usize> = accs
         .iter()
         .filter(|a| a.kind == Kind::Honest && a.is_alive())
@@ -163,20 +173,30 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
             .iter()
             .filter(|&&i| !world.was_online_at(i, STEPS as u64))
             .count();
-        if alive.is_empty() { 0.0 } else { off as f64 / alive.len() as f64 }
+        if alive.is_empty() {
+            0.0
+        } else {
+            off as f64 / alive.len() as f64
+        }
     };
 
     // 诊断：平均被多少人打过分
     let honest_raters = if honest_alive.is_empty() {
         0.0
     } else {
-        honest_alive.iter().map(|&i| accs[i].received_count as f64).sum::<f64>()
+        honest_alive
+            .iter()
+            .map(|&i| accs[i].received_count as f64)
+            .sum::<f64>()
             / honest_alive.len() as f64
     };
     let sleeper_raters = if sleepers.is_empty() {
         0.0
     } else {
-        sleepers.iter().map(|&i| accs[i].received_count as f64).sum::<f64>()
+        sleepers
+            .iter()
+            .map(|&i| accs[i].received_count as f64)
+            .sum::<f64>()
             / sleepers.len() as f64
     };
 
@@ -192,7 +212,11 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
         for &sl in &sleepers {
             acc += sums[sl];
         }
-        if sleepers.is_empty() { 0.0 } else { acc / sleepers.len() as f64 }
+        if sleepers.is_empty() {
+            0.0
+        } else {
+            acc / sleepers.len() as f64
+        }
     };
     // 注入：第 k 个潜伏者 -> 它的 N 个女巫，各 1.0
     for (k, &sl) in sleepers.iter().enumerate() {
@@ -212,7 +236,11 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
     let ecfg = EngineConfig {
         beta: 0.3,
         half_life: 72,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
@@ -254,7 +282,10 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
             let reqs = { nodes[a].as_mut().unwrap().tick(now, k) };
             for req in reqs {
                 if let Some(Some(v)) = views.get(req.idx as usize) {
-                    nodes[a].as_mut().unwrap().on_view(req.idx, v.clone(), now, now);
+                    nodes[a]
+                        .as_mut()
+                        .unwrap()
+                        .on_view(req.idx, v.clone(), now, now);
                 }
             }
             prev_on[a] = true;
@@ -347,12 +378,18 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
     let sleeper_mean = if lc > 0 { ls / lc as f64 } else { 0.0 };
     let target_promoted = if tc > 0 { ts / tc as f64 } else { 0.0 };
     let effective = if obs_n > 0 {
-        per_syb.iter().filter(|&&v| v / obs_n as f64 > honest_base).count()
+        per_syb
+            .iter()
+            .filter(|&&v| v / obs_n as f64 > honest_base)
+            .count()
     } else {
         0
     };
     let effective_p50 = if obs_n > 0 {
-        per_syb.iter().filter(|&&v| v / obs_n as f64 > honest_p50).count()
+        per_syb
+            .iter()
+            .filter(|&&v| v / obs_n as f64 > honest_p50)
+            .count()
     } else {
         0
     };
@@ -375,24 +412,51 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
         alive: alive.len(),
         offline,
         obs_n,
-        sleeper_online: sleepers.iter().filter(|&&i| online[i][ROUNDS as usize]).count(),
+        sleeper_online: sleepers
+            .iter()
+            .filter(|&&i| online[i][ROUNDS as usize])
+            .count(),
         honest_base,
         honest_p50,
         sybil_mean,
-        ratio: if honest_base > 0.0 { sybil_mean / honest_base } else { 0.0 },
+        ratio: if honest_base > 0.0 {
+            sybil_mean / honest_base
+        } else {
+            0.0
+        },
         effective,
         effective_p50,
-        ratio_exposed: if honest_base > 0.0 { sybil_exposed / honest_base } else { 0.0 },
-        ratio_own: if honest_base > 0.0 { sybil_own / honest_base } else { 0.0 },
-        syb_hit: if obs_n > 0 { syb_hit as f64 / obs_n as f64 } else { 0.0 },
+        ratio_exposed: if honest_base > 0.0 {
+            sybil_exposed / honest_base
+        } else {
+            0.0
+        },
+        ratio_own: if honest_base > 0.0 {
+            sybil_own / honest_base
+        } else {
+            0.0
+        },
+        syb_hit: if obs_n > 0 {
+            syb_hit as f64 / obs_n as f64
+        } else {
+            0.0
+        },
         sleeper_mean,
-        sleeper_ratio: if honest_base > 0.0 { sleeper_mean / honest_base } else { 0.0 },
+        sleeper_ratio: if honest_base > 0.0 {
+            sleeper_mean / honest_base
+        } else {
+            0.0
+        },
         target_promoted,
         syb_share: if shc > 0 { sh / shc as f64 } else { 0.0 },
         s0,
         sleeper_raters,
         honest_raters,
-        exposure: if obs_n > 0 { expo as f64 / obs_n as f64 } else { 0.0 },
+        exposure: if obs_n > 0 {
+            expo as f64 / obs_n as f64
+        } else {
+            0.0
+        },
     }
 }
 
@@ -403,7 +467,19 @@ fn main() {
         println!("# 标定 dormancy_rate = {dorm:.6}");
         println!(
             "{:>3} {:>5} {:>6} {:>5} {:>9} {:>7} {:>7} {:>7} {:>9} {:>9} {:>9} {:>11} {:>9}",
-            "s", "seed", "n_tot", "存活", "收益方idx", "活着", "在线", "休眠", "被打分", "收到均分", "质量", "潜伏在线/活", "认识潜者"
+            "s",
+            "seed",
+            "n_tot",
+            "存活",
+            "收益方idx",
+            "活着",
+            "在线",
+            "休眠",
+            "被打分",
+            "收到均分",
+            "质量",
+            "潜伏在线/活",
+            "认识潜者"
         );
         for &s in &SLEEPER_SET {
             for &seed in &SEEDS {
@@ -415,11 +491,18 @@ fn main() {
                     .filter(|a| matches!(a.kind, Kind::Sleeper { .. }))
                     .map(|a| a.idx)
                     .collect();
-                let promoted = accs.iter().find(|a| a.kind == Kind::Promoted).map(|a| a.idx);
+                let promoted = accs
+                    .iter()
+                    .find(|a| a.kind == Kind::Promoted)
+                    .map(|a| a.idx);
                 let alive = accs.iter().filter(|a| a.is_alive()).count();
                 let honest_online: Vec<usize> = accs
                     .iter()
-                    .filter(|a| a.kind == Kind::Honest && a.is_alive() && w.was_online_at(a.idx, STEPS as u64))
+                    .filter(|a| {
+                        a.kind == Kind::Honest
+                            && a.is_alive()
+                            && w.was_online_at(a.idx, STEPS as u64)
+                    })
                     .map(|a| a.idx)
                     .collect();
                 let knowers = honest_online
@@ -432,17 +515,32 @@ fn main() {
                         (
                             pi.to_string(),
                             if a.is_alive() { "是" } else { "否" },
-                            if w.was_online_at(pi, STEPS as u64) { "是" } else { "否" },
+                            if w.was_online_at(pi, STEPS as u64) {
+                                "是"
+                            } else {
+                                "否"
+                            },
                             if a.is_dormant() { "是" } else { "否" },
                             a.received_count.to_string(),
                             format!("{:.3}", a.mean_received()),
                             format!("{:.3}", a.quality),
                         )
                     }
-                    None => ("-".into(), "-".into(), "-".into(), "-".into(), "-".into(), "-".into(), "-".into()),
+                    None => (
+                        "-".into(),
+                        "-".into(),
+                        "-".into(),
+                        "-".into(),
+                        "-".into(),
+                        "-".into(),
+                        "-".into(),
+                    ),
                 };
                 let sl_alive = sleepers.iter().filter(|&&i| accs[i].is_alive()).count();
-                let sl_online = sleepers.iter().filter(|&&i| w.was_online_at(i, STEPS as u64)).count();
+                let sl_online = sleepers
+                    .iter()
+                    .filter(|&&i| w.was_online_at(i, STEPS as u64))
+                    .count();
                 println!(
                     "{:>3} {:>5} {:>6} {:>5} {:>9} {:>7} {:>7} {:>7} {:>9} {:>9} {:>9} {:>11} {:>9}",
                     s, seed, accs.len(), alive, p_idx, p_alive, p_online, p_dorm, p_cnt, p_mean, p_q,
@@ -455,12 +553,17 @@ fn main() {
     }
     let t_all = std::time::Instant::now();
     println!("L3 · 潜伏者批量引入女巫 · 真多 runtime（每账户一个 Engine + 时间衰减）");
-    println!("n_initial={N_INIT} steps={STEPS} seed∈{SEEDS:?} join=0 leave=0 return_rate={RETURN_RATE}");
+    println!(
+        "n_initial={N_INIT} steps={STEPS} seed∈{SEEDS:?} join=0 leave=0 return_rate={RETURN_RATE}"
+    );
     println!("sleep_hours={SLEEP_HOURS:?} normal_until={NORMAL_UNTIL}h 轮数={ROUNDS}（每轮 {TICK}h）抽样={SAMPLES}");
     println!("β=0.3 half_life=72h buckets=2048 hashers=5 agg=Mean\n");
 
     let dorm = calibrate(OFFLINE_TARGET);
-    println!("标定 dormancy_rate = {dorm:.6}（目标离线 {:.0}%）\n", OFFLINE_TARGET * 100.0);
+    println!(
+        "标定 dormancy_rate = {dorm:.6}（目标离线 {:.0}%）\n",
+        OFFLINE_TARGET * 100.0
+    );
 
     // 每个 (s, seed) 只跑一次世界；N 只影响注入，不影响世界
     let mut raw: Vec<(usize, usize, u64, Row)> = Vec::new();
@@ -489,12 +592,26 @@ fn main() {
 
     // 诊断：潜伏者 vs 诚实账户的平均被打分次数
     println!("\n=== 诊断（每个 s×seed 一行，世界跑完后统计）===");
-    println!("{:>3} {:>5} {:>6} {:>8} {:>10} {:>10} {:>10}", "s", "seed", "存活", "离线%", "诚实被打分数", "潜伏被打分数", "S0(潜伏评分和)");
+    println!(
+        "{:>3} {:>5} {:>6} {:>8} {:>10} {:>10} {:>10}",
+        "s", "seed", "存活", "离线%", "诚实被打分数", "潜伏被打分数", "S0(潜伏评分和)"
+    );
     for &s in &SLEEPER_SET {
         for &seed in &SEEDS {
-            if let Some((_, _, _, r)) = raw.iter().find(|(a, b, c, _)| *a == s && *b == 0 && *c == seed) {
-                println!("{:>3} {:>5} {:>6} {:>8.1} {:>13.2} {:>13.2} {:>13.2}",
-                    s, seed, r.alive, r.offline * 100.0, r.honest_raters, r.sleeper_raters, r.s0);
+            if let Some((_, _, _, r)) = raw
+                .iter()
+                .find(|(a, b, c, _)| *a == s && *b == 0 && *c == seed)
+            {
+                println!(
+                    "{:>3} {:>5} {:>6} {:>8.1} {:>13.2} {:>13.2} {:>13.2}",
+                    s,
+                    seed,
+                    r.alive,
+                    r.offline * 100.0,
+                    r.honest_raters,
+                    r.sleeper_raters,
+                    r.s0
+                );
             }
         }
     }
@@ -513,7 +630,15 @@ fn main() {
     println!("\n=== 跨 seed 汇总（均值 ± 样本标准差，n=3）===");
     println!(
         "{:>3} {:>4} {:>19} {:>19} {:>15} {:>11} {:>15} {:>15} {:>19}",
-        "s", "N", "诚实均值", "女巫均值", "女巫/诚实", "有效女巫", "认识潜者%", "潜/诚实", "份额(实测)"
+        "s",
+        "N",
+        "诚实均值",
+        "女巫均值",
+        "女巫/诚实",
+        "有效女巫",
+        "认识潜者%",
+        "潜/诚实",
+        "份额(实测)"
     );
     println!("#TSV\ts\tN\thonest_base\thonest_p50\tsybil_mean\tratio\tratio_own\teffective\teffective_p50\tratio_exposed\tsybil_share\tsleeper_ratio\ttarget_promoted\texposure\tsyb_hit\tn_total\tobs");
     for &s in &SLEEPER_SET {

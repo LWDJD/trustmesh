@@ -195,6 +195,72 @@ impl AccountTable {
     pub fn is_empty(&self) -> bool {
         self.idx_to_key.is_empty()
     }
+
+    // ---------------- 持久化入口（P4：状态快照） ----------------
+
+    /// 按编号升序导出全部公钥（下标即编号）。空表返回空 `Vec`。
+    ///
+    /// 编号分配的唯一依据是「第 i 个 intern 拿到编号 i」，所以「编号 0..len
+    /// 对应的 key 列表」就是这张表的**完整状态**——正向索引是它的函数，不必单独存。
+    ///
+    /// 返回的是克隆而不是借用：快照必须能脱离账户表独立存在
+    /// （存盘时表还要继续接收新的 intern）。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::AccountTable;
+    ///
+    /// let mut t = AccountTable::new();
+    /// t.intern([1u8; 32]);
+    /// t.intern([2u8; 32]);
+    /// assert_eq!(t.keys(), vec![[1u8; 32], [2u8; 32]]);
+    /// ~~~
+    pub fn keys(&self) -> Vec<AccountKey> {
+        self.idx_to_key.clone()
+    }
+
+    /// 由「编号 0..n 的公钥序列」重建账户表（持久化恢复用）。
+    ///
+    /// 输入必须是**升序、无重复**的公钥序列：第 i 个元素就拿到编号 i。
+    /// 出现重复或超过 `AccountIdx::MAX` 个条目时返回 `None`
+    /// （这类输入不是一份合法快照，重建出来的编号布局必然与原件不同，
+    /// 与其给出一个「看起来能用、实际已经错位」的表，不如明确拒绝）。
+    ///
+    /// 重建后 [AccountTable::lookup] / [AccountTable::key_of] / [AccountTable::len]
+    /// 与原件**逐项相同**，且之后继续 [AccountTable::intern] 新 key 会接着
+    /// 分配下一个连续编号，和一台从未重启过的引擎完全一致。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::AccountTable;
+    ///
+    /// let mut t = AccountTable::new();
+    /// t.intern([1u8; 32]);
+    /// t.intern([2u8; 32]);
+    /// let rebuilt = AccountTable::from_keys(&t.keys()).expect("合法快照");
+    /// assert_eq!(rebuilt.len(), 2);
+    /// assert_eq!(rebuilt.key_of(1), Some([2u8; 32]));
+    /// assert_eq!(rebuilt.lookup(&[1u8; 32]), Some(0));
+    /// ~~~
+    #[must_use]
+    pub fn from_keys(keys: &[AccountKey]) -> Option<Self> {
+        if keys.len() > AccountIdx::MAX as usize {
+            return None;
+        }
+        let mut key_to_idx = HashMap::with_capacity(keys.len());
+        for (i, key) in keys.iter().enumerate() {
+            if key_to_idx.insert(*key, i as AccountIdx).is_some() {
+                // 重复公钥：编号布局会与原件不同，拒绝而不是静默去重。
+                return None;
+            }
+        }
+        Some(Self {
+            key_to_idx,
+            idx_to_key: keys.to_vec(),
+        })
+    }
 }
 
 // ===========================================================================
@@ -283,7 +349,11 @@ impl PositiveList {
             return;
         }
         // 允许任意正数（应用层给的 0~n 原始数值），只挡住无穷大/超大值。
-        let score = if score.is_finite() { score.min(MAX_SCORE) } else { MAX_SCORE };
+        let score = if score.is_finite() {
+            score.min(MAX_SCORE)
+        } else {
+            MAX_SCORE
+        };
         match self.entries.get_mut(&idx) {
             // 已有条目：只更新分数与时间，连败计数原样保留。
             Some(entry) => {
@@ -501,6 +571,84 @@ impl PositiveList {
     /// 等价于 list.iter().map(|(idx, _, _)| idx).collect()。
     pub fn indices(&self) -> Vec<AccountIdx> {
         self.entries.keys().copied().collect()
+    }
+
+    // ---------------- 持久化入口（P4：状态快照） ----------------
+
+    /// 一次性导出全部条目：`(编号, 原始评分, 上次检查时间, 连败计数)`，按编号升序。
+    ///
+    /// 与 [PositiveList::iter] 的区别是**多带了连败计数**：快照/持久化要求
+    /// 四件套一次拿全。否则调用方只能先 `iter()` 拿三件套、再逐条
+    /// [PositiveList::fail_streak] 补一次，既扫两遍，也容易在两次遍历之间
+    /// 读到不一致的状态（快照语义上必须是同一个瞬间）。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::PositiveList;
+    ///
+    /// let mut list = PositiveList::new();
+    /// list.set(3, 0.5, 10);
+    /// list.record_failure(3);
+    /// assert_eq!(list.items(), vec![(3, 0.5, 10, 1)]);
+    /// ~~~
+    pub fn items(&self) -> Vec<(AccountIdx, Score, Time, u32)> {
+        self.entries
+            .iter()
+            .map(|(&idx, e)| (idx, e.score, e.last_check, e.fail_streak))
+            .collect()
+    }
+
+    /// 由 [PositiveList::items] 的条目重建清单（持久化恢复用）。
+    ///
+    /// 这是 [PositiveList::items] 的**逆操作**。它与「逐条 [PositiveList::set]」
+    /// 有两处关键不同，正是这两处让「恢复后逐位一致」成立：
+    ///
+    /// * `last_check` **原样保留**，不刷新成「现在」（`set` 会刷新）；
+    /// * `fail_streak` **原样保留**，不归零（`set` 只对已有条目保留连败，
+    ///   而重建时所有条目对新表来说都是「新条目」，会一律从 0 开始）。
+    ///
+    /// 输入仍按 [PositiveList::set] 的存储规则校验：`score <= 0`、NaN 的条目
+    /// **丢弃**（它们本来就不该在清单里），超过 [MAX_SCORE] 的截断到上界；
+    /// 同一编号出现多次时**后者覆盖前者**。因此恢复方若要求「一字不差」，
+    /// 应当把 [PositiveList::len] 与输入长度比对（畸形条目会被静默丢弃）。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::PositiveList;
+    ///
+    /// let mut list = PositiveList::new();
+    /// list.set(3, 0.5, 100);
+    /// list.record_failure(3);
+    /// list.record_failure(3);
+    /// let restored = PositiveList::from_items(&list.items());
+    /// assert_eq!(restored.items(), list.items());
+    /// assert_eq!(restored.last_check(3), Some(100), "时间原样保留");
+    /// assert_eq!(restored.fail_streak(3), 2, "连败计数原样保留");
+    /// ~~~
+    pub fn from_items(items: &[(AccountIdx, Score, Time, u32)]) -> Self {
+        let mut entries = BTreeMap::new();
+        for &(idx, score, last_check, fail_streak) in items {
+            // 与 set 同一套校验：NaN / 非正数 = 没表态，不进清单。
+            if score.is_nan() || score <= 0.0 {
+                continue;
+            }
+            let score = if score.is_finite() {
+                score.min(MAX_SCORE)
+            } else {
+                MAX_SCORE
+            };
+            entries.insert(
+                idx,
+                Entry {
+                    score,
+                    last_check,
+                    fail_streak,
+                },
+            );
+        }
+        Self { entries }
     }
 }
 
@@ -755,6 +903,80 @@ impl RoundSampler {
         self.pending.len()
     }
 
+    /// 本轮**尚未抽中**的编号（快照与调试用），顺序即待抽集合的内部顺序。
+    ///
+    /// 为什么需要它：轮次进度是一份**有状态的**随机化数组（每次 swap_remove
+    /// 后相对顺序都会变），只靠 `remaining()` 的计数无法把它重新构造出来。
+    /// 持久化要求「关机前存盘、开机后恢复」，恢复出来的抽样器必须与原抽样器
+    /// 抽到**同一个顺序的同一批人**，否则随机流一恢复就会立刻分叉。
+    ///
+    /// 返回的切片可以直接喂给 [RoundSampler::from_parts] 重建；它与
+    /// [RoundSampler::members] 的差别是：members 是「下一次自动重置用的全量」，
+    /// pending 是「本轮剩下的子集」。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::{RoundSampler, Rng};
+    ///
+    /// let mut s = RoundSampler::new();
+    /// s.reset(&[4, 5, 6]);
+    /// let mut rng = Rng::new(1);
+    /// assert_eq!(s.draw(1, &mut rng).len(), 1);
+    /// assert_eq!(s.pending().len(), 2, "抽走的那个不再在待抽集合里");
+    /// assert_eq!(s.remaining(), s.pending().len());
+    /// ~~~
+    #[must_use]
+    pub fn pending(&self) -> &[AccountIdx] {
+        &self.pending
+    }
+
+    /// 下一次自动重置用的**全量清单**（快照与调试用），恒为升序去重。
+    ///
+    /// 它是 [RoundSampler::sync] 最近一次同步到的成员集合，只在
+    /// [RoundSampler::start_new_round] 时被复制进待抽集合。
+    /// 恢复时必须与 [RoundSampler::pending] 一起保存：只有 pending 而没有
+    /// members 的话，本轮抽空后自动开的新一轮会退化（要么空，要么漏人）。
+    #[must_use]
+    pub fn members(&self) -> &[AccountIdx] {
+        &self.members
+    }
+
+    /// 由 [RoundSampler::members] 与 [RoundSampler::pending] 原样重建抽样器。
+    ///
+    /// 这是快照恢复的入口。语义是「**逐字节恢复**」，不做任何清洗：
+    ///
+    /// * `pending` 的**顺序被原样保留**——它是随机化过的，重排会让下一次
+    ///   [RoundSampler::draw] 抽出不同的人；
+    /// * `pending` 里即使有不在 `members` 里的编号也照样保留，不在重建时剔除。
+    ///   这是刻意的：越权数据应当由上层（`Engine::restore`）判定为畸形并拒绝，
+    ///   存储层不替它做主，也就不会在「畸形输入」和「合法输入」之间给出
+    ///   难以预料的部分修复结果。
+    ///
+    /// 合法性检查（`pending` 是 `members` 的子集、两者都不含重复编号）
+    /// 留给恢复方；本函数只负责把数据装进去。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::{RoundSampler, Rng};
+    ///
+    /// let mut s = RoundSampler::new();
+    /// s.reset(&[1, 2, 3]);
+    /// let mut rng = Rng::new(7);
+    /// let drawn = s.draw(1, &mut rng);
+    /// let cloned = RoundSampler::from_parts(s.members(), s.pending());
+    /// assert_eq!(cloned.remaining(), s.remaining());
+    /// assert_eq!(cloned.pending(), s.pending());
+    /// let _ = drawn;
+    /// ~~~
+    pub fn from_parts(members: &[AccountIdx], pending: &[AccountIdx]) -> Self {
+        Self {
+            members: members.to_vec(),
+            pending: pending.to_vec(),
+        }
+    }
+
     /// 强制开始新一轮：用 current 作为全量清单，清空本轮进度。
     ///
     /// 与 [RoundSampler::sync] 的区别：reset 会把已经抽中的元素**放回**待抽集合，
@@ -965,6 +1187,74 @@ impl Rng {
         x ^= x << 17;
         self.state = x;
         x
+    }
+
+    /// 当前内部状态（持久化用）。
+    ///
+    /// 这是「精确恢复」的关键：xorshift64 的下一个输出只由这 64 位决定，
+    /// 所以把状态存下来、再用 [Rng::from_state] 装回去，之后的随机序列
+    /// 与原发生器**逐位相同**——不是「同一个种子」，而是「同一个位置」。
+    ///
+    /// 返回 0 也是合法的（它只会在状态真的被摆成 0 的畸形输入里出现）；
+    /// 正常使用时状态恒非零（0 是 xorshift 的不动点，[Rng::new] 会把它换掉）。
+    #[must_use]
+    pub fn state(&self) -> u64 {
+        self.state
+    }
+
+    /// 用一份**内部状态**（而不是种子）恢复发生器。
+    ///
+    /// 这是「把发生器停在中途、之后再从同一个位置继续」的入口：
+    /// 快照里存的是 [Rng::state]，恢复时原样装回去即可，
+    /// `Rng::from_state(a.state())` 之后的输出与 `a` **逐位相同**。
+    ///
+    /// 状态 0 与 [Rng::new] 的种子 0 得到同样的处理：换成内置常量
+    /// 【FALLBACK_SEED】。0 是 xorshift 的不动点，一旦装进去，
+    /// [Rng::next_u64] 恒返回 0，[Rng::next_below] 的拒绝采样会**死循环**
+    /// （例如 n = 9 时拒绝区间是 [0, 7)，0 永远落在里面）。
+    ///
+    /// 一次**真实的**引擎运行永远走不到状态 0（xorshift 的非零状态不回到 0，
+    /// 构造入口也都会把 0 换掉），所以这条规范化只影响畸形输入；
+    /// 上层若要求「逐位恢复」，仍应把 `rng_state == 0` 当畸形快照拒绝
+    /// （见 `tm_engine::EngineSnapshot::decode`）。
+    ///
+    /// [Rng::new] 与 `from_state` 在同一条 xorshift 递推上是**同一台机器**：
+    /// `Rng::from_state(Rng::new(s).state())` 与 `Rng::new(s)` 逐位等价。
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::Rng;
+    ///
+    /// let mut a = Rng::new(2024);
+    /// let _ = a.next_u64();
+    /// let mut b = Rng::from_state(a.state());
+    /// for _ in 0..10 {
+    ///     assert_eq!(a.next_u64(), b.next_u64(), "恢复后序列必须完全相同");
+    /// }
+    ///
+    /// // 状态 0 被换成内置常量，与 new(0) 同一台机器，不会死循环。
+    /// assert_eq!(Rng::from_state(0).state(), Rng::new(0).state());
+    /// ~~~
+    ///
+    /// # 例子
+    ///
+    /// ~~~
+    /// use tm_store::Rng;
+    ///
+    /// let mut a = Rng::new(2024);
+    /// let _ = a.next_u64();
+    /// let mut b = Rng::from_state(a.state());
+    /// for _ in 0..10 {
+    ///     assert_eq!(a.next_u64(), b.next_u64(), "恢复后序列必须完全相同");
+    /// }
+    /// ~~~
+    #[must_use]
+    pub fn from_state(state: u64) -> Self {
+        // 0 是 xorshift 的不动点；装进去会让 next_below 的拒绝采样死循环。
+        // 与 Rng::new 对种子 0 的处理完全一致（同一台机器的同一条规则）。
+        let state = if state == 0 { FALLBACK_SEED } else { state };
+        Self { state }
     }
 
     /// 产生 [0, n) 内的均匀随机整数。
@@ -1921,5 +2211,222 @@ mod tests {
         list.set(2, 0.0, 30);
         list.set(2, 0.9, 40);
         assert_eq!(list.fail_streak(2), 0);
+    }
+
+    // ------------------------------------------------------------------
+    // P4：持久化入口（items / from_items / state / from_state /
+    //      pending / members / from_parts / keys / from_keys）
+    // ------------------------------------------------------------------
+
+    /// items() 必须一次给全四件套，且顺序与 iter() 一致。
+    #[test]
+    fn items_carry_score_time_and_fail_streak() {
+        let mut list = PositiveList::new();
+        list.set(7, 0.25, 100);
+        list.set(3, 0.75, 300);
+        list.record_failure(3);
+        list.record_failure(3);
+        let items = list.items();
+        assert_eq!(items, vec![(3, 0.75, 300, 2), (7, 0.25, 100, 0)]);
+        // 与 iter() 同一份数据（三件套部分逐项相同）。
+        let from_iter: Vec<(AccountIdx, Score, Time)> = list.iter().collect();
+        let from_items: Vec<(AccountIdx, Score, Time)> =
+            items.iter().map(|&(i, s, t, _)| (i, s, t)).collect();
+        assert_eq!(from_iter, from_items);
+        assert_eq!(
+            list.indices(),
+            items.iter().map(|i| i.0).collect::<Vec<_>>()
+        );
+    }
+
+    /// from_items 是 items 的精确逆操作：三件套 + 连败计数全部原样回来。
+    #[test]
+    fn items_roundtrip_through_from_items_is_lossless() {
+        let mut list = PositiveList::new();
+        list.set(1, 0.1, 10);
+        list.set(2, 1.0e9, 20);
+        list.set(5, f32::MIN_POSITIVE, 30);
+        list.record_failure(1);
+        list.record_failure(1);
+        list.record_failure(5);
+        let items = list.items();
+        let restored = PositiveList::from_items(&items);
+        assert_eq!(restored.items(), items, "恢复后必须逐项相同");
+        assert_eq!(restored.len(), list.len());
+        assert_eq!(restored.total(), list.total());
+        assert_eq!(restored.shares(), list.shares());
+        assert_eq!(restored.fail_streak(1), 2);
+        assert_eq!(restored.last_check(5), Some(30), "时间不得被刷新成 0");
+        assert_eq!(restored.fail_streak(5), 1);
+    }
+
+    /// 空清单 round-trip 仍是空清单（恢复分支不能凭空造出条目）。
+    #[test]
+    fn empty_list_roundtrips() {
+        let list = PositiveList::new();
+        let restored = PositiveList::from_items(&list.items());
+        assert!(restored.is_empty());
+        assert_eq!(restored.len(), 0);
+        assert_eq!(restored.total(), 0.0);
+    }
+
+    /// from_items 必须与 set 共用同一套存储规则：非正/NaN 丢弃、超上限截断。
+    #[test]
+    fn from_items_applies_same_storage_rules_as_set() {
+        let restored = PositiveList::from_items(&[
+            (1, 0.5, 10, 0),
+            (2, 0.0, 10, 0),           // 0 = 没表态 -> 丢弃
+            (3, -1.0, 10, 7),          // 负数 -> 丢弃
+            (4, f32::NAN, 10, 0),      // NaN -> 丢弃
+            (5, f32::INFINITY, 10, 0), // 无穷 -> 截到 MAX_SCORE
+            (6, 1.0e10, 10, 0),        // 超大 -> 截到 MAX_SCORE
+            (7, 2.5, 10, 0),           // 0~n 的原始数值原样保留
+        ]);
+        assert_eq!(restored.len(), 4, "三条非法条目必须被丢弃");
+        assert!(!restored.has(2) && !restored.has(3) && !restored.has(4));
+        assert_eq!(restored.get(5), Some(MAX_SCORE));
+        assert_eq!(restored.get(6), Some(MAX_SCORE));
+        assert_eq!(restored.get(7), Some(2.5));
+        assert_eq!(restored.get(1), Some(0.5));
+    }
+
+    /// 同一编号重复出现时后者覆盖前者（与 BTreeMap::insert 的语义一致）。
+    #[test]
+    fn from_items_last_wins_for_duplicate_index() {
+        let restored = PositiveList::from_items(&[(9, 0.2, 10, 0), (9, 0.8, 40, 3)]);
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored.get(9), Some(0.8));
+        assert_eq!(restored.last_check(9), Some(40));
+        assert_eq!(restored.fail_streak(9), 3);
+    }
+
+    /// Rng::state/from_state：中途取出状态再装回去，后续序列必须逐位相同。
+    #[test]
+    fn rng_state_roundtrip_is_bit_identical_midstream() {
+        let mut a = Rng::new(0xDEAD_BEEF_1234_5678);
+        for _ in 0..7 {
+            let _ = a.next_u64();
+        }
+        let mut b = Rng::from_state(a.state());
+        for step in 0..100 {
+            let (x, y) = (a.next_u64(), b.next_u64());
+            assert_eq!(x, y, "第 {step} 步分叉");
+        }
+        // next_below 走同一条流（含拒绝采样），也必须一致。
+        let mut c = Rng::from_state(a.state());
+        for _ in 0..100 {
+            assert_eq!(a.next_below(7), c.next_below(7));
+        }
+    }
+
+    /// from_state 与 new 在同一条递推上等价（种子非 0 时）。
+    #[test]
+    fn rng_from_state_matches_new_for_nonzero_seed() {
+        let fresh = Rng::new(2024);
+        let mut a = Rng::from_state(fresh.state());
+        let mut b = Rng::new(2024);
+        for _ in 0..10 {
+            assert_eq!(a.next_u64(), b.next_u64());
+        }
+        // 种子 0 经 new 被换成常量，from_state 拿到的正是那个常量。
+        assert_eq!(
+            Rng::new(0).state(),
+            Rng::from_state(Rng::new(0).state()).state()
+        );
+    }
+
+    /// from_state(0) 不 panic、也不会让拒绝采样死循环：0 换成内置常量。
+    #[test]
+    fn rng_from_state_zero_is_canonicalized() {
+        let mut rng = Rng::from_state(0);
+        assert_ne!(rng.state(), 0, "状态 0 是不动点，必须换成内置常量");
+        assert_eq!(rng.state(), Rng::new(0).state());
+        for _ in 0..10 {
+            assert_ne!(rng.next_u64(), 0);
+        }
+        // 能正常抽下标（若状态是 0，这里会死循环，测试会直接挂住）。
+        for n in [1usize, 3, 9, 64] {
+            for _ in 0..100 {
+                assert!(rng.next_below(n) < n);
+            }
+        }
+    }
+
+    /// pending()/members()/from_parts：重建后的抽样器必须抽出同一批人、同一个顺序。
+    #[test]
+    fn sampler_parts_roundtrip_replays_identical_sequence() {
+        let members: Vec<AccountIdx> = (0..12).collect();
+        let mut s = RoundSampler::new();
+        s.reset(&members);
+        let mut rng = Rng::new(0xABCD_EF01);
+        let _ = s.draw(3, &mut rng);
+
+        let mut twin = RoundSampler::from_parts(s.members(), s.pending());
+        let mut rng2 = Rng::from_state(rng.state());
+        for round in 0..4 {
+            let a = s.draw(4, &mut rng);
+            let b = twin.draw(4, &mut rng2);
+            assert_eq!(a, b, "第 {round} 批抽取顺序分叉");
+            assert_eq!(s.pending(), twin.pending(), "pending 必须逐项相同");
+            assert_eq!(s.remaining(), twin.remaining());
+        }
+    }
+
+    /// pending 永远是 members 的子集，且两者都不含重复编号。
+    #[test]
+    fn pending_is_a_deduped_subset_of_members() {
+        let mut s = RoundSampler::new();
+        s.sync(&[5, 3, 5, 9, 7]);
+        assert_eq!(s.members(), &[3, 5, 7, 9], "members 恒为升序去重");
+        assert_eq!(s.remaining(), 0, "sync 不主动开轮");
+        let mut rng = Rng::new(1);
+        let _ = s.draw(2, &mut rng);
+        let pending = s.pending();
+        assert_eq!(pending.len(), 2);
+        let uniq: BTreeSet<AccountIdx> = pending.iter().copied().collect();
+        assert_eq!(uniq.len(), pending.len(), "pending 不得有重复");
+        assert!(uniq.iter().all(|i| s.members().contains(i)));
+    }
+
+    /// AccountTable::keys/from_keys：往返后编号布局、长度、后续 intern 全部一致。
+    #[test]
+    fn account_table_keys_roundtrip_and_continue_numbering() {
+        let mut t = AccountTable::new();
+        let keys: Vec<AccountKey> = (0..8u32).map(make_key).collect();
+        for k in &keys {
+            t.intern(*k);
+        }
+        let rebuilt = AccountTable::from_keys(&t.keys()).expect("合法快照");
+        assert_eq!(rebuilt.len(), t.len());
+        for i in 0..8u32 {
+            assert_eq!(rebuilt.key_of(i), t.key_of(i));
+            assert_eq!(rebuilt.lookup(&make_key(i)), Some(i));
+        }
+        // 继续 intern 新 key：接着分配下一个连续编号（与从未重启一样）。
+        let mut a = t;
+        let mut b = rebuilt;
+        assert_eq!(a.intern(make_key(99)), 8);
+        assert_eq!(b.intern(make_key(99)), 8);
+        assert_eq!(a.intern(make_key(7)), 7, "已存在的 key 仍幂等");
+        assert_eq!(b.intern(make_key(7)), 7);
+        assert_eq!(b.len(), 9);
+    }
+
+    /// 空表 round-trip。
+    #[test]
+    fn empty_account_table_roundtrips() {
+        let t = AccountTable::new();
+        let rebuilt = AccountTable::from_keys(&t.keys()).expect("空表也是合法快照");
+        assert!(rebuilt.is_empty());
+        assert_eq!(rebuilt.key_of(0), None);
+    }
+
+    /// fit from_keys 必须拒绝重复公钥（编号布局会与原件不同）。
+    #[test]
+    fn from_keys_rejects_duplicate_keys() {
+        let dup: Vec<AccountKey> = vec![make_key(1), make_key(2), make_key(1)];
+        assert!(AccountTable::from_keys(&dup).is_none());
+        let ok: Vec<AccountKey> = vec![make_key(1), make_key(2), make_key(3)];
+        assert!(AccountTable::from_keys(&ok).is_some());
     }
 }

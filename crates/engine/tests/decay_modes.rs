@@ -15,13 +15,19 @@ fn eng(decay_enabled: bool, decay_floor: f32) -> Engine {
     Engine::new(EngineConfig {
         beta: 0.3,
         half_life: 72,
-        view_params: ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        view_params: ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled,
         decay_floor,
         // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
         penalty_strength: 1.0,
+        // 其余字段取默认值：尤其是 `max_views = 0`（无上限），本文件不测容量。
+        ..Default::default()
     })
 }
 
@@ -49,7 +55,10 @@ fn standard_decay_matches_formula() {
 fn floored_decay_never_below_floor() {
     let e = eng(true, 0.5);
     assert!((e.decay_factor(0) - 1.0).abs() < 1e-6, "刚收到时不衰减");
-    assert!((e.decay_factor(72) - 0.5).abs() < 1e-6, "一个半衰期正好到下限");
+    assert!(
+        (e.decay_factor(72) - 0.5).abs() < 1e-6,
+        "一个半衰期正好到下限"
+    );
     for dt in [72u64, 100, 720, 72_000, u64::MAX] {
         assert!(
             (e.decay_factor(dt) - 0.5).abs() < 1e-6,
@@ -71,18 +80,30 @@ fn floor_keeps_stale_source_relevant() {
         e.rate(f2, 1.0, 0);
         // f1 给 t 打满分，f2 给 t 打 0
         let v1 = CompressedView::from_pairs(
-            ViewParams { buckets: 512, hashers: 5, seed: 7 },
+            ViewParams {
+                buckets: 512,
+                hashers: 5,
+                seed: 7,
+            },
             &[(key(9), 1.0)],
         );
         let v2 = CompressedView::from_pairs(
-            ViewParams { buckets: 512, hashers: 5, seed: 7 },
+            ViewParams {
+                buckets: 512,
+                hashers: 5,
+                seed: 7,
+            },
             &[(key(9), 0.0)],
         );
         e.on_view(f1, v1, 0, 0);
         e.on_view(f2, v2, 0, 0);
         // f2 在 t=0 之后一直不更新；f1 在 t=1000 刷新
         let v1b = CompressedView::from_pairs(
-            ViewParams { buckets: 512, hashers: 5, seed: 7 },
+            ViewParams {
+                buckets: 512,
+                hashers: 5,
+                seed: 7,
+            },
             &[(key(9), 1.0)],
         );
         e.on_view(f1, v1b, 1000, 1000);
@@ -113,13 +134,20 @@ fn disabled_decay_is_time_invariant() {
     let t = e.intern(key(9));
     e.rate(f, 1.0, 0);
     let v = CompressedView::from_pairs(
-        ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         &[(key(9), 0.6), (key(20), 0.4)],
     );
     e.on_view(f, v, 0, 0);
     let q0 = e.query(t, 0);
     let q1 = e.query(t, 100_000);
-    assert!((q0 - q1).abs() < 1e-6, "关闭衰减后结果不随时间变：{q0} vs {q1}");
+    assert!(
+        (q0 - q1).abs() < 1e-6,
+        "关闭衰减后结果不随时间变：{q0} vs {q1}"
+    );
 }
 
 /// ⑥ 所有模式都保持信任分布总和为 1

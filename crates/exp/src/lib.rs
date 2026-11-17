@@ -54,7 +54,11 @@ const RNG_SEED: u64 = 0x1234_5678_9ABC_DEF1;
 const NO_VIEW: usize = usize::MAX;
 
 pub fn view_params() -> ViewParams {
-    ViewParams { buckets: PARAMS_BUCKETS, hashers: PARAMS_HASHERS, seed: 12345 }
+    ViewParams {
+        buckets: PARAMS_BUCKETS,
+        hashers: PARAMS_HASHERS,
+        seed: 12345,
+    }
 }
 
 /// 由内部编号合成一个 32 字节账户号（实验用）。
@@ -251,7 +255,11 @@ fn elapsed(start: u64, now: u64) -> u64 {
 fn reading_value(raw_query: f32, total_mass: f32, floor: f32) -> f32 {
     // 分子先夹紧，与分母 Σmin(q,1) 同一口径（顺序反了会让超量声明拿走 K 倍预算）。
     let raw = raw_query.clamp(0.0, 1.0) / total_mass;
-    let mut v = if raw.is_finite() { raw.clamp(0.0, 1.0) } else { 0.0 };
+    let mut v = if raw.is_finite() {
+        raw.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     if v < floor {
         v = 0.0;
     }
@@ -315,7 +323,10 @@ impl<'a> Net<'a> {
             }
             sources.push((src, w, row_start, mass_covers));
         }
-        Prepared { sources, total_rating }
+        Prepared {
+            sources,
+            total_rating,
+        }
     }
 
     /// 用预准备好的权重表查一个 target，语义等同 Engine::query(target, now)。
@@ -388,7 +399,11 @@ fn publish_generation(
                 vals.push((net.keys[u], q));
             }
         }
-        let do_norm = if net.is_atk[src] { net.pc.attacker_normalizes } else { net.pc.normalize_view };
+        let do_norm = if net.is_atk[src] {
+            net.pc.attacker_normalizes
+        } else {
+            net.pc.normalize_view
+        };
         if do_norm && sum > 0.0 {
             for x in vals.iter_mut() {
                 x.1 /= sum;
@@ -404,11 +419,15 @@ fn publish_generation(
             1.0
         };
         let floor = if net.pc.use_noise_floor {
-            (view.noise_floor(NOISE_SAMPLES, noise_seed(src)).median * net.pc.noise_multiplier).max(0.0)
+            (view.noise_floor(NOISE_SAMPLES, noise_seed(src)).median * net.pc.noise_multiplier)
+                .max(0.0)
         } else {
             0.0
         };
-        let readings: Vec<f32> = qs.iter().map(|&q| reading_value(q, total_mass, floor)).collect();
+        let readings: Vec<f32> = qs
+            .iter()
+            .map(|&q| reading_value(q, total_mass, floor))
+            .collect();
 
         // —— banlist 需要的原始读数与覆盖率（引擎等价配置下 need_ban = false，不做功）。
         let (raw_others, cov) = if net.need_ban {
@@ -418,13 +437,21 @@ fn publish_generation(
                 .map(|&b| view.query(&net.keys[b]).clamp(0.0, 1.0))
                 .collect();
             let hit = raw.iter().filter(|v| **v > 0.05).count();
-            let cov = if net.others.is_empty() { 0.0 } else { hit as f32 / net.others.len() as f32 };
+            let cov = if net.others.is_empty() {
+                0.0
+            } else {
+                hit as f32 / net.others.len() as f32
+            };
             (raw, cov)
         } else {
             (Vec::new(), 0.0)
         };
 
-        arena.push(Published { readings, raw_others, cov });
+        arena.push(Published {
+            readings,
+            raw_others,
+            cov,
+        });
     }
 }
 
@@ -493,10 +520,14 @@ fn evaluate(
     let mut rep = vec![vec![0.0f32; n]; n];
     let mut items: Vec<(f32, f32)> = Vec::with_capacity(n);
     for i in 0..n {
-        let mul_row = if net.need_mul { Some(&mul[i][..]) } else { None };
+        let mul_row = if net.need_mul {
+            Some(&mul[i][..])
+        } else {
+            None
+        };
         let prep = net.prepare(&nodes[i], arena, now, mul_row, fallback_gen);
-        for u in 0..n {
-            rep[i][u] = net.query(&nodes[i], &prep, u, arena, &mut items);
+        for (u, slot) in rep[i].iter_mut().enumerate() {
+            *slot = net.query(&nodes[i], &prep, u, arena, &mut items);
         }
     }
     rep
@@ -509,7 +540,12 @@ pub fn run_case(cfg: SimConfig, pc: &PropConfig) -> Outcome {
 
 /// 可注入额外评分与额外账户的版本。
 /// inject: (评分者, 被评者, 分数)；extra_accounts 只用于抬大 n。
-pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f32)], extra_accounts: &[usize]) -> Outcome {
+pub fn run_case_inject(
+    cfg: SimConfig,
+    pc: &PropConfig,
+    inject: &[(usize, usize, f32)],
+    extra_accounts: &[usize],
+) -> Outcome {
     run_case_full(cfg, pc, inject, extra_accounts, &[])
 }
 
@@ -524,7 +560,13 @@ pub fn run_case_inject(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize,
 ///     publish(r + 1)                  // = export_view(r + 1)
 /// rep = evaluate(now = rounds)        // = 最后一批观点在 rounds-1 取到，Δt = 1
 /// ```
-pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f32)], extra_accounts: &[usize], attacker_ids: &[usize]) -> Outcome {
+pub fn run_case_full(
+    cfg: SimConfig,
+    pc: &PropConfig,
+    inject: &[(usize, usize, f32)],
+    extra_accounts: &[usize],
+    attacker_ids: &[usize],
+) -> Outcome {
     let mut world = World::new(cfg);
     world.run();
     let observed = world.ratings();
@@ -540,7 +582,11 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
         n = n.max(e + 1);
     }
 
-    let honest: Vec<usize> = world.indices_of(Kind::Honest).into_iter().filter(|i| *i < n).collect();
+    let honest: Vec<usize> = world
+        .indices_of(Kind::Honest)
+        .into_iter()
+        .filter(|i| *i < n)
+        .collect();
     let honest_set: HashSet<usize> = honest.iter().copied().collect();
 
     // 每个观察者的正分清单（按目标号升序、同一目标只留一条）：
@@ -565,7 +611,11 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
         for (&t, &s) in &m {
             pl.set(t as AccountIdx, s, 0);
         }
-        nodes.push(Node { pl, stored: vec![None; n], sampler: RoundSampler::new() });
+        nodes.push(Node {
+            pl,
+            stored: vec![None; n],
+            sampler: RoundSampler::new(),
+        });
     }
 
     // 原始评分口径的对照统计（与传播结果无关，仅供报表）。
@@ -594,11 +644,24 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
     let keys: Vec<[u8; 32]> = (0..n).map(key_of).collect();
 
     let need_mul = !others.is_empty() && (pc.ban_lambda > 0.0 || pc.banlist);
-    let need_ban = !others.is_empty() && (pc.ban_lambda > 0.0 || pc.banlist || pc.ban_exclude > 0.0);
-    let net = Net { n, keys: &keys, pc, others: &others, is_atk: &is_atk, need_ban, need_mul };
+    let need_ban =
+        !others.is_empty() && (pc.ban_lambda > 0.0 || pc.banlist || pc.ban_exclude > 0.0);
+    let net = Net {
+        n,
+        keys: &keys,
+        pc,
+        others: &others,
+        is_atk: &is_atk,
+        need_ban,
+        need_mul,
+    };
 
     // 折扣表缺省 1.0；引擎等价配置下 need_mul = false，连分配都省掉。
-    let mut mul: Vec<Vec<f32>> = if need_mul { vec![vec![1.0f32; n]; n] } else { Vec::new() };
+    let mut mul: Vec<Vec<f32>> = if need_mul {
+        vec![vec![1.0f32; n]; n]
+    } else {
+        Vec::new()
+    };
     // 每代 n 份观点的读数行，下标 = generation × n + src。跨轮累积（读较旧的观点依然有效）。
     let mut arena: Vec<Published> = Vec::new();
 
@@ -613,25 +676,39 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
         // —— 接收：按真引擎的轮次抽样器抽 k 个来源，抽到的立刻算「上次检查 = now」
         // （等价 tick + on_view）。框架里没有失败路径，所以连败恒为 0，
         // draw_backoff 退化成无放回均匀抽样；抽样偏差已被拒绝采样消除。
-        for i in 0..n {
-            let node = &mut nodes[i];
+        for node in nodes.iter_mut() {
             let ids: Vec<AccountIdx> = node.pl.indices();
             node.sampler.sync(&ids);
             let picked = node.sampler.draw_backoff(&node.pl, pc.samples, &mut rng);
             // 最后一轮可以按 stride 只刷新一部分来源（验收测试用，默认 1 = 全刷）。
-            let stride = if r + 1 == pc.rounds { pc.last_round_refresh_stride.max(1) } else { 1 };
+            let stride = if r + 1 == pc.rounds {
+                pc.last_round_refresh_stride.max(1)
+            } else {
+                1
+            };
             for src in picked {
-                if (src as usize) % stride != 0 {
+                if !(src as usize).is_multiple_of(stride) {
                     continue;
                 }
-                node.stored[src as usize] =
-                    Some(StampedView { generation: cur_gen, last_check: now, mass_covers: n });
+                node.stored[src as usize] = Some(StampedView {
+                    generation: cur_gen,
+                    last_check: now,
+                    mass_covers: n,
+                });
             }
         }
         // —— 发布下一轮的观点（旧代码在最后一轮也就停在这里，之后的 mul 更新已无消费者）
         if r + 1 < pc.rounds {
             let next = cur_gen + 1;
-            publish_generation(&net, &nodes, &mul, &mut arena, next, (r + 1) as u64 * step, Some(cur_gen));
+            publish_generation(
+                &net,
+                &nodes,
+                &mul,
+                &mut arena,
+                next,
+                (r + 1) as u64 * step,
+                Some(cur_gen),
+            );
             cur_gen = next;
             if need_mul {
                 update_mul(&net, &nodes, &mut mul, &arena, cur_gen);
@@ -640,20 +717,37 @@ pub fn run_case_full(cfg: SimConfig, pc: &PropConfig, inject: &[(usize, usize, f
     }
 
     // —— 最终结果：与真引擎网络一样，在 now = rounds 处查一次（最后一批观点的年龄是 1）。
-    let rep = evaluate(&net, &nodes, &mul, &arena, pc.rounds as u64 * step, Some(cur_gen));
+    let rep = evaluate(
+        &net,
+        &nodes,
+        &mul,
+        &arena,
+        pc.rounds as u64 * step,
+        Some(cur_gen),
+    );
 
     Outcome {
         rep,
         honest,
         others,
-        raw_honest: if raw_cnt_h > 0 { (raw_sum_h / raw_cnt_h as f64) as f32 } else { 0.0 },
-        raw_others: if raw_cnt_o > 0 { (raw_sum_o / raw_cnt_o as f64) as f32 } else { 0.0 },
+        raw_honest: if raw_cnt_h > 0 {
+            (raw_sum_h / raw_cnt_h as f64) as f32
+        } else {
+            0.0
+        },
+        raw_others: if raw_cnt_o > 0 {
+            (raw_sum_o / raw_cnt_o as f64) as f32
+        } else {
+            0.0
+        },
     }
 }
 
 /// 从「诚实观察者」视角统计：某类账户平均拿到多少声望。
 pub fn mean_rep_from_honest(o: &Outcome, targets: &[usize]) -> f32 {
-    if o.honest.is_empty() || targets.is_empty() { return 0.0; }
+    if o.honest.is_empty() || targets.is_empty() {
+        return 0.0;
+    }
     let mut sum = 0.0f64;
     let mut cnt = 0usize;
     for &ob in &o.honest {
@@ -664,7 +758,11 @@ pub fn mean_rep_from_honest(o: &Outcome, targets: &[usize]) -> f32 {
             }
         }
     }
-    if cnt == 0 { 0.0 } else { (sum / cnt as f64) as f32 }
+    if cnt == 0 {
+        0.0
+    } else {
+        (sum / cnt as f64) as f32
+    }
 }
 
 /// 观察者胜率：同一观察者眼中，诚实均值 > 攻击者均值的比例。
@@ -672,16 +770,36 @@ pub fn win_rate(o: &Outcome) -> (f32, usize) {
     let mut win = 0usize;
     let mut tot = 0usize;
     for &ob in &o.honest {
-        if ob >= o.rep.len() { continue; }
-        let h: Vec<f32> = o.honest.iter().filter(|&&t| t < o.rep[ob].len()).map(|&t| o.rep[ob][t]).collect();
-        let a: Vec<f32> = o.others.iter().filter(|&&t| t < o.rep[ob].len()).map(|&t| o.rep[ob][t]).collect();
-        if h.is_empty() || a.is_empty() { continue; }
+        if ob >= o.rep.len() {
+            continue;
+        }
+        let h: Vec<f32> = o
+            .honest
+            .iter()
+            .filter(|&&t| t < o.rep[ob].len())
+            .map(|&t| o.rep[ob][t])
+            .collect();
+        let a: Vec<f32> = o
+            .others
+            .iter()
+            .filter(|&&t| t < o.rep[ob].len())
+            .map(|&t| o.rep[ob][t])
+            .collect();
+        if h.is_empty() || a.is_empty() {
+            continue;
+        }
         let hm = h.iter().sum::<f32>() / h.len() as f32;
         let am = a.iter().sum::<f32>() / a.len() as f32;
         tot += 1;
-        if hm > am { win += 1; }
+        if hm > am {
+            win += 1;
+        }
     }
-    if tot == 0 { (0.0, 0) } else { (win as f32 / tot as f32, tot) }
+    if tot == 0 {
+        (0.0, 0)
+    } else {
+        (win as f32 / tot as f32, tot)
+    }
 }
 // ===========================================================================
 // 单元测试：混合「有观点 / 没观点」时，框架的查询路径必须与引擎逐点一致
@@ -709,10 +827,16 @@ mod engine_parity_unit {
     ///
     /// known 是 on_view 那一刻的已知账户数（= 引擎的 accounts.len()），
     /// 总质量只对前 known 个账户求和。
-    fn readings_of(view: &CompressedView, keys: &[[u8; 32]], known: usize, n: usize, floor: f32) -> Vec<f32> {
+    fn readings_of(
+        view: &CompressedView,
+        keys: &[[u8; 32]],
+        known: usize,
+        n: usize,
+        floor: f32,
+    ) -> Vec<f32> {
         let mut total_mass = 0.0f32;
-        for i in 0..known {
-            total_mass += view.query(&keys[i]).clamp(0.0, 1.0);
+        for k in keys.iter().take(known) {
+            total_mass += view.query(k).clamp(0.0, 1.0);
         }
         let total_mass = total_mass.max(1e-6);
         (0..n)
@@ -738,19 +862,47 @@ mod engine_parity_unit {
         pl.set(1, 1.0, 0);
         pl.set(2, 0.5, 0);
         let mut stored = vec![None; N];
-        stored[1] = Some(StampedView { generation: 0, last_check: 0, mass_covers: KNOWN });
-        let node = Node { pl, stored, sampler: RoundSampler::new() };
-        let empty = Published { readings: vec![0.0; N], raw_others: Vec::new(), cov: 0.0 };
+        stored[1] = Some(StampedView {
+            generation: 0,
+            last_check: 0,
+            mass_covers: KNOWN,
+        });
+        let node = Node {
+            pl,
+            stored,
+            sampler: RoundSampler::new(),
+        };
+        let empty = Published {
+            readings: vec![0.0; N],
+            raw_others: Vec::new(),
+            cov: 0.0,
+        };
         let arena = vec![
-            Published { readings: readings_of(&view, &keys, KNOWN, N, floor), raw_others: Vec::new(), cov: 0.0 },
-            Published { readings: readings_of(&view, &keys, KNOWN, N, floor), raw_others: Vec::new(), cov: 0.0 },
+            Published {
+                readings: readings_of(&view, &keys, KNOWN, N, floor),
+                raw_others: Vec::new(),
+                cov: 0.0,
+            },
+            Published {
+                readings: readings_of(&view, &keys, KNOWN, N, floor),
+                raw_others: Vec::new(),
+                cov: 0.0,
+            },
             empty.clone(),
             empty.clone(),
             empty,
         ];
         let pc = PropConfig::default();
         let is_atk = [false; N];
-        let net = Net { n: N, keys: &keys, pc: &pc, others: &[], is_atk: &is_atk, need_ban: false, need_mul: false };
+        let net = Net {
+            n: N,
+            keys: &keys,
+            pc: &pc,
+            others: &[],
+            is_atk: &is_atk,
+            need_ban: false,
+            need_mul: false,
+        };
         let mut items: Vec<(f32, f32)> = Vec::new();
 
         // —— 引擎侧：同样的评分、同样的观点（只在 4 个账户时就收到），随后登记第 5 个账户。
@@ -785,28 +937,58 @@ mod engine_parity_unit {
         let floor = (view.noise_floor(NOISE_SAMPLES, noise_seed(1)).median * 1.0).max(0.0);
         let row = readings_of(&view, &keys, 3, 3, floor);
         let arena = vec![
-            Published { readings: row.clone(), raw_others: Vec::new(), cov: 0.0 },
-            Published { readings: row.clone(), raw_others: Vec::new(), cov: 0.0 },
-            Published { readings: row, raw_others: Vec::new(), cov: 0.0 },
+            Published {
+                readings: row.clone(),
+                raw_others: Vec::new(),
+                cov: 0.0,
+            },
+            Published {
+                readings: row.clone(),
+                raw_others: Vec::new(),
+                cov: 0.0,
+            },
+            Published {
+                readings: row,
+                raw_others: Vec::new(),
+                cov: 0.0,
+            },
         ];
 
         for decay_enabled in [true, false] {
-            let mut pc = PropConfig::default();
-            pc.decay_enabled = decay_enabled;
+            let pc = PropConfig {
+                decay_enabled,
+                ..PropConfig::default()
+            };
             let mut pl = PositiveList::new();
             pl.set(1, 1.0, 0);
             let mut stored = vec![None; 3];
-            stored[1] = Some(StampedView { generation: 0, last_check: 0, mass_covers: 3 });
-            let node = Node { pl, stored, sampler: RoundSampler::new() };
+            stored[1] = Some(StampedView {
+                generation: 0,
+                last_check: 0,
+                mass_covers: 3,
+            });
+            let node = Node {
+                pl,
+                stored,
+                sampler: RoundSampler::new(),
+            };
             let is_atk = [false; 3];
-            let net = Net { n: 3, keys: &keys, pc: &pc, others: &[], is_atk: &is_atk, need_ban: false, need_mul: false };
+            let net = Net {
+                n: 3,
+                keys: &keys,
+                pc: &pc,
+                others: &[],
+                is_atk: &is_atk,
+                need_ban: false,
+                need_mul: false,
+            };
             let mut items: Vec<(f32, f32)> = Vec::new();
 
             let mut cfg = engine_cfg();
             cfg.decay_enabled = decay_enabled;
             let mut e = Engine::new(cfg);
-            for i in 0..3 {
-                e.intern(keys[i]);
+            for k in &keys {
+                e.intern(*k);
             }
             e.rate(1, 1.0, 0);
             e.on_view(1, view.clone(), 0, 0);

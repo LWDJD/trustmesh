@@ -5,9 +5,27 @@
 //!
 //! | 函数 | 作用 |
 //! | --- | --- |
-//! | [decay] | 时间衰减：0.5 的 (dt / half_life) 次方 |
+//! | [decay] | 时间衰减：0.5 的 (dt / half_life) 次方（**伤害时效**，不是反女巫） |
 //! | [aggregate] | 把多个来源的观点聚成一个数（四种口径） |
 //! | [combine] | β × 个人项 + (1 − β) × 群体项 |
+//!
+//! ## [decay] 的目的：伤害时效，不是反女巫
+//!
+//! 这一点是本仓 2026-11-16 之后**口径改写**的结果，写在这里防止再被误读：
+//!
+//! * 衰减**不是**反女巫机制。消融实测（审计/A4-decay.md，16 seed 配对差）显示：
+//!   关掉衰减后 S1 女巫可见度、S2 越线、S4 空账户三条判据**逐位不变或差异 CI 跨 0**；
+//!   只有 S3 背书场景有 6.3%（72h）/ 10.4%（24h）的差异，而 S5 单来源上限反而被
+//!   放大 1.60×（72h）/ 3.40×（24h）—— 也就是说衰减在反女巫这件事上**净贡献接近 0，
+//!   而且自己还开了一个新的失效面**。
+//! * 衰减**是**伤害时效机制：它让「曾经生效过的攻击载荷」随观察者缓存变旧而自动
+//!   退潮。A4 里唯一的一阶效应就是这个：攻击者转离线后，攻击残余（末段相对峰值）
+//!   从关掉的 0.990 降到 72h 的 0.250（−74.7%）、24h 的 −0.043（相对 off −104%）。
+//!   P3 的 E2 把这条效应拍成了时间曲线（见 审计/P3-decay-purpose.md）。
+//!
+//! 所以本函数的**唯一正当用途**是「让伤害有到期日」，不是「让女巫更难刷分」。
+//! 反女巫要靠 badlist / 份额上限这类结构性机制；把衰减当反女巫机制会同时得到
+//! 「几乎没有收益」与「S5 套利」两个坏结果。
 //!
 //! ## 数值约定
 //!
@@ -50,6 +68,21 @@ pub const MAX_TRIM: f32 = 0.5 - f32::EPSILON / 2.0;
 // ---------------------------------------------------------------------------
 
 /// 指数衰减因子：factor = 0.5 ^ (dt / half_life)。
+///
+/// # 这个函数实现的是「伤害时效」，不是「反女巫」
+///
+/// * **它不改变任何人之间的相对可信度**：只要所有来源的新鲜度相同，因子是一个
+///   公共乘数，在加权平均里会被约掉（本 crate 与 tm_engine 的等价性测试正是靠
+///   这个性质在「全员每轮被刷新」的时序下测不出差异）。
+/// * **它唯一的一阶效应是遗忘**：一个来源停止更新后，它对群体项的贡献按 0.5^(Δt/H)
+///   单调退潮。这正是「一次已经结束的攻击，其伤害应当随缓存变旧而退去」的数学形状。
+/// * **它不是反女巫机制**：消融实测（审计/A4-decay.md）里关掉衰减后 S1/S2/S4 不变、
+///   S3 只在背书场景差 6~10%、而 S5 单来源上限被反向放大 1.60×/3.40×。
+///   引用衰减来论证「反女巫更强」是错的（详见 审计/P3-decay-purpose.md）。
+/// * **它自带一个失效面**：衰减只作用于「来源观点的新鲜度」，所以「保持新鲜的那个
+///   来源」相对「变旧的诚实来源」会获得超额话语权。这是 S5 新鲜度套利的来源，
+///   不是本函数的 bug，而是它的语义决定的——需要上层用「来源新鲜度上限」一类的
+///   约束去兜，见 E3 的解析式 `7/(1+6·0.5^(age/H))`。
 ///
 /// # 参数
 /// * dt —— 当前时间减上次成功取到对方观点的时间（单位与 half_life 相同，通常是小时）。
@@ -394,7 +427,10 @@ mod tests {
             for &h in &[0u64, 1, 72, 1000] {
                 let v = decay(dt, h);
                 assert!(v > 0.0, "dt = {dt}, H = {h} 时衰减值归零了");
-                assert!(!v.is_nan() && !v.is_infinite(), "dt = {dt}, H = {h} 时非有限");
+                assert!(
+                    !v.is_nan() && !v.is_infinite(),
+                    "dt = {dt}, H = {h} 时非有限"
+                );
                 assert!(v <= 1.0);
             }
         }
@@ -402,7 +438,10 @@ mod tests {
         assert_eq!(decay(5000, 1), DECAY_FLOOR);
         assert_eq!(decay(u64::MAX, 1), DECAY_FLOOR);
         let floor = DECAY_FLOOR;
-        assert!(floor > 0.0 && floor.is_finite(), "DECAY_FLOOR 必须是正的有限数");
+        assert!(
+            floor > 0.0 && floor.is_finite(),
+            "DECAY_FLOOR 必须是正的有限数"
+        );
         // 但还留在 f32 次正规区间内的值不该被兜底抬高成 1.4e-45
         let tiny = decay(144, 1); // 2^-144 ≈ 4.5e-44，f32 可表示
         assert!(tiny > floor, "得到 {tiny}");
@@ -507,7 +546,10 @@ mod tests {
         let one = [(3.0f32, 0.25f32)];
         assert!(close(aggregate(&one, AggMode::Mean).unwrap(), 0.25));
         assert!(close(aggregate(&one, AggMode::Median).unwrap(), 0.25));
-        assert!(close(aggregate(&one, AggMode::WeightedMedian).unwrap(), 0.25));
+        assert!(close(
+            aggregate(&one, AggMode::WeightedMedian).unwrap(),
+            0.25
+        ));
         assert!(close(aggregate(&one, AggMode::Trimmed(0.4)).unwrap(), 0.25));
     }
 
@@ -524,9 +566,9 @@ mod tests {
     fn mean_drops_nonpositive_and_nonfinite_weights() {
         let items = [
             (1.0f32, 0.2f32),
-            (0.0, 1.0),        // 权重 0：没表态，剔除
-            (-5.0, 1.0),       // 负权重：协议里不存在，剔除
-            (f32::NAN, 1.0),   // NaN 权重：剔除
+            (0.0, 1.0),           // 权重 0：没表态，剔除
+            (-5.0, 1.0),          // 负权重：协议里不存在，剔除
+            (f32::NAN, 1.0),      // NaN 权重：剔除
             (f32::INFINITY, 1.0), // inf 权重：剔除
             (1.0, 0.4),
         ];
@@ -578,14 +620,20 @@ mod tests {
     fn weighted_median_basic() {
         // 累积权重 1, 3（总 3，半 1.5）⇒ 第二次跨过 ⇒ 0.9
         let items = [(1.0f32, 0.1f32), (2.0, 0.9)];
-        assert!(close(aggregate(&items, AggMode::WeightedMedian).unwrap(), 0.9));
+        assert!(close(
+            aggregate(&items, AggMode::WeightedMedian).unwrap(),
+            0.9
+        ));
     }
 
     #[test]
     fn weighted_median_ties_go_to_lower_value() {
         // 各占一半：下侧中位数判给小值
         let items = [(1.0f32, 0.1f32), (1.0, 0.9)];
-        assert!(close(aggregate(&items, AggMode::WeightedMedian).unwrap(), 0.1));
+        assert!(close(
+            aggregate(&items, AggMode::WeightedMedian).unwrap(),
+            0.1
+        ));
     }
 
     #[test]
@@ -623,7 +671,10 @@ mod tests {
         // 两个等权条目，p = 0.25 ⇒ 低端裁 0.5、高端裁 0.5，
         // 0.0 剩下 0.5 权重、1.0 剩下 0.5 权重 ⇒ 0.5
         let items = [(1.0f32, 0.0f32), (1.0, 1.0)];
-        assert!(close(aggregate(&items, AggMode::Trimmed(0.25)).unwrap(), 0.5));
+        assert!(close(
+            aggregate(&items, AggMode::Trimmed(0.25)).unwrap(),
+            0.5
+        ));
     }
 
     #[test]
@@ -662,12 +713,7 @@ mod tests {
     #[test]
     fn four_modes_disagree_on_same_data() {
         // 一个高权重的极端值 0.9（权重 5），三个低权重的小值
-        let items = [
-            (1.0f32, 0.0f32),
-            (1.0, 0.2),
-            (1.0, 0.4),
-            (5.0, 0.9),
-        ];
+        let items = [(1.0f32, 0.0f32), (1.0, 0.2), (1.0, 0.4), (5.0, 0.9)];
         let mean = aggregate(&items, AggMode::Mean).unwrap();
         let median = aggregate(&items, AggMode::Median).unwrap();
         let wmed = aggregate(&items, AggMode::WeightedMedian).unwrap();

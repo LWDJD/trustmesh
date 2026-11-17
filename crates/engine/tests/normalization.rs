@@ -15,13 +15,19 @@ fn eng() -> Engine {
     Engine::new(EngineConfig {
         beta: 0.3,
         half_life: 72,
-        view_params: ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        view_params: ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
         // 折扣表默认为空：不调用 report_bad_account 时不改变任何既有行为。
         penalty_strength: 1.0,
+        // 其余字段取默认值：尤其是 `max_views = 0`（无上限），本文件不测容量。
+        ..Default::default()
     })
 }
 
@@ -47,7 +53,10 @@ fn stage1_accepts_values_above_one() {
     let mut e = eng();
     let a = e.intern(key(1));
     e.rate(a, 37.0, 0);
-    assert!((e.share_of(a).unwrap() - 1.0).abs() < 1e-6, "唯一账户份额应为 1");
+    assert!(
+        (e.share_of(a).unwrap() - 1.0).abs() < 1e-6,
+        "唯一账户份额应为 1"
+    );
 }
 
 /// ①c 撤销某条评分后重新归一化
@@ -62,7 +71,10 @@ fn stage1_revoking_renormalizes() {
     e.rate(c, 2.0, 0);
     assert!((e.share_of(c).unwrap() - 0.5).abs() < 1e-6);
     e.rate(a, 0.0, 0); // 撤销
-    assert!((e.share_of(c).unwrap() - 2.0 / 3.0).abs() < 1e-6, "撤销后应重新归一化");
+    assert!(
+        (e.share_of(c).unwrap() - 2.0 / 3.0).abs() < 1e-6,
+        "撤销后应重新归一化"
+    );
     let sum: f32 = e.shares().iter().map(|(_, s)| *s).sum();
     assert!((sum - 1.0).abs() < 1e-6, "剩余份额之和仍为 1");
 }
@@ -74,10 +86,16 @@ fn stage1_record_accumulates() {
     let a = e.intern(key(1));
     e.record(a, 0, 3);
     e.record(a, 0, 2);
-    assert!((e.share_of(a).unwrap() - 1.0).abs() < 1e-6, "只有一个对象时份额为 1");
+    assert!(
+        (e.share_of(a).unwrap() - 1.0).abs() < 1e-6,
+        "只有一个对象时份额为 1"
+    );
     let b = e.intern(key(2));
     e.record(b, 0, 5);
-    assert!((e.share_of(a).unwrap() - 0.5).abs() < 1e-6, "3+2 对 5，应各占一半");
+    assert!(
+        (e.share_of(a).unwrap() - 0.5).abs() < 1e-6,
+        "3+2 对 5，应各占一半"
+    );
 }
 
 /// ② 群体项归一化：每个来源的观点文件先归一化，再按权重平均
@@ -93,12 +111,20 @@ fn stage2_group_terms_are_normalized() {
 
     // f1 的观点：t=2.0、另一个=2.0 → 归一化后 t 占 0.5
     let v1 = CompressedView::from_pairs(
-        ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         &[(key(9), 0.5), (key(50), 0.5)],
     );
     // f2 的观点：t=1.0、另一个=9.0 → 归一化后 t 占 0.1
     let v2 = CompressedView::from_pairs(
-        ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         &[(key(9), 0.1), (key(50), 0.9)],
     );
     e.on_view(f1, v1, 0, 0);
@@ -107,7 +133,10 @@ fn stage2_group_terms_are_normalized() {
     // 群体项 = 加权平均 = (0.5 + 0.1) / 2 = 0.3（两者权重相同）
     // 个人项为 0，混合系数 0.7 → 0.21
     let q = e.query(t, 0);
-    assert!((q - 0.21).abs() < 1e-4, "群体项应为 0.3，混合后 0.21，实际 {q}");
+    assert!(
+        (q - 0.21).abs() < 1e-4,
+        "群体项应为 0.3，混合后 0.21，实际 {q}"
+    );
 }
 
 /// ③ 3:7 混合后仍要归一化
@@ -134,7 +163,11 @@ fn stage4_distribution_sums_to_one() {
     let _t = e.intern(key(9));
     e.rate(f, 1.0, 0);
     let v = CompressedView::from_pairs(
-        ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         &[(key(9), 0.6), (key(20), 0.4)],
     );
     e.on_view(f, v, 0, 0);

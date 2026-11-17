@@ -9,6 +9,64 @@
 //! - 它产出「我需要谁的观点」的请求意图，由应用层去真正发起
 //! - 应用层拿到观点后回调 `on_view`
 //!
+//! # 五分钟上手
+//!
+//! 下面这段是**真能跑**的最小流程（`cargo test --doc` 会验证它）。
+//! 完整版见 `examples/quickstart.rs`。
+//!
+//! ~~~rust
+//! use tm_engine::{Engine, EngineConfig};
+//! use tm_view::{CompressedView, ViewParams};
+//!
+//! fn key(name: &str) -> [u8; 32] {
+//!     let mut k = [0u8; 32];
+//!     k[..name.len()].copy_from_slice(name.as_bytes());
+//!     k
+//! }
+//!
+//! // 全网必须用同一套 ViewParams（形状 + 种子），不一致的观点会被整条丢弃。
+//! let params = ViewParams::new(2048, 5, 0);
+//! let cfg = EngineConfig { view_params: params, ..EngineConfig::default() };
+//!
+//! let names = ["alice", "bob", "carol"];
+//! // 每个在线节点各有一个引擎。编号顺序（intern 的先后）全网一致。
+//! let mut engines: Vec<Engine> = (0..names.len())
+//!     .map(|_| {
+//!         let mut e = Engine::with_seed(cfg.clone(), 7);
+//!         for n in &names {
+//!             e.intern(key(n));   // 顺序必须一致：编号 = intern 的先后次序
+//!         }
+//!         e
+//!     })
+//!     .collect();
+//!
+//! // 打分：alice 信任 bob 0.9、carol 0.7（取值 (0,1]）
+//! engines[0].rate(1, 0.9, 0);
+//! engines[0].rate(2, 0.7, 0);
+//!
+//! // 一轮传播：导出 → 抽样 → 收取
+//! let now = 12;
+//! let published: Vec<CompressedView> = engines.iter().map(|e| e.export_view(now)).collect();
+//! let fetches: Vec<Vec<u32>> = engines
+//!     .iter_mut()
+//!     .map(|e| e.tick(now, 2).into_iter().map(|r| r.idx).collect())
+//!     .collect();
+//! for (i, reqs) in fetches.iter().enumerate() {
+//!     for &owner in reqs {
+//!         engines[i].on_view(owner, published[owner as usize].clone(), now, now);
+//!     }
+//! }
+//!
+//! // 查询：我眼中 bob 有多可信（0~1）
+//! let bob = engines[0].query(1, now);
+//! assert!(bob > 0.0, "alice 评过 bob，应该拿到正的声望");
+//! assert!((0.0..=1.0).contains(&bob), "声望恒在 [0,1]");
+//!
+//! // 发布自己的观点（对外只是一份定长字节）
+//! let mine = engines[0].export_view(now);
+//! assert_eq!(mine.bytes(), 2048 * 5 * 4);
+//! ~~~
+//!
 //! ## 抽样退避与兜底探测（设计规格 4.9.4）
 //!
 //! * [Engine::tick] 按**连续失败次数**退避（权重 1/2^n）：连续取不到观点的来源
@@ -27,8 +85,38 @@
 //! 折扣取 `min`，不复合，也**没有自动恢复**（[Engine::clear_penalties] 是
 //! 应用层的手动撤销）。默认 `penalty_strength = 1.0`、折扣表为空，
 //! 不调用报告接口时行为与改造前逐位一致。算法细节见 `src/badlist.rs`。
+//!
+//! ## 状态持久化：快照（P4）
+//!
+//! 引擎仍然**不做 I/O**，但它现在能把整份运行状态**变成字节**、再从字节**装回来**：
+//!
+//! * [Engine::snapshot] → [EngineSnapshot]：正分清单、观点缓存、账户编号、折扣表、
+//!   时钟、统计、抽样轮次进度、随机流的**内部状态**，一次全拿到；
+//! * [EngineSnapshot::encode] → [EngineSnapshot::decode]：手写定长字节格式
+//!   （零外部依赖、**不用 serde**），浮点用 `to_bits()` 逐位搬运；
+//! * [Engine::restore]：三层校验（版本 → 结构自洽 → 观点字节能被
+//!   `cfg.view_params` 解出来），任何一层不过都返回 `None`，**绝不部分恢复**。
+//!
+//! 恢复后的引擎与原引擎**逐位一致**：`query` / `shares` /
+//! `freshness_stats` / `trust_distribution` / `stats` 全部相同，
+//! 之后每一步 `tick` 抽到的请求序列也相同（轮次进度与随机流位置都装回去了）。
+//!
+//! 快照**不含 cfg**：配置是部署参数、不是运行状态，由调用方自己保管并在
+//! `restore` 时原样传入。参数不符会被拒绝 —— 包括「seed 不同但观点字节长度
+//! 完全一样」这种 `CompressedView::decode` 抓不到的情形（靠快照里的参数指纹挡）。
+//! 格式细节见 `src/snapshot.rs` 的模块文档。
 
 mod badlist;
+pub mod criteria;
+mod snapshot;
+
+pub use snapshot::{EngineSnapshot, ViewSnapshot, SNAPSHOT_MAGIC, SNAPSHOT_VERSION};
+
+/// 自适应抽样预算：A10 硬约束 `(n_list/k)·T ≤ H/2` 的纯函数实现。
+///
+/// 只提供只读能力（推荐值 + 体检结果），不改变引擎的任何行为：
+/// 抽样仍然由应用层按自己的节奏调用 [Engine::tick]，预算 `k` 由应用层决定。
+pub mod budget;
 
 use std::collections::BTreeMap;
 
@@ -69,7 +157,18 @@ pub struct StoredView {
 pub struct EngineConfig {
     /// 个人权重 β：声望 = β × 个人项 + (1−β) × 群体项
     pub beta: Score,
-    /// 半衰期（与 Time 同单位），默认 72
+    /// 半衰期 H（与 Time 同单位），默认 72。
+    ///
+    /// # 语义改写：它是「伤害时效」参数，不是「反女巫」参数
+    ///
+    /// H 决定「一份已经发布的观点多久失去一半话语权」，也就是**一次伤害多久退潮**。
+    /// 它不是用来让女巫更难刷分的：消融实测（审计/A4-decay.md）关掉衰减后
+    /// S1/S2/S4 逐位不变、S3 只有背书场景差 6~10%、S5 单来源上限反向放大
+    /// 1.60×（72h）/ 3.40×（24h）；唯一的一阶效应是攻击残余从 0.990 降到 0.250（72h）。
+    ///
+    /// 因此调 H 的正确问法是「我希望一次攻击的伤害保留多久」，而不是
+    /// 「多小的 H 能让女巫更难被看见」。P3 用 E2/E3 把这两个后果都量化了：
+    /// 见 审计/P3-decay-purpose.md。H 与刷新周期 T 的自适应关系见 P1 与 E4。
     pub half_life: Time,
     /// 观点压缩参数
     pub view_params: ViewParams,
@@ -91,6 +190,24 @@ pub struct EngineConfig {
     ///
     /// 这是 badlist 的**唯一**配置项：没有清单、没有 EMA、没有恢复速率。
     pub penalty_strength: Score,
+    /// 观点缓存的**条目数**上限；`0`（默认）= 无限制，与引入本字段之前逐位一致。
+    ///
+    /// 设计规格 §0.3 把「观点文件设条目数 / 字节数上限，超出即丢弃并视同失败」
+    /// 写成**唯一的**资源保护，但旧实现里 [Engine::on_view] 无条件插入
+    /// `views`，`views` 只会被应用层主动调用的 [Engine::prune_stale]
+    /// 缩小（审计 A13-spec U-01 判「未实现」）。恶意应用层持续
+    /// `on_view` 不同 owner 就能让内存无界增长（每份视图 40 KiB 起）。
+    ///
+    /// 字节数上限由形状参数固定：每份视图恒为
+    /// `view_params.buckets × view_params.hashers × 4` 字节，参数不一致的视图
+    /// 在入口就被丢弃，所以**条数上限即内存上限**
+    /// `max_views × 视图字节数`（另加每条约几十字节的
+    /// [StoredView] 元数据与 `Vec` 头）。
+    ///
+    /// 判定规则见 [Engine::on_view] 的「容量上限」一节，要点：
+    /// **只有「新 owner 且已满」才丢；已缓存的 owner 更新既有条目永远接受**
+    /// （原地覆盖不增长内存）。
+    pub max_views: usize,
 }
 
 impl Default for EngineConfig {
@@ -107,6 +224,9 @@ impl Default for EngineConfig {
             // 没人调用 report_bad_account 时 query 完全跳过折扣分支，
             // 因此默认行为与引入本机制之前逐位一致。
             penalty_strength: 1.0,
+            // 0 = 无上限（旧行为）。默认值必须逐位保持：任何一个既有实验/测试
+            // 都可能喂超过（将来）某个上限的 owner 数量，改默认值等于改口径。
+            max_views: 0,
         }
     }
 }
@@ -130,13 +250,26 @@ pub struct FreshnessStats {
     pub max_age: Time,
 }
 
-
 /// 一次性批量刷新用的请求项。
 pub struct FetchRequest {
     /// 内部编号
     pub idx: AccountIdx,
     /// 对外要用的账户号（应用层据此找节点）
     pub key: AccountKey,
+}
+
+/// [Engine::on_view] 丢弃一份观点的原因（安全加固 P2）。
+///
+/// 两种原因的**处理语义完全相同**（见 [Engine::on_view]）：整条丢弃、按
+/// [Engine::on_view_failed] 的语义只给 owner 累计连败、不刷新 `last_check`、
+/// 不进缓存、不计命中。区分它们只为可观测性：容量丢弃说明 `max_views` 已经
+/// 顶满（资源保护在起作用）；非有限丢弃说明**有人在喂脏视图**（安全信号）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rejection {
+    /// 缓存已达 [EngineConfig::max_views] 且这是新 owner。
+    Capacity,
+    /// 这份观点的 `total_mass` 不是有限值（NaN / ±∞）。
+    NonFinite,
 }
 
 pub struct Engine {
@@ -165,6 +298,25 @@ pub struct Engine {
     /// 统计：累计请求数 / 成功数
     stat_requests: u64,
     stat_hits: u64,
+    /// 被 [Engine::on_view] **整条丢弃**的观点累计数（安全加固 P2）。
+    ///
+    /// 与 [Engine::stats] 分开记，是为了让 `stats()` 的四元组**形状与含义
+    /// 一个字节都不变**（既有实验与测试直接按位置解构它）。这里含两类丢弃：
+    /// 容量（[EngineConfig::max_views]）与非有限读数；`view.params()` 不匹配
+    /// 的那类仍然**只**静默丢弃、不计入——它属于协议层的「无法解释的字节」，
+    /// 与「可解释但被拒」是两件事。细分计数见 [Engine::rejected_breakdown]。
+    stat_rejected_view: u64,
+    /// 其中因容量上限被丢的条数。
+    stat_rejected_capacity: u64,
+    /// 其中因读数非有限（NaN / ±∞）被丢的条数。
+    stat_rejected_nonfinite: u64,
+    /// 最近一次 [Engine::tick] 传入的抽样预算 k（一次都没 tick 过时为 0）。
+    ///
+    /// 只用于 [Engine::freshness_budget] 的**观测**：它不参与抽样、不改任何
+    /// 评分或时间戳，也不影响后续任何计算结果。之所以由引擎记下来，
+    /// 是因为 refresh_period = ⌈n_list·T/k⌉ 必须用「**实际**用过的 k」，
+    /// 而不是调用方事后回忆的配置值。
+    last_k: usize,
 }
 
 impl Engine {
@@ -185,6 +337,10 @@ impl Engine {
             rng,
             stat_requests: 0,
             stat_hits: 0,
+            stat_rejected_view: 0,
+            stat_rejected_capacity: 0,
+            stat_rejected_nonfinite: 0,
+            last_k: 0,
         }
     }
 
@@ -253,6 +409,9 @@ impl Engine {
         // 供之后应用层调用 report_bad_account / on_view 等接口使用。
         // 不调用报告接口时折扣表恒为空，随机数序列与引入本机制之前逐位一致。
         self.clock = now;
+        // 记下这一轮实际用的预算，供只读的 [Engine::freshness_budget] 体检。
+        // 这行不参与抽样：随机流、轮次位图、退避权重的推进与之前逐位一致。
+        self.last_k = k;
 
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);
@@ -331,6 +490,45 @@ impl Engine {
     /// 这是必需的输入校验，不是优化：`hashers` 由对端声明，不校验时 16×4096
     /// 的视图能把单次 `on_view` 从 0.9 ms 拉到 572 ms（×609），单视图体积
     /// 上限 2^26 单元 = 256 MiB 也会原样进入缓存。
+    ///
+    /// # 容量上限（设计规格 §0.3，安全加固 P2）
+    ///
+    /// [EngineConfig::max_views] 给出缓存条目数上限，`0` 表示无限制。
+    ///
+    /// * **新 owner 且 `views.len() >= max_views`** → 整条**丢弃**，并按
+    ///   [Engine::on_view_failed] 的语义处理：只给该 owner 累计连败、**不**刷新
+    ///   `last_check`、不进缓存、不计 [Engine::stats] 的命中，只累加 [Engine::rejected_count] 与细分计数。
+    ///   调用方本来就分不清「成功」与「失败」，所以丢弃对上层是透明的：下一次
+    ///   [Engine::tick] 会按 1/2^n 退避它，链路自然收敛。
+    /// * **owner 已在缓存里** → 原地覆盖既有条目，**永远接受**：内存不增长，
+    ///   丢它没有任何资源保护收益，反而会阻断正常的观点刷新。
+    /// * `max_views = 0` → 两条判定都不触发，行为与引入本字段之前**逐位一致**。
+    ///
+    /// 「字节数上限」由形状参数决定：`view.params()` 必须与
+    /// [EngineConfig::view_params] 一致，于是每份缓存视图恒占
+    /// `buckets × hashers × 4` 字节，**条目数上限即内存上限**。
+    ///
+    /// # 非有限读数的防护
+    ///
+    /// `total_mass` 是对已知账户的 `query` 求和。只要任一 `query` 返回 NaN 或
+    /// ±∞，这份观点就**整条丢弃**（语义与容量路径完全相同），细分计数见
+    /// [Engine::rejected_breakdown]。
+    ///
+    /// 三个数值细节决定了必须**在求和过程中**逐个检查，而不是求和之后再查：
+    ///
+    /// 1. `clamp(0.0, 1.0)` 把 +∞ 收成 1.0、把 -∞ 收成 0.0——`total_mass` 之外
+    ///    看不出任何异常，但这份视图的读数已经被静默改写；
+    /// 2. NaN 会传染给求和结果，然而 `NaN.max(1e-6)` **精确等于 `1e-6`**
+    ///    （`f32::max` 返回非 NaN 的那个操作数），所以「在 `.max()` 之后查
+    ///    `is_finite()`」永远查不出 NaN——它只会把总质量塌到 1e-6 这个
+    ///    「放大器」档位，让每条读数都被抬到 1.0（审计 A6 D4 记的同一个洞）；
+    /// 3. 求和本身仍可能溢出成 +∞（每个读数都被 clamp 进 [0,1]，账户数要超过
+    ///    3.4e38 才可能，实际不可达），但保留 `total_mass.is_finite()` 这一条作为
+    ///    与 `all_finite` 互补的兜底。
+    ///
+    /// 注意正常路径上 `decode` 已经拒绝非有限负载，这里是**防御纵深**：
+    /// 应用层可能用 [CompressedView::merge] 把 `0 × ∞` 之类的 NaN 合进视图，
+    /// 或者自己构造 `f32` 数组（见 `crates/engine/tests/capacity.rs`）。
     pub fn on_view(
         &mut self,
         owner: AccountIdx,
@@ -343,15 +541,46 @@ impl Engine {
             return;
         }
         self.clock = now;
+        // —— 容量上限（设计规格 §0.3）——
+        // 已缓存的 owner 是原地覆盖，不增长内存，永远接受；只有「新 owner 且已满」
+        // 才丢。判定放在 noise_floor 与质量扫描之前：被丢的观点一分钱计算都不做。
+        if self.cfg.max_views > 0
+            && self.views.len() >= self.cfg.max_views
+            && !self.views.contains_key(&owner)
+        {
+            self.reject_view(owner, Rejection::Capacity);
+            return;
+        }
         let noise = view.noise_floor(1000, noise_seed(owner));
         // 接收方自己估计总质量：对已知账户求和。发布方无法伪造这个估计。
+        //
+        // **求和过程中逐个校验有限性**，而不是求和之后再查：
+        // `clamp(0.0, 1.0)` 会把 +∞ 收成 1.0、把 -∞ 收成 0.0（静默丢掉信息），
+        // NaN 则会一路传染给和；更致命的是 `NaN.max(1e-6)` 精确等于 1e-6
+        // （`f32::max` 返回非 NaN 的那个操作数），于是「查 .max() 之后的值」
+        // 永远查不出 NaN，还会把这份视图的总质量塌到 1e-6 这个放大器档位。
+        // 所以必须看 `query` 的原始返回值。
         let mut total_mass = 0.0f32;
+        let mut all_finite = true;
         for i in 0..self.accounts.len() as u32 {
             if let Some(k) = self.accounts.key_of(i) {
-                total_mass += view.query(&k).clamp(0.0, 1.0);
+                let q = view.query(&k);
+                if !q.is_finite() {
+                    all_finite = false;
+                    break;
+                }
+                total_mass += q.clamp(0.0, 1.0);
             }
         }
         let total_mass = total_mass.max(1e-6);
+        // —— 非有限读数防护 ——
+        // 判定必须在 `.max(1e-6)` **之外**留着 `all_finite`：NaN.max(1e-6) 等于 1e-6，
+        // 光看 total_mass 永远看不出 NaN。`total_mass.is_finite()` 只是为求和溢出兜底，
+        // 两者任一不成立就整条丢弃——非有限值在协议里就是「无法解释的字节」。
+        if !all_finite || !total_mass.is_finite() {
+            self.reject_view(owner, Rejection::NonFinite);
+            return;
+        }
         self.stat_hits += 1;
         self.views.insert(
             owner,
@@ -380,6 +609,25 @@ impl Engine {
     /// 普通抽样失败与兜底探测失败都要调用它。
     pub fn on_view_failed(&mut self, owner: AccountIdx, now: Time) {
         self.clock = now;
+        self.ratings.record_failure(owner);
+    }
+
+    /// 统一的「观点被拒」路径：累加计数，并按失败语义处理 owner。
+    ///
+    /// 规格 §0.3 的原文是「超出即丢弃并**视同失败**」。这里刻意直接复用
+    /// [Engine::on_view_failed] 的两条效果（时钟前移 + 连败 +1），而不是另写一遍，
+    /// 免得两条路径日后漂移。
+    ///
+    /// 代价说明：丢弃一条视图是 O(log n)（计数 + [tm_store::PositiveList] 里的
+    /// 一次 BTreeMap 查询），而被丢弃的 `view` 参数在函数返回时立刻释放——
+    /// 容量上限挡住的正是「留在缓存里」的那部分内存，不是丢弃动作本身。
+    fn reject_view(&mut self, owner: AccountIdx, why: Rejection) {
+        self.stat_rejected_view += 1;
+        match why {
+            Rejection::Capacity => self.stat_rejected_capacity += 1,
+            Rejection::NonFinite => self.stat_rejected_nonfinite += 1,
+        }
+        // 与 on_view_failed 完全同一语义：只加连败，不刷新 last_check。
         self.ratings.record_failure(owner);
     }
 
@@ -544,6 +792,26 @@ impl Engine {
     /// - `decay_enabled = false`  → 恒为 1（不衰减）
     /// - `decay_floor > 0`        → `max(0.5^(Δt/H), floor)`（有下限，例如最多衰减一半）
     /// - 其它                      → `0.5^(Δt/H)`（原行为）
+    ///
+    /// # 它是「伤害时效」，不是「反女巫」
+    ///
+    /// 本因子只出现在 [Engine::query] 的**来源级**权重 `w_v = 份额_v × fs_v × penalty_v`
+    /// 里，因此：
+    ///
+    /// * 它**不改份额、不改个人项**——[Engine::query] 的个人项永不衰减，
+    ///   所以「我对谁打过多少分」这个表态本身没有到期日；
+    /// * 它只在「来源之间」重新分配话语权。全部来源新鲜度相同（同一时刻批量刷新）时
+    ///   公共因子会被加权平均约掉，此时删掉衰减实现也测不出差异——这也是为什么
+    ///   「衰减对 S1/S2/S4 的贡献 ≤4% 且 CI 跨 0」不是实现 bug，而是它的结构决定的；
+    /// * 它的一阶效应是**遗忘**：来源停止更新后权重单调退潮，攻击载荷随缓存变旧而
+    ///   失去杀伤力。这是保留本参数的唯一理由（消融里它是唯一显著的一阶效应：
+    ///   攻击残余 0.990(off) → 0.250(72h) → −0.043(24h)）；
+    /// * 它的副作用是**新鲜度套利**：保持新鲜的来源相对变旧的来源拿到超额话语权。
+    ///   解析式见 E3：诚实来源整体陈旧 `age` 小时、单个攻击者保持新鲜时，
+    ///   单来源影响力被放大 `7/(1+6·0.5^(age/H))` 倍（24h/60h 时 3.40×）。
+    ///
+    /// 结论：调 H 时的正确目标函数是「伤害时效」，不是「反女巫强度」。
+    /// 完整论证与四个实验的数字见 审计/P3-decay-purpose.md。
     pub fn decay_factor(&self, dt: Time) -> Score {
         if !self.cfg.decay_enabled {
             return 1.0;
@@ -819,6 +1087,115 @@ impl Engine {
         combine(self.cfg.beta, personal, group)
     }
 
+    // ---------- 自适应抽样预算（只读观测，A10 §6.2 / §8） ----------
+
+    /// 按当前正分清单长度反解「每轮该抽多少条」。
+    ///
+    /// 直接调 [budget::recommended_k]，参数取自引擎自己：
+    /// 清单长度 = [PositiveList::len]，半衰期 = [EngineConfig::half_life]
+    /// （0 按 1 处理，与 `tm_agg::decay` 的约定一致）。
+    ///
+    /// 依据是 A10 的硬约束 `(n_list/k)·T ≤ H/2`：刷新周期一旦超过半个半衰期，
+    /// 时间衰减就退化成「谁被随机抽到谁说话」，群体项实际由最近被抽到的那几条决定
+    /// （实测 n=600、k=8、T=30h ⇒ 刷新周期 2250h、90.7% 的来源衰减因子 < 0.1、
+    /// ESS 600 → 55.8）。本方法给的就是满足该约束的**最小** k。
+    ///
+    /// * 清单为空返回 0（没有可抽的对象）；
+    /// * 返回值恒落在 `[1, n_list]`：超过清单长度的预算没有意义；
+    /// * 返回值等于 `n_list` 时说明**仅靠增大 k 已经不达标**：轮间隔 `period`
+    ///   本身超过了 H/2，只能缩短 `period`（见 [budget::BudgetVerdict::DecayDiluted]）。
+    ///
+    /// 只读：不修改任何状态，多次调用必然返回同一个值。
+    #[must_use]
+    pub fn recommended_k(&self, period: Time) -> usize {
+        budget::recommended_k(self.ratings.len(), period, self.cfg.half_life)
+    }
+
+    /// 体检当前的抽样预算：刷新周期够不够短、衰减还在不在起作用、观点覆盖够不够。
+    ///
+    /// # 参数
+    /// * `now` —— 计算观点年龄的时间基准（衰减基准是 [StoredView::last_check]，
+    ///   不是对方声明的 `published_at`）；
+    /// * `period` —— **应用层自己的轮次间隔**。引擎不维护定时器（[Engine::tick] /
+    ///   [Engine::probe] 的节奏本就由应用层决定），所以这个数只能由调用方给。
+    ///
+    /// 抽样预算 `k` 取 [Engine::last_budget_k]（最近一次 [Engine::tick] 实际传入的值）。
+    /// 一次都没 tick 过时 `k = 0`：刷新周期按无穷处理（[budget::refresh_period]），
+    /// 判定必然不是健康 —— 「还没开始抽」本来就不该被报成健康。
+    /// 如果需要体检「假设用某个 k」的方案，用 [budget::assess] 或
+    /// [budget::recommended_k] 直接算。
+    ///
+    /// # 口径（与 [Engine::query] 的群体项严格对齐）
+    /// * 来源集合 = **正分清单** `ratings`（不是 `views`）：撤销评分的来源还在
+    ///   缓存里，但它已经不在群体项里了，所以不算覆盖；
+    /// * 每个来源的权重 `w = 份额 × 衰减因子`，衰减因子取 [Engine::decay_factor]
+    ///   （因此 `decay_enabled = false` 时全体权重恒为 1，ESS 就是来源数）；
+    /// * **不含 badlist 折扣**：折扣是「这次先少听它一点」的事件态，不是部署参数
+    ///   的体检对象，而且默认表为空（此时两者逐位相同）；
+    /// * `coverage = |views ∩ ratings| / |ratings|`；`fresh_within_halflife` 的
+    ///   判定是 `age ≤ H`（H 按 0 → 1），与 [Engine::freshness_stats] 逐点同口径；
+    /// * `ess = (Σw)²/Σw²`，见 [budget::effective_sample_size]。
+    ///
+    /// # 判定
+    /// `Empty`（清单为空）→ `LowCoverage`（覆盖率 < 0.5）→ `DecayDiluted`
+    /// （刷新周期 > H/2，附推荐 k）→ `Healthy`。顺序是固定的：覆盖率不足时
+    /// 「把 k 调大」是隔靴搔痒，先把观点取回来才是第一优先级。
+    ///
+    /// 本方法是**纯观测**：不刷新 `last_check`、不动抽样轮次、不写折扣表，
+    /// 连续调用两次返回逐位相同的结构体。
+    #[must_use]
+    pub fn freshness_budget(&self, now: Time, period: Time) -> budget::FreshnessBudget {
+        let n_list = self.ratings.len();
+        let half_life = self.cfg.half_life;
+        // 与 freshness_stats 的口径一致：H = 0 按 1 处理，恰好 H 也算「新鲜」。
+        let half_life_norm = budget::normalized_half_life(half_life);
+
+        let mut weights: Vec<Score> = Vec::with_capacity(n_list);
+        let mut covered = 0usize;
+        let mut fresh = 0usize;
+        for (owner, _rating, _last) in self.ratings.iter() {
+            // 没有观点：这个来源投弃权票（份额计入群体项分母，但不进 ESS ——
+            // ESS 量的是「真正参与加权」的样本）。
+            let stored = match self.views.get(&owner) {
+                Some(v) => v,
+                None => continue,
+            };
+            covered += 1;
+            if let Some(share) = self.ratings.share(owner) {
+                let w = share * self.decay_factor(elapsed(stored.last_check, now));
+                if w.is_finite() && w > 0.0 {
+                    weights.push(w);
+                }
+            }
+            if elapsed(stored.last_check, now) <= half_life_norm {
+                fresh += 1;
+            }
+        }
+        let coverage = if n_list == 0 {
+            0.0
+        } else {
+            covered as f32 / n_list as f32
+        };
+        budget::assess(
+            n_list,
+            self.last_k,
+            period,
+            half_life,
+            coverage,
+            fresh,
+            budget::effective_sample_size(&weights),
+        )
+    }
+
+    /// 最近一次 [Engine::tick] 传入的抽样预算 k；一次都没 tick 过时为 0。
+    ///
+    /// 这是 [Engine::freshness_budget] 计算刷新周期用的那个值，单独暴露出来
+    /// 是为了让应用层能核对「体检用的确实是我实际在用的预算」。
+    #[must_use]
+    pub fn last_budget_k(&self) -> usize {
+        self.last_k
+    }
+
     // ---------- 统计 ----------
 
     pub fn stats(&self) -> (u64, u64, usize, usize) {
@@ -828,6 +1205,31 @@ impl Engine {
             self.views.len(),
             self.ratings.len(),
         )
+    }
+
+    /// 被 [Engine::on_view] **整条丢弃**的观点累计条数（安全加固 P2）。
+    ///
+    /// 含两类：容量上限（[EngineConfig::max_views]）与非有限读数。
+    /// `view.params()` 不匹配的视图仍然只静默丢弃、不计入这里。
+    ///
+    /// 与 [Engine::stats] 分开暴露是刻意的：`stats()` 的四元组形状与含义
+    /// 保持不变（既有实验按位置解构它），新计数走新接口。
+    ///
+    /// 这个数字**单调递增**、只增不减（[Engine::prune_stale] 清理旧观点不会让它
+    /// 回退），它是「被拒了多少次」的累计事件计数，不是「现在有多少条被拒」。
+    #[must_use]
+    pub fn rejected_count(&self) -> u64 {
+        self.stat_rejected_view
+    }
+
+    /// 丢弃原因的细分计数：`(因容量被丢, 因读数非有限被丢)`。
+    ///
+    /// 两者之和恒等于 [Engine::rejected_count]。容量那一项大于 0 说明
+    /// [EngineConfig::max_views] 正在顶满（资源保护生效）；非有限那一项大于 0
+    /// 说明有人在喂脏视图（安全信号，值得上层告警）。
+    #[must_use]
+    pub fn rejected_breakdown(&self) -> (u64, u64) {
+        (self.stat_rejected_capacity, self.stat_rejected_nonfinite)
     }
 }
 

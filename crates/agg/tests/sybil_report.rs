@@ -153,7 +153,10 @@ fn one_liar_weight_sweep() {
         );
         // 5) 截尾的方向依赖占比：不到一半只会往下修，超过一半反而比 Mean 更高
         if share < 0.5 {
-            assert!(t05 <= mean + 1e-6, "占比 {share}：Trimmed 不该比 Mean 高，{t05} > {mean}");
+            assert!(
+                t05 <= mean + 1e-6,
+                "占比 {share}：Trimmed 不该比 Mean 高，{t05} > {mean}"
+            );
         } else if share > 0.5 {
             assert!(
                 t05 >= mean - 1e-6,
@@ -195,7 +198,10 @@ fn one_liar_at_full_weight_share() {
     let share = share_of(f32::MAX);
 
     println!();
-    println!("===== 表 1 补充：撒谎者权重占比 -> 100%（w = f32::MAX = {:e}）=====", f32::MAX);
+    println!(
+        "===== 表 1 补充：撒谎者权重占比 -> 100%（w = f32::MAX = {:e}）=====",
+        f32::MAX
+    );
     println!("实际占比 = {share:.17}（f32 下即 1.0）");
     println!("Mean = {mean}, Median = {median}, WeightedMedian = {wmed}");
 
@@ -258,7 +264,10 @@ fn headcount_beats_median_but_weight_does_not() {
 
         // Mean 一定等于撒谎者的**人头**占比
         let expect = k as f32 / total as f32;
-        assert!((mean - expect).abs() < 1e-6, "k = {k}: Mean {mean} 应当是 {expect}");
+        assert!(
+            (mean - expect).abs() < 1e-6,
+            "k = {k}: Mean {mean} 应当是 {expect}"
+        );
 
         // 中位数：<= 9 个撒谎者时仍是 0；10 个时是 0.5（两侧各一半）；>= 11 个时是 1
         let expect_median = if k <= 9 {
@@ -288,13 +297,18 @@ fn headcount_beats_median_but_weight_does_not() {
     // 一句话总结：1 个撒谎者拿 100% 权重也动不了 Median，
     // 但 10 个撒谎者各拿 1/20 的权重，Median 立刻变成 0.5。
     let one_liar_all_weight = scenario(f32::MAX);
-    assert_eq!(aggregate(&one_liar_all_weight, AggMode::Median).unwrap(), 0.0);
+    assert_eq!(
+        aggregate(&one_liar_all_weight, AggMode::Median).unwrap(),
+        0.0
+    );
     let ten_liars: Vec<(f32, f32)> = (0..total)
         .map(|i| (1.0f32, if i < 10 { 1.0f32 } else { 0.0f32 }))
         .collect();
     assert_eq!(aggregate(&ten_liars, AggMode::Median).unwrap(), 0.5);
     println!();
-    println!("对照：1 个撒谎者拿 100% 权重 -> Median 0.0000；10 个撒谎者各拿 1/20 权重 -> Median 0.5000");
+    println!(
+        "对照：1 个撒谎者拿 100% 权重 -> Median 0.0000；10 个撒谎者各拿 1/20 权重 -> Median 0.5000"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +419,10 @@ fn trimmed_immunity_requires_p_at_least_the_attacker_share() {
                 "占比 {share:.3}、p = {p}: Trimmed = {r}，闭式解 = {want}"
             );
             if (p as f64) >= share {
-                assert!(r < 1e-5, "占比 {share:.3}、p = {p} 时应当完全免疫，实际 {r}");
+                assert!(
+                    r < 1e-5,
+                    "占比 {share:.3}、p = {p} 时应当完全免疫，实际 {r}"
+                );
             } else {
                 assert!(r > 0.0, "占比 {share:.3}、p = {p} 时不该完全免疫，实际 {r}");
             }
@@ -424,7 +441,10 @@ fn trimmed_immunity_requires_p_at_least_the_attacker_share() {
     let w = liar_weight_for_share(0.6);
     let items = scenario(w);
     let r = aggregate(&items, AggMode::Trimmed(tm_agg::MAX_TRIM)).unwrap();
-    assert!(r > 0.01, "占比 60%、p 取到上限时截尾均值仍应被污染，实际 {r}");
+    assert!(
+        r > 0.01,
+        "占比 60%、p 取到上限时截尾均值仍应被污染，实际 {r}"
+    );
     println!();
     println!(
         "注意：p 被 MAX_TRIM（{:.7}）卡在 0.5 以下，所以撒谎者权重过半后，Trimmed 也救不回来。",
@@ -446,7 +466,11 @@ fn combine_only_dilutes_the_poisoned_group_term() {
     for &beta in &[0.0f32, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0] {
         let r = combine(beta, 0.0, Some(1.0));
         println!("{:>6.2}  {:>10.4}", beta, r);
-        assert!((r - (1.0 - beta)).abs() < 1e-6, "beta = {beta}: {r} 应当是 {}", 1.0 - beta);
+        assert!(
+            (r - (1.0 - beta)).abs() < 1e-6,
+            "beta = {beta}: {r} 应当是 {}",
+            1.0 - beta
+        );
     }
     // 默认 β = 0.7：群体项里的 1.0 会有 30% 漏进最终声望
     assert!((combine(0.7, 0.0, Some(1.0)) - 0.3).abs() < 1e-6);
@@ -493,7 +517,10 @@ fn final_reputation_under_single_liar() {
         );
 
         // 最终声望同样被 clamp 在 [0,1]；β 只是等比缩放群体项
-        assert!((f_median - 0.0).abs() < 1e-6, "Median 口径下最终声望必须仍是 0");
+        assert!(
+            (f_median - 0.0).abs() < 1e-6,
+            "Median 口径下最终声望必须仍是 0"
+        );
         assert!((f_mean - (1.0 - beta) * mean).abs() < 1e-6);
     }
 }

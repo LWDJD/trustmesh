@@ -18,7 +18,11 @@ fn eng() -> Engine {
     Engine::new(EngineConfig {
         beta: 0.3,
         half_life: 72,
-        view_params: ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        view_params: ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
@@ -90,20 +94,20 @@ fn multi_node_exchange_keeps_sum_one() {
         .collect();
 
     // 环形互评：i 给 (i+1)%N 打 1.0
-    for i in 0..N {
-        nodes[i].rate(((i + 1) % N) as u32, 1.0, 0);
+    for (i, node) in nodes.iter_mut().enumerate() {
+        node.rate(((i + 1) % N) as u32, 1.0, 0);
     }
 
     for round in 0..3u64 {
         // 所有节点先导出观点快照
         let views: Vec<CompressedView> = nodes.iter().map(|e| e.export_view(round)).collect();
         // 再各自抽样并接收
-        for i in 0..N {
-            let reqs = nodes[i].tick(round, 4);
+        for (i, node) in nodes.iter_mut().enumerate() {
+            let reqs = node.tick(round, 4);
             assert!(!reqs.is_empty(), "节点 {i} 应有抽样请求");
             for r in reqs {
                 let src = r.idx as usize;
-                nodes[i].on_view(r.idx, views[src].clone(), round, round);
+                node.on_view(r.idx, views[src].clone(), round, round);
             }
         }
         // 每轮结束都校验守恒
@@ -124,7 +128,11 @@ fn unrated_account_is_visible_but_never_sampled() {
 
     // a 的观点抬举 ghost → ghost 通过链条进入我的群体项（这是设计允许的）
     let v = CompressedView::from_pairs(
-        ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         &[(key(200), 1.0)],
     );
     e.on_view(a, v, 0, 0);
@@ -152,7 +160,11 @@ fn view_age_grows_over_time() {
     let a = e.intern(key(1));
     e.rate(a, 1.0, 0);
     let v = CompressedView::from_pairs(
-        ViewParams { buckets: 512, hashers: 5, seed: 7 },
+        ViewParams {
+            buckets: 512,
+            hashers: 5,
+            seed: 7,
+        },
         &[(key(1), 1.0)],
     );
     e.on_view(a, v, 0, 0);
@@ -173,11 +185,19 @@ fn uniform_staleness_does_not_change_result() {
         e.rate(f1, 1.0, 0);
         e.rate(f2, 1.0, 0);
         let v1 = CompressedView::from_pairs(
-            ViewParams { buckets: 512, hashers: 5, seed: 7 },
+            ViewParams {
+                buckets: 512,
+                hashers: 5,
+                seed: 7,
+            },
             &[(key(9), 1.0)],
         );
         let v2 = CompressedView::from_pairs(
-            ViewParams { buckets: 512, hashers: 5, seed: 7 },
+            ViewParams {
+                buckets: 512,
+                hashers: 5,
+                seed: 7,
+            },
             &[(key(9), 0.0)],
         );
         e.on_view(f1, v1, 0, 0);

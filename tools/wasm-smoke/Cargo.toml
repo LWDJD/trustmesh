@@ -1,0 +1,24 @@
+[package]
+name = "tm_wasm_smoke"
+version = "0.1.0"
+edition = "2021"
+description = "wasm32 冒烟测试：在真引擎上跑完整流程，与 native 逐位对拍"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# bin 名字必须与 lib 不同，否则 cargo 会报 output filename collision
+[[bin]]
+name = "tm_wasm_smoke_cli"
+path = "src/main.rs"
+
+[dependencies]
+tm_engine = { path = "../../crates/engine" }
+tm_view = { path = "../../crates/view" }
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = true

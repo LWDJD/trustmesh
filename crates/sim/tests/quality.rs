@@ -62,14 +62,24 @@ fn 评分全部落在开区间零到一() {
     assert!(!ratings.is_empty());
     for (s, u, score) in &ratings {
         assert!(score.is_finite(), "{s}->{u} 的评分不是有限值");
-        assert!(*score > 0.0, "{s}->{u} 出现 0 分（0 应该表示没表态，不写入）");
+        assert!(
+            *score > 0.0,
+            "{s}->{u} 出现 0 分（0 应该表示没表态，不写入）"
+        );
         assert!(*score <= 1.0, "{s}->{u} 评分 {} 超过 1", score);
-        assert!(*score >= w.cfg.min_stance - 1e-6, "低于表态阈值的分不该被记录");
+        assert!(
+            *score >= w.cfg.min_stance - 1e-6,
+            "低于表态阈值的分不该被记录"
+        );
     }
     let d = w.report().distribution;
     assert_eq!(d.count, ratings.len());
     assert!(d.min > 0.0);
-    assert!((0.3..0.7).contains(&d.mean), "整体均分 {} 偏离常识区间", d.mean);
+    assert!(
+        (0.3..0.7).contains(&d.mean),
+        "整体均分 {} 偏离常识区间",
+        d.mean
+    );
     assert!(d.std > 0.05, "评分完全没有差异（std={}）", d.std);
     assert!(d.p10 <= d.p25 && d.p25 <= d.p50 && d.p50 <= d.p75);
     assert!(d.p75 <= d.p90 && d.p90 <= d.p99);

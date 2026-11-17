@@ -106,6 +106,8 @@ fn engine_cfg() -> EngineConfig {
         decay_enabled: true,
         decay_floor: 0.0,
         penalty_strength: 1.0,
+        // 其余字段取默认值：尤其是 max_views = 0（无上限），与改造前逐位一致。
+        ..Default::default()
     }
 }
 

@@ -287,7 +287,11 @@ impl SimConfig {
 
         self.attack_ratio = unit(self.attack_ratio, d.attack_ratio);
         if let AttackKind::Endorser { ratio } = self.attack_kind {
-            let r = if ratio.is_finite() { ratio.clamp(0.0, 1.0) } else { 0.0 };
+            let r = if ratio.is_finite() {
+                ratio.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             self.attack_kind = AttackKind::Endorser { ratio: r };
         }
         if let AttackKind::Sybil { cluster } = self.attack_kind {

@@ -52,13 +52,19 @@ fn ecfg(_arm: Arm) -> EngineConfig {
     EngineConfig {
         beta: 0.3,
         half_life: HALF_LIFE,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
         decay_floor: 0.0,
         // badlist 默认关闭：本实验不涉及受害者反馈。
         penalty_strength: 1.0,
+        // 其余字段取默认值：尤其是 max_views = 0（无上限），与改造前逐位一致。
+        ..Default::default()
     }
 }
 
@@ -231,7 +237,11 @@ fn pct_of(row: &[f32], hset: &[usize], x: usize) -> (f64, f64) {
 fn ranks(vals: &[f64]) -> Vec<f64> {
     let n = vals.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| vals[a].partial_cmp(&vals[b]).unwrap_or(std::cmp::Ordering::Equal));
+    idx.sort_by(|&a, &b| {
+        vals[a]
+            .partial_cmp(&vals[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut out = vec![0.0f64; n];
     let mut i = 0usize;
     while i < n {
@@ -282,7 +292,10 @@ fn spearman(row: &[f32], quality: &[f32], n: usize) -> (f64, usize) {
 
 fn live_stat(e: &Engine, t: u64, is_att: &[bool], is_slp: &[bool]) -> LiveStat {
     let shares = e.shares();
-    let mut ls = LiveStat { n_pos: shares.len(), ..LiveStat::default() };
+    let mut ls = LiveStat {
+        n_pos: shares.len(),
+        ..LiveStat::default()
+    };
     let mut w_sum = 0.0f64;
     let mut age_sum = 0.0f64;
     let mut ages: Vec<f64> = Vec::new();
@@ -310,7 +323,11 @@ fn live_stat(e: &Engine, t: u64, is_att: &[bool], is_slp: &[bool]) -> LiveStat {
         }
     }
     ls.avg_age = if w_sum > 0.0 { age_sum / w_sum } else { 0.0 };
-    ls.cov = if ls.n_pos > 0 { ls.live as f64 / ls.n_pos as f64 } else { 0.0 };
+    ls.cov = if ls.n_pos > 0 {
+        ls.live as f64 / ls.n_pos as f64
+    } else {
+        0.0
+    };
     ls.s = 1.0; // §4.9 删除后不存在群体级系数（列位保留，便于与历史数据对齐）
     ls.age_med = median(&mut ages);
     ls
@@ -358,9 +375,15 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
         let alive: Vec<bool> = world.accounts().iter().map(|a| a.is_alive()).collect();
         let kind: Vec<Kind> = world.accounts().iter().map(|a| a.kind).collect();
         let is_att: Vec<bool> = kind.iter().map(|k| k.is_attacker()).collect();
-        let is_slp: Vec<bool> = kind.iter().map(|k| matches!(k, Kind::Sleeper { .. })).collect();
+        let is_slp: Vec<bool> = kind
+            .iter()
+            .map(|k| matches!(k, Kind::Sleeper { .. }))
+            .collect();
         let is_prom: Vec<bool> = kind.iter().map(|k| matches!(k, Kind::Promoted)).collect();
-        let is_syb: Vec<bool> = kind.iter().map(|k| matches!(k, Kind::Sybil { .. })).collect();
+        let is_syb: Vec<bool> = kind
+            .iter()
+            .map(|k| matches!(k, Kind::Sybil { .. }))
+            .collect();
         let joined: Vec<u64> = world.accounts().iter().map(|a| a.joined_at).collect();
         let quality: Vec<f32> = world.accounts().iter().map(|a| a.quality).collect();
         let online: Vec<bool> = (0..n)
@@ -442,10 +465,26 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
             n_h: honest_online.len(),
             n_alive: alive_n,
             n_online: online_n,
-            pop_slp_alive: if alive_n > 0 { n_alive_slp as f64 / alive_n as f64 } else { 0.0 },
-            pop_att_alive: if alive_n > 0 { n_alive_att as f64 / alive_n as f64 } else { 0.0 },
-            pop_slp_on: if online_n > 0 { n_on_slp as f64 / online_n as f64 } else { 0.0 },
-            pop_att_on: if online_n > 0 { n_on_att as f64 / online_n as f64 } else { 0.0 },
+            pop_slp_alive: if alive_n > 0 {
+                n_alive_slp as f64 / alive_n as f64
+            } else {
+                0.0
+            },
+            pop_att_alive: if alive_n > 0 {
+                n_alive_att as f64 / alive_n as f64
+            } else {
+                0.0
+            },
+            pop_slp_on: if online_n > 0 {
+                n_on_slp as f64 / online_n as f64
+            } else {
+                0.0
+            },
+            pop_att_on: if online_n > 0 {
+                n_on_att as f64 / online_n as f64
+            } else {
+                0.0
+            },
             ..RoundRec::default()
         };
 
@@ -478,9 +517,21 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
                     }
                 }
                 rr.ctrl_n = cs.len();
-                rr.ctrl_pct_s = if cs.is_empty() { 0.0 } else { cs.iter().sum::<f64>() / cs.len() as f64 };
-                rr.ctrl_pct_m = if cm.is_empty() { 0.0 } else { cm.iter().sum::<f64>() / cm.len() as f64 };
-                rr.ctrl_ratio = if cr.is_empty() { 0.0 } else { cr.iter().sum::<f64>() / cr.len() as f64 };
+                rr.ctrl_pct_s = if cs.is_empty() {
+                    0.0
+                } else {
+                    cs.iter().sum::<f64>() / cs.len() as f64
+                };
+                rr.ctrl_pct_m = if cm.is_empty() {
+                    0.0
+                } else {
+                    cm.iter().sum::<f64>() / cm.len() as f64
+                };
+                rr.ctrl_ratio = if cr.is_empty() {
+                    0.0
+                } else {
+                    cr.iter().sum::<f64>() / cr.len() as f64
+                };
             }
             let sample_obs = stride_sample(&honest_online, 8);
             {
@@ -488,8 +539,19 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
                 let mut live_v: Vec<f64> = Vec::new();
                 println!(
                     "CTRL,{:.2},{},{},{},{},{},{:.4},{:.4},{:.4},{:.3},{:.3},{:.4},{:.4},{:.4}",
-                    wc.p, wc.d, wc.seed, arm.tag(), r, rr.ctrl_n, rr.ctrl_pct_s, rr.ctrl_pct_m,
-                    rr.ctrl_ratio, rr.s_p50, rr.cov_p50, rr.pop_slp_alive, rr.pop_att_alive,
+                    wc.p,
+                    wc.d,
+                    wc.seed,
+                    arm.tag(),
+                    r,
+                    rr.ctrl_n,
+                    rr.ctrl_pct_s,
+                    rr.ctrl_pct_m,
+                    rr.ctrl_ratio,
+                    rr.s_p50,
+                    rr.cov_p50,
+                    rr.pop_slp_alive,
+                    rr.pop_att_alive,
                     median(&mut live_v)
                 );
             }
@@ -502,7 +564,14 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
                     None => continue,
                 };
                 let ls = live_stat(e, t, &is_att, &is_slp);
-                let mut rec = EvRec { obs, r0, k, ls, online: online[obs], ..EvRec::default() };
+                let mut rec = EvRec {
+                    obs,
+                    r0,
+                    k,
+                    ls,
+                    online: online[obs],
+                    ..EvRec::default()
+                };
                 if let Some(prom) = prom_idx {
                     let row = row_of(e, n, t);
                     let (s, m) = pct_of(&row, &honest_online, prom);
@@ -527,7 +596,16 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
                     let row = row_of(e, n, t);
                     let (rho, sup) = spearman(&row, &quality, n);
                     let ls = live_stat(e, t, &is_att, &is_slp);
-                    let mut rec = EvRec { obs: o, r0: r, k: 999, rho, support: sup, ls, online: true, ..EvRec::default() };
+                    let mut rec = EvRec {
+                        obs: o,
+                        r0: r,
+                        k: 999,
+                        rho,
+                        support: sup,
+                        ls,
+                        online: true,
+                        ..EvRec::default()
+                    };
                     let syb_n = is_syb.iter().filter(|x| **x).count();
                     if syb_n > 0 {
                         let mut s = 0.0f64;
@@ -597,7 +675,11 @@ fn simulate(wc: &WorldCfg, arm: Arm) -> SimOut {
 
         // 8. 更新离线时长
         for i in 0..n {
-            prev_off[i] = if alive[i] { world.offline_duration(i, t) } else { 0 };
+            prev_off[i] = if alive[i] {
+                world.offline_duration(i, t)
+            } else {
+                0
+            };
         }
 
         out.rounds.push(rr);
@@ -620,19 +702,35 @@ fn diag(args: &[String]) {
         vec![0.70]
     } else {
         let p0 = get_f64(args, "--p", -1.0);
-        if p0 >= 0.0 { vec![p0] } else { vec![0.50, 0.70, 0.90] }
+        if p0 >= 0.0 {
+            vec![p0]
+        } else {
+            vec![0.50, 0.70, 0.90]
+        }
     };
     let d: u64 = get_u64(args, "--d", 216);
-    let seeds: Vec<u64> = if smoke { vec![11] } else { vec![11, 23, 37, 53, 71, 89, 97, 113] };
+    let seeds: Vec<u64> = if smoke {
+        vec![11]
+    } else {
+        vec![11, 23, 37, 53, 71, 89, 97, 113]
+    };
     let steps: u64 = 400;
     let n_init: usize = get_u64(args, "--n", 300) as usize;
 
     // dormancy_rate 取 L4 的 CAL 标定值（attack_ratio=1/300）
     let calib: [(f64, u64, f64); 12] = [
-        (0.30, 72, 0.002779), (0.30, 216, 0.000905), (0.30, 720, 0.000292),
-        (0.50, 72, 0.006416), (0.50, 216, 0.002171), (0.50, 720, 0.000655),
-        (0.70, 72, 0.015679), (0.70, 216, 0.004917), (0.70, 720, 0.001159),
-        (0.90, 72, 0.069347), (0.90, 216, 0.009935), (0.90, 720, 0.002999),
+        (0.30, 72, 0.002779),
+        (0.30, 216, 0.000905),
+        (0.30, 720, 0.000292),
+        (0.50, 72, 0.006416),
+        (0.50, 216, 0.002171),
+        (0.50, 720, 0.000655),
+        (0.70, 72, 0.015679),
+        (0.70, 216, 0.004917),
+        (0.70, 720, 0.001159),
+        (0.90, 72, 0.069347),
+        (0.90, 216, 0.009935),
+        (0.90, 720, 0.002999),
     ];
     println!("# A5 diag：回归者 live 集合组成");
     println!("# 攻击=Sleeper ratio={:.3} normal_until={} 强制攻击者在线={} 轮长={}h samples={} (回归当轮 x3)",
@@ -641,12 +739,23 @@ fn diag(args: &[String]) {
     println!("DIAGHDR,p,D,seed,k,n_events,live_mean,n_pos_mean,cov_mean,s_mean,live_slp_share,live_att_share,pop_slp_share,pop_att_share,pos_slp_share,pos_att_share,ratio_slp,ratio_att,ratio_slp_on,ratio_att_on,age_med");
 
     for &p in &ps {
-        let dormancy = calib.iter().find(|c| (c.0 - p).abs() < 1e-9 && c.1 == d).map(|c| c.2).unwrap_or(0.005);
+        let dormancy = calib
+            .iter()
+            .find(|c| (c.0 - p).abs() < 1e-9 && c.1 == d)
+            .map(|c| c.2)
+            .unwrap_or(0.005);
         for &seed in &seeds {
             let wc = WorldCfg {
-                p, dormancy, d, seed, steps, n_initial: n_init,
+                p,
+                dormancy,
+                d,
+                seed,
+                steps,
+                n_initial: n_init,
                 attack_ratio: ratio,
-                attack: AttackKind::Sleeper { normal_until: steps / 5 },
+                attack: AttackKind::Sleeper {
+                    normal_until: steps / 5,
+                },
                 force_att_online: force_on,
             };
             let o = simulate(&wc, Arm::Off);
@@ -675,19 +784,56 @@ fn diag(args: &[String]) {
                     cov.push(ls.cov);
                     s.push(ls.s);
                     ages.push(ls.age_med);
-                    let lsv = if ls.live > 0 { ls.live_slp as f64 / ls.live as f64 } else { 0.0 };
-                    let lav = if ls.live > 0 { ls.live_att as f64 / ls.live as f64 } else { 0.0 };
-                    let psv = if ls.n_pos > 0 { ls.pos_slp as f64 / ls.n_pos as f64 } else { 0.0 };
-                    let pav = if ls.n_pos > 0 { ls.pos_att as f64 / ls.n_pos as f64 } else { 0.0 };
+                    let lsv = if ls.live > 0 {
+                        ls.live_slp as f64 / ls.live as f64
+                    } else {
+                        0.0
+                    };
+                    let lav = if ls.live > 0 {
+                        ls.live_att as f64 / ls.live as f64
+                    } else {
+                        0.0
+                    };
+                    let psv = if ls.n_pos > 0 {
+                        ls.pos_slp as f64 / ls.n_pos as f64
+                    } else {
+                        0.0
+                    };
+                    let pav = if ls.n_pos > 0 {
+                        ls.pos_att as f64 / ls.n_pos as f64
+                    } else {
+                        0.0
+                    };
                     lsh.push(lsv);
                     lsh_att.push(lav);
                     psh.push(psv);
                     psh_att.push(pav);
-                    let rr = o.rounds.iter().find(|x| x.r == e.r0 + e.k).copied().unwrap_or_default();
-                    ratio_slp.push(if rr.pop_slp_alive > 0.0 { lsv / rr.pop_slp_alive } else { 0.0 });
-                    ratio_att.push(if rr.pop_att_alive > 0.0 { lav / rr.pop_att_alive } else { 0.0 });
-                    ratio_slp_on.push(if rr.pop_slp_on > 0.0 { lsv / rr.pop_slp_on } else { 0.0 });
-                    ratio_att_on.push(if rr.pop_att_on > 0.0 { lav / rr.pop_att_on } else { 0.0 });
+                    let rr = o
+                        .rounds
+                        .iter()
+                        .find(|x| x.r == e.r0 + e.k)
+                        .copied()
+                        .unwrap_or_default();
+                    ratio_slp.push(if rr.pop_slp_alive > 0.0 {
+                        lsv / rr.pop_slp_alive
+                    } else {
+                        0.0
+                    });
+                    ratio_att.push(if rr.pop_att_alive > 0.0 {
+                        lav / rr.pop_att_alive
+                    } else {
+                        0.0
+                    });
+                    ratio_slp_on.push(if rr.pop_slp_on > 0.0 {
+                        lsv / rr.pop_slp_on
+                    } else {
+                        0.0
+                    });
+                    ratio_att_on.push(if rr.pop_att_on > 0.0 {
+                        lav / rr.pop_att_on
+                    } else {
+                        0.0
+                    });
                 }
                 let mut pop_s = Vec::new();
                 let mut pop_a = Vec::new();
@@ -708,7 +854,10 @@ fn diag(args: &[String]) {
                     mean_sd(&ages).0
                 );
             }
-            eprintln!("[diag] p={p} d={d} seed={seed} events={} {:.1}s", o.n_events, o.secs);
+            eprintln!(
+                "[diag] p={p} d={d} seed={seed} events={} {:.1}s",
+                o.n_events, o.secs
+            );
         }
     }
 }
@@ -724,7 +873,11 @@ fn effect(args: &[String]) {
         vec![0.50]
     } else {
         let p0 = get_f64(args, "--p", -1.0);
-        if p0 >= 0.0 { vec![p0] } else { vec![0.30, 0.50, 0.70, 0.90] }
+        if p0 >= 0.0 {
+            vec![p0]
+        } else {
+            vec![0.30, 0.50, 0.70, 0.90]
+        }
     };
     let d: u64 = get_u64(args, "--d", 216);
     let seeds: Vec<u64> = if smoke {
@@ -735,10 +888,18 @@ fn effect(args: &[String]) {
     let steps: u64 = 400;
     let n_init: usize = 300;
     let calib: [(f64, u64, f64); 12] = [
-        (0.30, 72, 0.002779), (0.30, 216, 0.000905), (0.30, 720, 0.000292),
-        (0.50, 72, 0.006416), (0.50, 216, 0.002171), (0.50, 720, 0.000655),
-        (0.70, 72, 0.015679), (0.70, 216, 0.004917), (0.70, 720, 0.001159),
-        (0.90, 72, 0.069347), (0.90, 216, 0.009935), (0.90, 720, 0.002999),
+        (0.30, 72, 0.002779),
+        (0.30, 216, 0.000905),
+        (0.30, 720, 0.000292),
+        (0.50, 72, 0.006416),
+        (0.50, 216, 0.002171),
+        (0.50, 720, 0.000655),
+        (0.70, 72, 0.015679),
+        (0.70, 216, 0.004917),
+        (0.70, 720, 0.001159),
+        (0.90, 72, 0.069347),
+        (0.90, 216, 0.009935),
+        (0.90, 720, 0.002999),
     ];
     println!("# A5 effect：Off（全关）/ Cov（只开 live 判定）/ G（4.9 推荐参数）三臂配对");
     println!("# 同 seed 的世界逐位一致，配对按 (观察者, 回归轮, k) 对齐");
@@ -748,13 +909,24 @@ fn effect(args: &[String]) {
     let mut round_all: Vec<(f64, u64, u64, String, Vec<RoundRec>)> = Vec::new();
 
     for &p in &ps {
-        let dormancy = calib.iter().find(|c| (c.0 - p).abs() < 1e-9 && c.1 == d).map(|c| c.2).unwrap_or(0.005);
+        let dormancy = calib
+            .iter()
+            .find(|c| (c.0 - p).abs() < 1e-9 && c.1 == d)
+            .map(|c| c.2)
+            .unwrap_or(0.005);
         for &seed in &seeds {
             for &arm in &arms {
                 let wc = WorldCfg {
-                    p, dormancy, d, seed, steps, n_initial: n_init,
+                    p,
+                    dormancy,
+                    d,
+                    seed,
+                    steps,
+                    n_initial: n_init,
                     attack_ratio: ratio,
-                    attack: AttackKind::Sleeper { normal_until: steps / 5 },
+                    attack: AttackKind::Sleeper {
+                        normal_until: steps / 5,
+                    },
                     force_att_online: false,
                 };
                 let o = simulate(&wc, arm);
@@ -768,8 +940,12 @@ fn effect(args: &[String]) {
                         );
                     }
                 }
-                eprintln!("[effect] p={p} d={d} seed={seed} arm={} events={} {:.1}s",
-                    arm.tag(), o.n_events, o.secs);
+                eprintln!(
+                    "[effect] p={p} d={d} seed={seed} arm={} events={} {:.1}s",
+                    arm.tag(),
+                    o.n_events,
+                    o.secs
+                );
                 ev_all.push((p, d, seed, arm.tag().to_string(), o.ev));
                 round_all.push((p, d, seed, arm.tag().to_string(), o.rounds));
             }
@@ -802,11 +978,19 @@ fn effect(args: &[String]) {
                         live_med.push(e.ls.live as f64);
                         cov_med.push(e.ls.cov);
                         s_med.push(e.ls.s);
-                        ratio_ev.push(if e.hon_mean > 0.0 { e.share_prom / e.hon_mean } else { 0.0 });
+                        ratio_ev.push(if e.hon_mean > 0.0 {
+                            e.share_prom / e.hon_mean
+                        } else {
+                            0.0
+                        });
                     }
                 }
                 // 对照：与该事件同轮（r = r0 + k）的对照均值
-                for e in ev_all.iter().filter(|x| (x.0 - p).abs() < 1e-9).flat_map(|x| x.4.iter()) {
+                for e in ev_all
+                    .iter()
+                    .filter(|x| (x.0 - p).abs() < 1e-9)
+                    .flat_map(|x| x.4.iter())
+                {
                     if e.k != k || !e.online {
                         continue;
                     }
@@ -862,7 +1046,10 @@ fn effect(args: &[String]) {
                         None => continue,
                     };
                     for e in ev.iter().filter(|e| e.k == k && e.online) {
-                        if let Some(b) = off.iter().find(|b| b.obs == e.obs && b.r0 == e.r0 && b.k == k) {
+                        if let Some(b) = off
+                            .iter()
+                            .find(|b| b.obs == e.obs && b.r0 == e.r0 && b.k == k)
+                        {
                             ds.push(e.pct_s - b.pct_s);
                             dm.push(e.pct_m - b.pct_m);
                         }
@@ -876,7 +1063,15 @@ fn effect(args: &[String]) {
                 let win = dm.iter().filter(|x| **x > 0.0).count() as f64 / dm.len() as f64;
                 println!(
                     "DP,{:.2},{},{},{},{:+.4},{:.4},{:+.4},{:.4},{:.3}",
-                    p, k, tag, ds.len(), ms, ss, mm, sm, win
+                    p,
+                    k,
+                    tag,
+                    ds.len(),
+                    ms,
+                    ss,
+                    mm,
+                    sm,
+                    win
                 );
             }
         }
@@ -884,7 +1079,13 @@ fn effect(args: &[String]) {
 
     println!("\n# ---- 覆盖率分桶的排序质量（Spearman ρ vs 真实 quality）----");
     println!("BUCKET,p,arm,bucket,n,rho_mean,rho_sd,support_mean,s_mean");
-    let buckets = [(0.0, 0.0), (0.01, 0.25), (0.25, 0.50), (0.50, 0.75), (0.75, 1.0001)];
+    let buckets = [
+        (0.0, 0.0),
+        (0.01, 0.25),
+        (0.25, 0.50),
+        (0.50, 0.75),
+        (0.75, 1.0001),
+    ];
     for &p in &ps {
         for &arm in &arms {
             let tag = arm.tag().to_string();
@@ -914,8 +1115,14 @@ fn effect(args: &[String]) {
                 };
                 println!(
                     "BUCKET,{:.2},{},{},{},{:.4},{:.4},{:.1},{:.3}",
-                    p, tag, bname, rhos.len(), mean_sd(&rhos).0, mean_sd(&rhos).1,
-                    mean_sd(&sups).0, mean_sd(&sval).0
+                    p,
+                    tag,
+                    bname,
+                    rhos.len(),
+                    mean_sd(&rhos).0,
+                    mean_sd(&rhos).1,
+                    mean_sd(&sups).0,
+                    mean_sd(&sval).0
                 );
             }
         }
@@ -926,7 +1133,11 @@ fn effect(args: &[String]) {
 
 fn s3(args: &[String]) {
     let smoke = args.iter().any(|a| a == "--smoke");
-    let seeds: Vec<u64> = if smoke { vec![11] } else { vec![11, 23, 37, 53, 71] };
+    let seeds: Vec<u64> = if smoke {
+        vec![11]
+    } else {
+        vec![11, 23, 37, 53, 71]
+    };
     let n_init = 300usize;
     let steps = 400u64;
     let want = args
@@ -939,7 +1150,12 @@ fn s3(args: &[String]) {
     println!("# ratio = 诚实观察者眼中 share(收益方) ÷ 同期诚实账户平均 share");
     println!("S3HDR,kind,seed,arm,n_obs,ratio_mean,ratio_sd,share_prom,hon_mean,ctrl_n,ctrl_ratio");
     for &(kind, ratio) in &[
-        (AttackKind::Sleeper { normal_until: steps / 5 }, 1.0 / 300.0),
+        (
+            AttackKind::Sleeper {
+                normal_until: steps / 5,
+            },
+            1.0 / 300.0,
+        ),
         (AttackKind::Infiltrator, 0.08),
         (AttackKind::Endorser { ratio: 0.20 }, 0.20),
     ] {
@@ -954,8 +1170,15 @@ fn s3(args: &[String]) {
         for &seed in &seeds {
             for arm in arms_of(false) {
                 let wc = WorldCfg {
-                    p: 0.30, dormancy: 0.000905, d: 216, seed, steps, n_initial: n_init,
-                    attack_ratio: ratio, attack: kind, force_att_online: false,
+                    p: 0.30,
+                    dormancy: 0.000905,
+                    d: 216,
+                    seed,
+                    steps,
+                    n_initial: n_init,
+                    attack_ratio: ratio,
+                    attack: kind,
+                    force_att_online: false,
                 };
                 let o = simulate(&wc, arm);
                 let last_r = (steps / ROUND_LEN) as usize;
@@ -972,9 +1195,16 @@ fn s3(args: &[String]) {
                 let ctrl = o.rounds.last().copied().unwrap_or_default();
                 println!(
                     "S3,{},{},{},{},{:.4},{:.4},{:.5},{:.5},{},{:.4}",
-                    tag, seed, arm.tag(), ratios.len(),
-                    mean_sd(&ratios).0, mean_sd(&ratios).1, mean_sd(&sp).0, mean_sd(&hm).0,
-                    ctrl.ctrl_n, ctrl.ctrl_ratio
+                    tag,
+                    seed,
+                    arm.tag(),
+                    ratios.len(),
+                    mean_sd(&ratios).0,
+                    mean_sd(&ratios).1,
+                    mean_sd(&sp).0,
+                    mean_sd(&hm).0,
+                    ctrl.ctrl_n,
+                    ctrl.ctrl_ratio
                 );
             }
         }
@@ -985,29 +1215,52 @@ fn s3(args: &[String]) {
 
 fn s1(args: &[String]) {
     let smoke = args.iter().any(|a| a == "--smoke");
-    let seeds: Vec<u64> = if smoke { vec![11] } else { vec![11, 23, 37, 53, 71] };
+    let seeds: Vec<u64> = if smoke {
+        vec![11]
+    } else {
+        vec![11, 23, 37, 53, 71]
+    };
     println!("# A5 s1：女巫账户在诚实观察者眼里的平均份额（真 Engine）");
     println!("# S1HDR,seed,arm,n_obs,syb_share,hon_mean,ratio");
     for &seed in &seeds {
         for arm in arms_of(false) {
             let wc = WorldCfg {
-                p: 0.30, dormancy: 0.000905, d: 216, seed, steps: 400, n_initial: 300,
+                p: 0.30,
+                dormancy: 0.000905,
+                d: 216,
+                seed,
+                steps: 400,
+                n_initial: 300,
                 attack_ratio: 0.08,
                 attack: AttackKind::Sybil { cluster: 4 },
                 force_att_online: false,
             };
             let o = simulate(&wc, arm);
             let last_r = (400u64 / ROUND_LEN) as usize;
-            let rows: Vec<&EvRec> = o.ev.iter().filter(|e| e.k == 999 && e.r0 == last_r).collect();
+            let rows: Vec<&EvRec> =
+                o.ev.iter()
+                    .filter(|e| e.k == 999 && e.r0 == last_r)
+                    .collect();
             let syb: Vec<f64> = rows.iter().map(|e| e.syb).collect();
             let hon: Vec<f64> = rows.iter().map(|e| e.hon_mean).collect();
             let r: Vec<f64> = rows
                 .iter()
-                .map(|e| if e.hon_mean > 0.0 { e.syb / e.hon_mean } else { 0.0 })
+                .map(|e| {
+                    if e.hon_mean > 0.0 {
+                        e.syb / e.hon_mean
+                    } else {
+                        0.0
+                    }
+                })
                 .collect();
             println!(
                 "S1,{},{},{},{:.6},{:.5},{:.3}",
-                seed, arm.tag(), rows.len(), mean_sd(&syb).0, mean_sd(&hon).0, mean_sd(&r).0
+                seed,
+                arm.tag(),
+                rows.len(),
+                mean_sd(&syb).0,
+                mean_sd(&hon).0,
+                mean_sd(&r).0
             );
         }
     }
@@ -1051,15 +1304,21 @@ fn micro(_args: &[String]) {
                     let src = e.intern(key(s));
                     e.rate(src, w_src, 0);
                     let view = CompressedView::from_pairs(
-                        ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+                        ViewParams {
+                            buckets: 2048,
+                            hashers: 5,
+                            seed: 99,
+                        },
                         &[(key(0), 1.0), (key(1), 0.0)],
                     );
                     e.on_view(src, view.clone(), 0, 0);
                     my_views.push((src, 1.0, view));
                 }
                 let dt = e.query(target, 0) as f64;
-                let dh = honest.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / honest.len() as f64;
-                let de = empty.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / empty.len() as f64;
+                let dh =
+                    honest.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / honest.len() as f64;
+                let de =
+                    empty.iter().map(|&h| e.query(h, 0) as f64).sum::<f64>() / empty.len() as f64;
                 // (b) 权重精确分母
                 let shares = e.shares();
                 let mut w_live = 0.0f64;
@@ -1089,7 +1348,15 @@ fn micro(_args: &[String]) {
                 );
                 println!(
                     "M,{},{},{},{:.6},{:.6},{:.2},{:.6},{:.4},{:.4}",
-                    scen, arm.tag(), m, dt, dh, if dh > 0.0 { dt / dh } else { 0.0 }, de, cov, w_live
+                    scen,
+                    arm.tag(),
+                    m,
+                    dt,
+                    dh,
+                    if dh > 0.0 { dt / dh } else { 0.0 },
+                    de,
+                    cov,
+                    w_live
                 );
             }
         }

@@ -68,7 +68,9 @@ fn make_cfg(d: u64, dorm: f64, seed: u64, ret: f64, n_sleepers: usize) -> SimCon
         sleep_hours: (d, d * 6 / 5),
         return_rate: ret,
         enable_rhythm: false, // 离线只由休眠决定：离线时长 == sleep_hours
-        attack_kind: AttackKind::Sleeper { normal_until: NORMAL_UNTIL },
+        attack_kind: AttackKind::Sleeper {
+            normal_until: NORMAL_UNTIL,
+        },
         attack_ratio: n_sleepers as f64 / N_INIT as f64,
         ..Default::default()
     }
@@ -91,18 +93,39 @@ fn world_stat(cfg: &SimConfig) -> WorldStat {
     let mut w = tm_sim::World::new(cfg.clone());
     w.run();
     let t = STEPS as u64;
-    let alive: Vec<usize> = w.accounts().iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = w
+        .accounts()
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let online = alive.iter().filter(|&&i| w.was_online_at(i, t)).count();
-    let off = if alive.is_empty() { 0.0 } else { (alive.len() - online) as f64 / alive.len() as f64 };
+    let off = if alive.is_empty() {
+        0.0
+    } else {
+        (alive.len() - online) as f64 / alive.len() as f64
+    };
     let ever = (0..w.accounts().len())
         .filter(|&i| {
             w.life_traces
                 .get(i)
-                .map(|tr| tr.events().iter().any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. })))
+                .map(|tr| {
+                    tr.events()
+                        .iter()
+                        .any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. }))
+                })
                 .unwrap_or(false)
         })
         .count();
-    WorldStat { off, alive: alive.len(), online, accts: w.accounts().len(), ever, leaves: w.leaves, dorms: w.dormancy_events }
+    WorldStat {
+        off,
+        alive: alive.len(),
+        online,
+        accts: w.accounts().len(),
+        ever,
+        leaves: w.leaves,
+        dorms: w.dormancy_events,
+    }
 }
 
 /// 对数网格上找使「结束时离线比例」最接近 0.60 的 dormancy_rate。
@@ -114,7 +137,9 @@ fn calibrate(d: u64, seed: u64, ret: f64, n_sleepers: usize) -> (f64, WorldStat)
         let err = (st.off - TARGET_OFF).abs();
         let better = match &best {
             None => true,
-            Some((be, _, bs)) => err < *be - 1e-9 || ((err - *be).abs() <= 1e-9 && st.alive > bs.alive),
+            Some((be, _, bs)) => {
+                err < *be - 1e-9 || ((err - *be).abs() <= 1e-9 && st.alive > bs.alive)
+            }
         };
         if better {
             best = Some((err, dorm, st));
@@ -145,11 +170,19 @@ fn median_f64(mut v: Vec<f64>) -> f64 {
     }
     v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = v.len();
-    if n % 2 == 1 { v[n / 2] } else { 0.5 * (v[n / 2 - 1] + v[n / 2]) }
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        0.5 * (v[n / 2 - 1] + v[n / 2])
+    }
 }
 
 fn mean(v: &[f64]) -> f64 {
-    if v.is_empty() { f64::NAN } else { v.iter().sum::<f64>() / v.len() as f64 }
+    if v.is_empty() {
+        f64::NAN
+    } else {
+        v.iter().sum::<f64>() / v.len() as f64
+    }
 }
 
 fn corr(x: &[f64], y: &[f64]) -> f64 {
@@ -167,11 +200,17 @@ fn corr(x: &[f64], y: &[f64]) -> f64 {
         sxx += dx * dx;
         syy += dy * dy;
     }
-    if sxx <= 0.0 || syy <= 0.0 { f64::NAN } else { sxy / (sxx * syy).sqrt() }
+    if sxx <= 0.0 || syy <= 0.0 {
+        f64::NAN
+    } else {
+        sxy / (sxx * syy).sqrt()
+    }
 }
 
 fn pct_rank(v: &[f64], x: f64) -> f64 {
-    if v.is_empty() || x.is_nan() { return f64::NAN; }
+    if v.is_empty() || x.is_nan() {
+        return f64::NAN;
+    }
     v.iter().filter(|&&y| y <= x).count() as f64 / v.len() as f64
 }
 
@@ -246,20 +285,55 @@ struct Row {
 }
 
 const T_KEYS: [&str; 15] = [
-    "n", "q", "alive", "indeg", "outdeg", "sleeps", "offdur", "r",
-    "ratio_mean", "ratio_med", "ret_ratio_mean", "ret_ratio_med", "ret_n", "pct", "resid_z",
+    "n",
+    "q",
+    "alive",
+    "indeg",
+    "outdeg",
+    "sleeps",
+    "offdur",
+    "r",
+    "ratio_mean",
+    "ratio_med",
+    "ret_ratio_mean",
+    "ret_ratio_med",
+    "ret_n",
+    "pct",
+    "resid_z",
 ];
 
 impl Row {
     fn pairs(&self) -> Vec<(String, String)> {
-        let f = |x: f64| if x.is_nan() { "nan".to_string() } else { format!("{:.6}", x) };
+        let f = |x: f64| {
+            if x.is_nan() {
+                "nan".to_string()
+            } else {
+                format!("{:.6}", x)
+            }
+        };
         let t = |prefix: &str, st: &TStat| -> Vec<(String, String)> {
             let vals = vec![
-                st.set_n.to_string(), f(st.q), st.alive.to_string(), f(st.indeg), f(st.outdeg),
-                f(st.sleeps), f(st.offdur), f(st.r_mean), f(st.ratio_mean), f(st.ratio_med),
-                f(st.ret_ratio_mean), f(st.ret_ratio_med), st.ret_n.to_string(), f(st.pct), f(st.resid_z),
+                st.set_n.to_string(),
+                f(st.q),
+                st.alive.to_string(),
+                f(st.indeg),
+                f(st.outdeg),
+                f(st.sleeps),
+                f(st.offdur),
+                f(st.r_mean),
+                f(st.ratio_mean),
+                f(st.ratio_med),
+                f(st.ret_ratio_mean),
+                f(st.ret_ratio_med),
+                st.ret_n.to_string(),
+                f(st.pct),
+                f(st.resid_z),
             ];
-            T_KEYS.iter().zip(vals).map(|(k, v)| (format!("{}{}", prefix, k), v)).collect()
+            T_KEYS
+                .iter()
+                .zip(vals)
+                .map(|(k, v)| (format!("{}{}", prefix, k), v))
+                .collect()
         };
         let mut out: Vec<(String, String)> = vec![
             ("arm".into(), self.arm.clone()),
@@ -315,7 +389,15 @@ impl Row {
 }
 // ───────────────────────── 一次完整仿真 ─────────────────────────
 
-fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sleepers: usize) -> Row {
+fn run_cell(
+    arm: &str,
+    mode: &str,
+    d: u64,
+    seed: u64,
+    ret: f64,
+    dorm: f64,
+    n_sleepers: usize,
+) -> Row {
     let t_end = STEPS as u64;
     let rn = rounds();
     let tick = t_end / rn;
@@ -327,13 +409,25 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
     // 坑 1：编号一律用 accounts().len()（只增不删）；alive_count() 更小会撞号。
     let n = accs.len();
 
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let is_att: Vec<bool> = accs.iter().map(|a| a.kind.is_attacker()).collect();
-    let is_prom: Vec<bool> = accs.iter().map(|a| matches!(a.kind, Kind::Promoted)).collect();
-    let is_slp: Vec<bool> = accs.iter().map(|a| matches!(a.kind, Kind::Sleeper { .. })).collect();
+    let is_prom: Vec<bool> = accs
+        .iter()
+        .map(|a| matches!(a.kind, Kind::Promoted))
+        .collect();
+    let is_slp: Vec<bool> = accs
+        .iter()
+        .map(|a| matches!(a.kind, Kind::Sleeper { .. }))
+        .collect();
     // 诚实 = 既不是攻击者，也不是收益方（Promoted 必须从基线里剔除）
     let is_msr: Vec<bool> = (0..n).map(|i| !is_att[i] && !is_prom[i]).collect();
-    let hon_alive: Vec<usize> = (0..n).filter(|&i| is_msr[i] && accs[i].is_alive()).collect();
+    let hon_alive: Vec<usize> = (0..n)
+        .filter(|&i| is_msr[i] && accs[i].is_alive())
+        .collect();
     let sleepers: Vec<usize> = (0..n).filter(|&i| is_slp[i]).collect();
     let promoted: Vec<usize> = (0..n).filter(|&i| is_prom[i]).collect();
     let attack_target = world.attack.target;
@@ -346,7 +440,11 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
     let ecfg = EngineConfig {
         beta: 0.3,
         half_life: HALF_LIFE,
-        view_params: ViewParams { buckets: 2048, hashers: 5, seed: 99 },
+        view_params: ViewParams {
+            buckets: 2048,
+            hashers: 5,
+            seed: 99,
+        },
         agg_mode: AggMode::Mean,
         noise_multiplier: 1.0,
         decay_enabled: true,
@@ -405,7 +503,10 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
             let reqs = { nodes[a].as_mut().unwrap().tick(now, k) };
             for req in reqs {
                 if let Some(Some(v)) = views.get(req.idx as usize) {
-                    nodes[a].as_mut().unwrap().on_view(req.idx, v.clone(), now, now);
+                    nodes[a]
+                        .as_mut()
+                        .unwrap()
+                        .on_view(req.idx, v.clone(), now, now);
                 }
             }
             prev_on[a] = true;
@@ -413,7 +514,11 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
     }
 
     // ── 观察者：存活 + 诚实 + 结束时在线 ──
-    let obs: Vec<usize> = alive.iter().copied().filter(|&i| is_msr[i] && online_end[i]).collect();
+    let obs: Vec<usize> = alive
+        .iter()
+        .copied()
+        .filter(|&i| is_msr[i] && online_end[i])
+        .collect();
 
     let mut s_r_v: Vec<f64> = Vec::new();
     let mut s_ratio_v: Vec<f64> = Vec::new();
@@ -454,7 +559,11 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
         for &h in &hon_alive {
             hsum += v_of[h];
         }
-        let base = if hon_alive.is_empty() { 0.0 } else { hsum / hon_alive.len() as f64 };
+        let base = if hon_alive.is_empty() {
+            0.0
+        } else {
+            hsum / hon_alive.len() as f64
+        };
         if base <= 1e-12 {
             zero_base += 1;
             continue;
@@ -549,7 +658,8 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
     let hon_ratio_mean = mean(&hon_ratios);
     let hon_ratio_std = if hon_ratios.len() > 1 {
         let m = hon_ratio_mean;
-        (hon_ratios.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (hon_ratios.len() - 1) as f64).sqrt()
+        (hon_ratios.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (hon_ratios.len() - 1) as f64)
+            .sqrt()
     } else {
         f64::NAN
     };
@@ -571,7 +681,9 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
         if sxx > 0.0 {
             ols_b = sxy / sxx;
             ols_a = my - ols_b * mq;
-            let resid: Vec<f64> = (0..qs.len()).map(|i| hon_ratios[i] - (ols_a + ols_b * qs[i])).collect();
+            let resid: Vec<f64> = (0..qs.len())
+                .map(|i| hon_ratios[i] - (ols_a + ols_b * qs[i]))
+                .collect();
             let dof = (resid.len() as f64 - 2.0).max(1.0);
             ols_sd = (resid.iter().map(|x| x * x).sum::<f64>() / dof).sqrt();
         }
@@ -588,22 +700,39 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
         if set.is_empty() {
             return TStat::default();
         }
-        let q = mean(&set.iter().map(|&i| accs[i].quality as f64).collect::<Vec<_>>());
+        let q = mean(
+            &set.iter()
+                .map(|&i| accs[i].quality as f64)
+                .collect::<Vec<_>>(),
+        );
         let alive_n = set.iter().filter(|&&i| accs[i].is_alive()).count();
         let indeg_m = mean(&set.iter().map(|&i| indeg[i] as f64).collect::<Vec<_>>());
-        let outdeg_m = mean(&set.iter().map(|&i| accs[i].follows.len() as f64).collect::<Vec<_>>());
+        let outdeg_m = mean(
+            &set.iter()
+                .map(|&i| accs[i].follows.len() as f64)
+                .collect::<Vec<_>>(),
+        );
         let sleeps_m = mean(
             &set.iter()
                 .map(|&i| {
                     world
                         .life_traces
                         .get(i)
-                        .map(|tr| tr.events().iter().filter(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. })).count() as f64)
+                        .map(|tr| {
+                            tr.events()
+                                .iter()
+                                .filter(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. }))
+                                .count() as f64
+                        })
                         .unwrap_or(0.0)
                 })
                 .collect::<Vec<_>>(),
         );
-        let offdur_m = mean(&set.iter().map(|&i| world.offline_duration(i, t_end) as f64).collect::<Vec<_>>());
+        let offdur_m = mean(
+            &set.iter()
+                .map(|&i| world.offline_duration(i, t_end) as f64)
+                .collect::<Vec<_>>(),
+        );
         let ratio_mean = mean(ratio_v);
         TStat {
             set_n: set.len(),
@@ -645,13 +774,21 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
     }
 
     // 攻击通道验证
-    let tgt_is_promoted = if attack_target.map(|t| is_prom[t]).unwrap_or(false) { 1 } else { 0 };
+    let tgt_is_promoted = if attack_target.map(|t| is_prom[t]).unwrap_or(false) {
+        1
+    } else {
+        0
+    };
     let s_follows_tgt = if sleepers.is_empty() {
         f64::NAN
     } else {
         let c = sleepers
             .iter()
-            .filter(|&&i| attack_target.map(|t| accs[i].follows.contains(&t)).unwrap_or(false))
+            .filter(|&&i| {
+                attack_target
+                    .map(|t| accs[i].follows.contains(&t))
+                    .unwrap_or(false)
+            })
             .count();
         c as f64 / sleepers.len() as f64
     };
@@ -691,7 +828,11 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
                 world
                     .life_traces
                     .get(i)
-                    .map(|tr| tr.events().iter().any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. })))
+                    .map(|tr| {
+                        tr.events()
+                            .iter()
+                            .any(|(_, l)| matches!(l, tm_sim::Life::Dormant { .. }))
+                    })
                     .unwrap_or(false)
             })
             .count(),
@@ -707,9 +848,17 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
         corr_indeg,
         s,
         p,
-        s_src_cover: if obs.is_empty() { f64::NAN } else { s_src_age_v.len() as f64 / obs.len() as f64 },
+        s_src_cover: if obs.is_empty() {
+            f64::NAN
+        } else {
+            s_src_age_v.len() as f64 / obs.len() as f64
+        },
         s_src_age: mean(&s_src_age_v),
-        s_src_fresh: if s_src_age_v.is_empty() { f64::NAN } else { s_src_fresh_c as f64 / s_src_age_v.len() as f64 },
+        s_src_fresh: if s_src_age_v.is_empty() {
+            f64::NAN
+        } else {
+            s_src_fresh_c as f64 / s_src_age_v.len() as f64
+        },
         s_src_n: s_src_age_v.len(),
         h_src_age: mean(&h_src_age_v),
         h_src_fresh: mean(&h_src_fresh_v),
@@ -720,7 +869,11 @@ fn run_cell(arm: &str, mode: &str, d: u64, seed: u64, ret: f64, dorm: f64, n_sle
         s_max_age: mean(&s_max),
         h_fresh_frac: mean(&h_fresh_frac_v),
         h_med_age: mean(&h_med_age_v),
-        h_fresh_n: if h_fresh_frac_v.is_empty() { f64::NAN } else { h_fresh_n as f64 / h_fresh_frac_v.len() as f64 },
+        h_fresh_n: if h_fresh_frac_v.is_empty() {
+            f64::NAN
+        } else {
+            h_fresh_n as f64 / h_fresh_frac_v.len() as f64
+        },
         p_ratio_fresh: mean(&p_fresh_v),
         p_ratio_stale: mean(&p_stale_v),
         p_ratio_none: mean(&p_none_v),
@@ -737,8 +890,14 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let smoke = args.iter().any(|a| a == "smoke");
     let land = args.iter().any(|a| a == "land");
-    let only_arm: Option<String> = args.iter().skip(1).find(|a| a.starts_with("arm=")).map(|a| a[4..].to_string());
-    let r_override: Option<u64> = args.iter().find_map(|a| a.strip_prefix("rounds=").and_then(|x| x.parse().ok()));
+    let only_arm: Option<String> = args
+        .iter()
+        .skip(1)
+        .find(|a| a.starts_with("arm="))
+        .map(|a| a[4..].to_string());
+    let r_override: Option<u64> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("rounds=").and_then(|x| x.parse().ok()));
     unsafe {
         ROUNDS_ARG = r_override.unwrap_or(DEFAULT_ROUNDS);
     }
@@ -748,7 +907,13 @@ fn main() {
     println!("# L2 离线时长 × 潜伏者优势（仿真器含 27e970f 修复）");
     println!(
         "# n_initial={} steps={} rounds={} tick={}h samples={} half_life={} normal_until={}",
-        N_INIT, STEPS, n_rounds, STEPS as u64 / n_rounds, SAMPLES, HALF_LIFE, NORMAL_UNTIL
+        N_INIT,
+        STEPS,
+        n_rounds,
+        STEPS as u64 / n_rounds,
+        SAMPLES,
+        HALF_LIFE,
+        NORMAL_UNTIL
     );
     println!("# 离线只由 dormancy 决定（enable_rhythm=false）");
 
@@ -779,7 +944,10 @@ fn main() {
     if smoke {
         for (arm, ns) in [("a1", 1usize), ("a5", 5)] {
             let (dorm, st) = calibrate(216, 11, 0.12, ns);
-            println!("# smoke arm={} D=216 seed=11 dorm={:.6} off={:.3} alive={} online={}", arm, dorm, st.off, st.alive, st.online);
+            println!(
+                "# smoke arm={} D=216 seed=11 dorm={:.6} off={:.3} alive={} online={}",
+                arm, dorm, st.off, st.alive, st.online
+            );
             let r = run_cell(arm, "fix", 216, 11, 0.12, dorm, ns);
             emit(r);
         }
@@ -798,11 +966,21 @@ fn main() {
         for seed in SEEDS {
             let (dorm216, st216) = calibrate(216, seed, 0.12, ns);
             fix.push((arm.to_string(), seed, 216, dorm216, st216));
-            println!("CALF,{},fix,{},{:.6},{:.4},{},{}", arm, seed, dorm216, st216.off, st216.alive, st216.online);
+            println!(
+                "CALF,{},fix,{},{:.6},{:.4},{},{}",
+                arm, seed, dorm216, st216.off, st216.alive, st216.online
+            );
             for d in DS {
-                let (dorm, st) = if d == 216 { (dorm216, st216) } else { calibrate(d, seed, 0.12, ns) };
+                let (dorm, st) = if d == 216 {
+                    (dorm216, st216)
+                } else {
+                    calibrate(d, seed, 0.12, ns)
+                };
                 cal.push((arm.to_string(), seed, d, dorm, st));
-                println!("CALC,{},cal,{},{},{:.6},{:.4},{},{}", arm, seed, d, dorm, st.off, st.alive, st.online);
+                println!(
+                    "CALC,{},cal,{},{},{:.6},{:.4},{},{}",
+                    arm, seed, d, dorm, st.off, st.alive, st.online
+                );
             }
         }
     }
@@ -814,20 +992,33 @@ fn main() {
             }
         }
         for seed in SEEDS {
-            let dorm_fix = fix.iter().find(|(a, s, _, _, _)| a == arm && *s == seed).map(|x| x.3).unwrap();
+            let dorm_fix = fix
+                .iter()
+                .find(|(a, s, _, _, _)| a == arm && *s == seed)
+                .map(|x| x.3)
+                .unwrap();
             for d in DS {
                 for ret in [0.12f64, 0.0] {
                     let r = run_cell(arm, "fix", d, seed, ret, dorm_fix, ns);
                     emit(r);
-                    eprintln!("done arm={} mode=fix D={} seed={} ret={}", arm, d, seed, ret);
+                    eprintln!(
+                        "done arm={} mode=fix D={} seed={} ret={}",
+                        arm, d, seed, ret
+                    );
                 }
-                let c = cal.iter().find(|(a, s, dd, _, _)| a == arm && *s == seed && *dd == d).unwrap();
+                let c = cal
+                    .iter()
+                    .find(|(a, s, dd, _, _)| a == arm && *s == seed && *dd == d)
+                    .unwrap();
                 if c.4.alive >= 100 && (c.4.off - TARGET_OFF).abs() <= 0.05 {
                     let r = run_cell(arm, "cal", d, seed, 0.12, c.3, ns);
                     emit(r);
                     eprintln!("done arm={} mode=cal D={} seed={}", arm, d, seed);
                 } else {
-                    println!("SKIP,{},cal,{},{},{:.6},{:.4},{},{}", arm, seed, d, c.3, c.4.off, c.4.alive, c.4.online);
+                    println!(
+                        "SKIP,{},cal,{},{},{:.6},{:.4},{},{}",
+                        arm, seed, d, c.3, c.4.off, c.4.alive, c.4.online
+                    );
                 }
             }
         }

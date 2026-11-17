@@ -16,7 +16,11 @@ struct XorShift64(u64);
 impl XorShift64 {
     fn new(seed: u64) -> Self {
         // 0 是 xorshift 的不动点，必须避开
-        Self(if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed })
+        Self(if seed == 0 {
+            0x9E37_79B9_7F4A_7C15
+        } else {
+            seed
+        })
     }
 
     fn next_u64(&mut self) -> u64 {
@@ -242,7 +246,10 @@ fn randomized_invariants_hold() {
             }
             let v = got.expect("非空样本不应返回 None");
             assert!((0.0..=1.0).contains(&v), "第 {case} 组 {m:?} 越界：{v}");
-            assert!(v >= vmin - EPS && v <= vmax + EPS, "第 {case} 组 {m:?} 不在值域内：{v}");
+            assert!(
+                v >= vmin - EPS && v <= vmax + EPS,
+                "第 {case} 组 {m:?} 不在值域内：{v}"
+            );
 
             // 加权中位数必须恰好落在某个来源的数值上
             if matches!(m, AggMode::WeightedMedian) {

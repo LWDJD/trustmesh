@@ -155,7 +155,10 @@ fn fmt8(x: f64) -> String {
 fn is_count_metric(name: &str) -> bool {
     name.starts_with("n_")
         || name.starts_with("obs_")
-        || matches!(name, "s2_cross_n" | "s2_pairs_n" | "s3_obs_rated" | "s6_len")
+        || matches!(
+            name,
+            "s2_cross_n" | "s2_pairs_n" | "s3_obs_rated" | "s6_len"
+        )
 }
 
 /// 按指标类型格式化：计数走整数，比值走 8 位定点。
@@ -348,7 +351,11 @@ fn build_scenario_with_cfg(name: &'static str, cfg: SimConfig) -> Scenario {
     let raw = w.ratings();
     let accs = w.accounts();
 
-    let alive: Vec<usize> = accs.iter().filter(|a| a.is_alive()).map(|a| a.idx).collect();
+    let alive: Vec<usize> = accs
+        .iter()
+        .filter(|a| a.is_alive())
+        .map(|a| a.idx)
+        .collect();
     let honest: Vec<usize> = accs
         .iter()
         .filter(|a| a.kind == Kind::Honest && a.is_alive())
@@ -364,10 +371,11 @@ fn build_scenario_with_cfg(name: &'static str, cfg: SimConfig) -> Scenario {
         .filter(|a| a.kind.is_attacker())
         .map(|a| a.idx)
         .collect();
-    let benef = w
-        .attack
-        .target
-        .filter(|&t| accs.get(t).map(|a| a.kind == Kind::Promoted).unwrap_or(false));
+    let benef = w.attack.target.filter(|&t| {
+        accs.get(t)
+            .map(|a| a.kind == Kind::Promoted)
+            .unwrap_or(false)
+    });
 
     // 追加账户：编号直接接在「世界账户总数」后面（不能用 alive_count，
     // 否则会与已离开账户撞号 —— 交接文档 8.1 节）。
@@ -711,7 +719,6 @@ fn row_from_dist(
     }
 }
 
-
 /// 收集每个观察者的判据读数，并补上 S3 分解。
 ///
 /// 返回 (逐观察者行, 被跳过的观察者数, 分布总和最大偏差)。跳过条件与 A6 一致：
@@ -879,7 +886,6 @@ fn measure_s5(sc: &Scenario, engines: &mut [Option<Engine>], now: u64) -> (f64, 
         if r0 > 0.0 { r2 / r0 } else { f64::NAN },
     )
 }
-
 
 // ============================== 汇总行 ==============================
 
@@ -1108,7 +1114,6 @@ fn metric_names(scenario: &str) -> Vec<&'static str> {
     }
     out
 }
-
 
 /// 按选择器把一个观察者行映射成数值。
 type ObsField = fn(&ObsRow) -> f64;
@@ -1411,7 +1416,6 @@ fn main() {
     println!("# DONE elapsed {:.1}s", t0.elapsed().as_secs_f64());
 }
 
-
 // ============================== 单元测试 ==============================
 
 #[cfg(test)]
@@ -1461,10 +1465,17 @@ mod tests {
         let hm = hsum / sc.honest.len() as f64;
         let hm_present = hsum / hp as f64;
         assert!((hm - 0.0875).abs() < 1e-6, "hm = {hm}");
-        assert!((hm_present - 0.116_666_66).abs() < 1e-5, "hm_present = {hm_present}");
+        assert!(
+            (hm_present - 0.116_666_66).abs() < 1e-5,
+            "hm_present = {hm_present}"
+        );
         let row = row_from_dist(&sc, &d, hm, hm_present, hp);
         assert!(row.s1.is_nan(), "没有女巫成员时 S1 应为 NA");
-        assert!((row.present_frac - 0.75).abs() < 1e-9, "出现率 = {}", row.present_frac);
+        assert!(
+            (row.present_frac - 0.75).abs() < 1e-9,
+            "出现率 = {}",
+            row.present_frac
+        );
         // hm_present = hm / present_frac：报告第 3 节的换算关系
         assert!((hm_present - hm / row.present_frac).abs() < 1e-12);
     }
@@ -1476,7 +1487,11 @@ mod tests {
         let d = dist();
         let row = row_from_dist(&sc, &d, 0.0875, 0.116_666_66, 3);
         // 注入女巫 = {4, 5}：4 的 0.30 > hm ⇒ 越线；5 的 0.02 不越线 ⇒ 1/2。
-        assert!((row.s2_cross - 0.5).abs() < 1e-6, "s2_cross = {}", row.s2_cross);
+        assert!(
+            (row.s2_cross - 0.5).abs() < 1e-6,
+            "s2_cross = {}",
+            row.s2_cross
+        );
         assert_eq!(row.s2_cross_n, 1.0);
         assert_eq!(row.s2_pairs_n, 2.0);
     }
@@ -1487,13 +1502,24 @@ mod tests {
         let sc = tiny();
         let d = dist();
         let row = row_from_dist(&sc, &d, 0.0875, 0.116_666_66, 3);
-        assert!((row.s4_present - 1.0).abs() < 1e-6, "唯一空账户出现了 ⇒ 1.0");
+        assert!(
+            (row.s4_present - 1.0).abs() < 1e-6,
+            "唯一空账户出现了 ⇒ 1.0"
+        );
         assert!((row.s4 - 0.01 / 0.0875).abs() < 1e-6, "s4 = {}", row.s4);
         let mut sc2 = sc;
         sc2.empty = vec![6, 8, 9];
         let row2 = row_from_dist(&sc2, &d, 0.0875, 0.116_666_66, 3);
-        assert!((row2.s4_present - 1.0 / 3.0).abs() < 1e-6, "s4_present = {}", row2.s4_present);
-        assert!((row2.s4 - (0.01 / 3.0) / 0.0875).abs() < 1e-6, "s4 = {}", row2.s4);
+        assert!(
+            (row2.s4_present - 1.0 / 3.0).abs() < 1e-6,
+            "s4_present = {}",
+            row2.s4_present
+        );
+        assert!(
+            (row2.s4 - (0.01 / 3.0) / 0.0875).abs() < 1e-6,
+            "s4 = {}",
+            row2.s4
+        );
     }
 
     /// 汇总的 mean / sd 用有限值口径，NA 不参与。
@@ -1567,7 +1593,11 @@ mod tests {
         };
         let sc = build_scenario_with_cfg("infiltrator", cfg);
         let row = run_one(&sc, 3);
-        assert_eq!(row.s6_max, 0.0, "同输入重跑必须逐位相同，实测 {}", row.s6_max);
+        assert_eq!(
+            row.s6_max, 0.0,
+            "同输入重跑必须逐位相同，实测 {}",
+            row.s6_max
+        );
         assert!(row.s6_len > 0.0);
         assert!(row.obs_used > 0.0, "至少要有一些观察者");
         assert!(

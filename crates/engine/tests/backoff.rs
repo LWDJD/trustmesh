@@ -21,7 +21,12 @@ fn key(n: u8) -> AccountKey {
 }
 
 fn base() -> EngineConfig {
-    EngineConfig { beta: 0.3, half_life: 72, agg_mode: AggMode::Mean, ..Default::default() }
+    EngineConfig {
+        beta: 0.3,
+        half_life: 72,
+        agg_mode: AggMode::Mean,
+        ..Default::default()
+    }
 }
 
 fn engine(cfg: EngineConfig) -> Engine {
@@ -90,8 +95,16 @@ fn tick_backs_off_sources_that_keep_failing() {
             counts[req.idx as usize] += 1;
         }
     }
-    assert!(counts[0] <= 2, "连败 20 次的来源权重是 2^-20，第一抽几乎抽不到，实际 {} 次", counts[0]);
-    assert!(counts[1] > 250 && counts[2] > 250, "另外两个应各占约一半，实际 {:?}", counts);
+    assert!(
+        counts[0] <= 2,
+        "连败 20 次的来源权重是 2^-20，第一抽几乎抽不到，实际 {} 次",
+        counts[0]
+    );
+    assert!(
+        counts[1] > 250 && counts[2] > 250,
+        "另外两个应各占约一半，实际 {:?}",
+        counts
+    );
 
     // 一轮走完：连败者必然被排到最后（这是「不放回」的必然结果，也是兜底恢复的前提）
     e.restart_round();

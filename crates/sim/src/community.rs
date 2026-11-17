@@ -164,8 +164,14 @@ mod tests {
         for _ in 0..10_000 {
             counts[c.choose(&mut rng)] += 1;
         }
-        assert!(counts[1] > counts[0] + 3000, "大社团应被明显偏好: {counts:?}");
-        assert!(counts[0] > 100 && counts[2] > 100, "小社团不能被饿死: {counts:?}");
+        assert!(
+            counts[1] > counts[0] + 3000,
+            "大社团应被明显偏好: {counts:?}"
+        );
+        assert!(
+            counts[0] > 100 && counts[2] > 100,
+            "小社团不能被饿死: {counts:?}"
+        );
     }
 
     #[test]

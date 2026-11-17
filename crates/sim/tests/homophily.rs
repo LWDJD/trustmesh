@@ -22,8 +22,14 @@ fn 同质性零到一显著提升社团内边占比() {
     for seed in [11u64, 12] {
         let low = 内占比(0.0, seed);
         let high = 内占比(1.0, seed);
-        assert!(low < 0.45, "同质性 0 时不该高度圈子化，实测 {low}（seed {seed}）");
-        assert!(high > 0.80, "同质性 1 时应高度圈子化，实测 {high}（seed {seed}）");
+        assert!(
+            low < 0.45,
+            "同质性 0 时不该高度圈子化，实测 {low}（seed {seed}）"
+        );
+        assert!(
+            high > 0.80,
+            "同质性 1 时应高度圈子化，实测 {high}（seed {seed}）"
+        );
         assert!(
             high - low > 0.30,
             "同质性 0→1 的内占比提升只有 {:.3}（{low} → {high}，seed {seed}）",
@@ -63,10 +69,7 @@ fn 桥接节点比例提高跨社团关注() {
     多桥.run();
     let a = 无桥.report().community.follow_inter;
     let b = 多桥.report().community.follow_inter;
-    assert!(
-        b > a,
-        "桥接比例 0.6 的跨社团边（{b}）应明显多于 0.0（{a}）"
-    );
+    assert!(b > a, "桥接比例 0.6 的跨社团边（{b}）应明显多于 0.0（{a}）");
     assert!((b as f32) > a as f32 * 1.15, "提升幅度太小：{a} → {b}");
 }
 

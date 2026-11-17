@@ -11,9 +11,9 @@
 
 use std::collections::BTreeSet;
 
-use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler};
 #[allow(unused_imports)]
 use tm_store::MAX_SCORE;
+use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler};
 
 /// 构造互不相同的测试公钥（只动前 4 字节，其余留 0）。
 fn key(n: u32) -> AccountKey {
@@ -181,7 +181,10 @@ fn tiny_positive_score_never_underflows_to_zero_share() {
 
     let single = list.share(0).expect("有条目就必须有份额");
     assert!(single > 0.0, "正分条目的份额下溢成了 0");
-    assert!(single >= f32::MIN_POSITIVE, "份额下限应是最小正正规数: {single:e}");
+    assert!(
+        single >= f32::MIN_POSITIVE,
+        "份额下限应是最小正正规数: {single:e}"
+    );
     assert!(
         (list.share(1).unwrap() - 1.0).abs() < 1e-6,
         "大账户的份额不应被下限扰动"
@@ -247,10 +250,7 @@ fn random_scores_improve_total_and_share_sum_by_at_least_2x() {
             "seed={seed}: total 误差没有减半，旧 {old_total_err:e} -> 新 {new_total_err:e}"
         );
 
-        let old_sum: f64 = list
-            .iter()
-            .map(|(_, s, _)| f64::from(s / old_total))
-            .sum();
+        let old_sum: f64 = list.iter().map(|(_, s, _)| f64::from(s / old_total)).sum();
         let new_sum: f64 = list.shares().iter().map(|(_, s)| f64::from(*s)).sum();
         let old_sum_err = (old_sum - 1.0).abs();
         let new_sum_err = (new_sum - 1.0).abs();

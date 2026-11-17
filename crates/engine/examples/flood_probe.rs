@@ -67,7 +67,7 @@ fn run(k: usize, n_honest: usize, n_garbage: usize, endorse: usize, own_garbage:
     // 每个背书者发布一份观点：给每个垃圾账户打 1.0
     let params = cfg().view_params;
     let mut published = Vec::new();
-    for i in 0..endorse {
+    for _ in 0..endorse {
         let mut pairs: Vec<([u8; 32], f32)> = Vec::new();
         for g in 0..n_garbage {
             pairs.push((key((1 + n_honest + g) as u32), 1.0));
@@ -81,8 +81,8 @@ fn run(k: usize, n_honest: usize, n_garbage: usize, endorse: usize, own_garbage:
 
     // 收观点
     let now = 12;
-    for i in 0..endorse {
-        e.on_view((endorse_start + i) as u32, published[i].clone(), now, now);
+    for (i, view) in published.iter().enumerate() {
+        e.on_view((endorse_start + i) as u32, view.clone(), now, now);
     }
 
     // 一轮 tick 只抽 k 个（k 固定，清单变长 ⇒ 刷新周期变长）
@@ -93,9 +93,9 @@ fn run(k: usize, n_honest: usize, n_garbage: usize, endorse: usize, own_garbage:
     let mut garbage_sum = 0.0f32;
     for (idx, v) in &dist {
         let i = *idx as usize;
-        if i >= 1 && i < 1 + n_honest {
+        if (1..1 + n_honest).contains(&i) {
             honest_sum += *v;
-        } else if i >= 1 + n_honest && i < 1 + n_honest + n_garbage {
+        } else if (1 + n_honest..1 + n_honest + n_garbage).contains(&i) {
             garbage_sum += *v;
         }
     }
@@ -142,7 +142,13 @@ fn main() {
         };
         println!(
             "{:<8} {:<8} {:<10.3} {:<10.3} {:<12.2} {:<12.5} {:<10.1}",
-            g, r.n_list, r.garbage_share, r.honest_share, ratio, r.honest_score, r.refresh_rounds
+            r.n_garbage,
+            r.n_list,
+            r.garbage_share,
+            r.honest_share,
+            ratio,
+            r.honest_score,
+            r.refresh_rounds
         );
     }
 

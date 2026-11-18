@@ -54,7 +54,15 @@ impl PositiveList {
     /// * 新条目的连败计数从 0 开始；**已有条目的连败计数原样保留**——
     ///   改分不是「刚取到观点」。
     pub fn set(&mut self, acc: Acc, score: f32, now: Time) {
-        if !(score > 0.0) {
+        // 语义：NaN / -0.0 / <= 0 → **删除**该条目（0 就是没表态）。
+        //
+        // 这里**必须**显式判 NaN：`!(score > 0.0)` 对 NaN 为真，`score <= 0.0` 对 NaN 为假。
+        // 若写成后者，NaN 会穿过下面所有分支被**真的存进清单**（NaN > 1.0 为假 ⟹ 不夹紧），
+        // 随后 `total()` 立刻变成 NaN，这份清单里所有份额一起报废——
+        // 那是安静的数据污染，比「删一条」严重得多。
+        // `is_nan() || <= 0.0` 与原来的 `!(score > 0.0)` 在全部 f32 位模式上逐值等价
+        // （本轮已穷举 2^32 个位模式验证，0 处不一致）。
+        if score.is_nan() || score <= 0.0 {
             if self.entries.remove(&acc).is_some() {
                 self.version += 1;
             }

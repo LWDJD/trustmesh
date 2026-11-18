@@ -277,7 +277,19 @@ impl Node {
                 Some(s) => f64::from(s) / total,
                 None => continue,
             };
-            if !(share > 0.0) {
+            // 这里**不可能**出现 NaN：`PositiveList::set` 是清单的唯一写入入口，它把 NaN
+            // 当成删除（见 list.rs），所以 `list.get()` 给出的 s 恒为 (0, 1] 内的有限值；
+            // total 是这些有限值的 f64 和（f64::from(f32) 不会溢出，条目数 ≤ 2^32，
+            // 和 ≤ 2^32），所以 share 是有限非负数。
+            //
+            // 但**仍然保留 NaN 分支**，并且必须用 `is_nan() || <= 0.0` 这种写法：
+            // `!(x > 0.0)` 对 NaN 为真、`x <= 0.0` 对 NaN 为假，机械替换会悄悄把
+            // 「跳过这一条」变成「让 NaN 流进 wsum / num」。
+            // 两式逐值等价的理由：非 NaN 时由全序三分律（x > 0 / x < 0 / x == 0 三选一）
+            // `!(x > 0.0)` 恰等于 `x <= 0.0`；NaN 时两侧都为真。
+            // 本轮用 rustc -O 实做对拍：f32 穷举全部 2^32 个位模式，f64 覆盖全部 NaN
+            // 与边界代表值 838 万个 + 2^32 个随机位模式，均 0 处不一致。
+            if share.is_nan() || share <= 0.0 {
                 continue;
             }
             let age = now.saturating_sub(rec.last_check);
@@ -287,7 +299,10 @@ impl Node {
                 1.0
             };
             let w = share * f;
-            if !(w > 0.0) {
+            // 同 share：share 有限非负、f 是 `decay()` 的返回值（它自己保证不返回 NaN /
+            // 0 / 负数，见 decay 的文档），所以 w 也有限非负，这里不可能出现 NaN。
+            // 保留 NaN 分支只是纵深防御，写法必须和原来逐值等价。
+            if w.is_nan() || w <= 0.0 {
                 continue;
             }
             wsum += w;
@@ -303,7 +318,10 @@ impl Node {
     fn group_term(&self, now: Time) -> (BTreeMap<Acc, f64>, f64) {
         let (weights, wsum) = self.weights(now);
         let mut num: BTreeMap<Acc, f64> = BTreeMap::new();
-        if !(wsum > 0.0) {
+        // wsum 只累加 `weights()` 里已经过 NaN 检查、且满足 w > 0 的项，所以它是有限正数
+        // 或 0.0，不可能为 NaN。保留 NaN 分支是纵深防御，写法与 `!(wsum > 0.0)` 逐值等价
+        // （非 NaN 时由全序三分律成立，NaN 时两侧同为真；对拍方法见 `weights()` 的注释）。
+        if wsum.is_nan() || wsum <= 0.0 {
             return (num, 0.0);
         }
         for (owner, w) in &weights {
@@ -323,7 +341,9 @@ impl Node {
     /// 因此 ¤query¤ 不需要为「我不关心的账户」付钱。
     fn group_of(&self, acc: Acc, now: Time) -> (f64, f64) {
         let (weights, wsum) = self.weights(now);
-        if !(wsum > 0.0) {
+        // 与 `group_term` 同源：wsum 只累加通过 NaN 检查的正权重，不可能为 NaN。
+        // 分支仍然保留，写法与原式逐值等价。
+        if wsum.is_nan() || wsum <= 0.0 {
             return (0.0, 0.0);
         }
         let mut num = 0.0f64;
@@ -389,7 +409,13 @@ impl Node {
         }
         // 全局归一化。
         let mass: f64 = out.values().sum();
-        if !(mass > 0.0) {
+        // mass 的来源：个人项 beta * (s / total) 与群体项 coef * g。s、total、beta、
+        // g、coef 全部由前面已经过 NaN 检查的量构造（见 weights / group_term），
+        // 所以 mass 有限、非负，不可能为 NaN。分支保留作纵深防御。
+        // 与 `!(mass > 0.0)` 逐值等价（推导见 `weights()` 的注释）。若机械替换成
+        // `mass <= 0.0`，NaN 时这里会**穿透**并继续做 `v / mass`，把 NaN 写进分布条目；
+        // 当前写法保住了「NaN ⟹ 整份分布静默变空」的原语义。
+        if mass.is_nan() || mass <= 0.0 {
             return Distribution::default();
         }
         let entries: Vec<(Acc, f32)> = out

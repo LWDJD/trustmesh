@@ -85,7 +85,7 @@ cd crates/engine && cargo run --example quickstart
 
 ## 结构
 
-六个**互相独立、零外部依赖**的 crate，每个都是自己的 workspace：
+七个**互相独立、零外部依赖**的 crate，每个都是自己的 workspace：
 
 | crate | 职责 | 测试 |
 |---|---|---:|
@@ -95,8 +95,9 @@ cd crates/engine && cargo run --example quickstart
 | [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 206 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
+| [`tm_mincore`](crates/mincore) | **最小反女巫内核原型**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍 | 17 |
 
-能力矩阵 **694 passed / 0 failed / 1 ignored**（七个 workspace）。
+能力矩阵 **712 passed / 0 failed / 1 ignored**（八个 workspace：七个 crate + 根 v1.0）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 
@@ -153,7 +154,7 @@ cd crates/exp   && cargo test
 ~~~
 
 ⚠️ **不要只在根目录跑 `cargo test`**——根目录是 v1.0 旧代码，只有 58 条测试。
-上面六个 crate 是独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
+上面七个 crate 是独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
 
 ### wasm32 逐位对拍
 

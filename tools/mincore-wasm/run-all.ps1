@@ -23,15 +23,15 @@ $binName = 'mc_wasm_cli'
 
 Push-Location -LiteralPath $PSScriptRoot
 try {
-    Write-Host "== 1/6 编 wasm32 lib（产出 .wasm，run-compare.mjs 读它）=="
+    Write-Host "== 1/7 编 wasm32 lib（产出 .wasm，run-compare.mjs 读它）=="
     cargo build --release --lib --target wasm32-unknown-unknown | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'wasm32 编译失败' }
 
-    Write-Host "== 2/6 编 native bin（同一个 run_all()，不是另一份实现）=="
+    Write-Host "== 2/7 编 native bin（同一个 run_all()，不是另一份实现）=="
     cargo build --release --bin $binName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'native 编译失败' }
 
-    Write-Host "== 3/6 跑 native 并落盘 native.txt =="
+    Write-Host "== 3/7 跑 native 并落盘 native.txt =="
     $exe = Join-Path $PSScriptRoot "target\release\$binName.exe"
     $txt = Join-Path $PSScriptRoot 'native.txt'
     $lines = (& $exe) -join "`n"
@@ -39,7 +39,23 @@ try {
     # 用 .NET 直接写无 BOM 的 UTF-8，避开 PS5.1 的 Out-File 会插 BOM 的问题
     [System.IO.File]::WriteAllText($txt, $lines + "`n", [System.Text.UTF8Encoding]::new($false))
 
-    Write-Host "== 4/6 确定性自检：native 再跑一遍，两遍必须逐字节相同 =="
+    Write-Host "== 4/7 金标准新鲜度：入库的 native.txt 必须与真实 native 逐字节相同 =="
+    # native.txt 是入库的**金标准**（verify-mincore.ps1 在没有 native 二进制时靠它对拍）。
+    # 如果 crates/mincore 的行为变了、或探针的输入表变了，这里会立刻发现金标准过期。
+    $committed = (git -C $PSScriptRoot show HEAD:tools/mincore-wasm/native.txt 2>$null | Out-String)
+    if ($LASTEXITCODE -eq 0) {
+        $now = [System.IO.File]::ReadAllText($txt, [System.Text.UTF8Encoding]::new($false))
+        $crlfNow = $now -replace "`r`n", "`n"
+        $crlfOld = $committed -replace "`r`n", "`n"
+        if ($crlfNow.TrimEnd("`n") -ne $crlfOld.TrimEnd("`n")) {
+            throw '入库的 native.txt 与真实 native 输出不一致（金标准过期，请重新生成并提交）'
+        }
+        Write-Host "   金标准仍新鲜"
+    } else {
+        Write-Host "   跳过（本提交是首次引入 native.txt，或不在 git 里）" -ForegroundColor Yellow
+    }
+
+    Write-Host "== 5/7 确定性自检：native 再跑一遍，两遍必须逐字节相同 =="
     $lines2 = (& $exe) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'native 第二遍运行失败' }
     $txt2 = Join-Path $PSScriptRoot 'native2.txt'
@@ -56,7 +72,7 @@ try {
     if (-not $same) { throw 'native 自己跑两遍结果不同（探针在抖动，对拍结论不可信）' }
     Write-Host "   native 两遍逐字节相同（$($a.Length) 字节）"
 
-    Write-Host "== 5/6 负对照：人为篡改 1 个位模式 + 1 个快照字节，对拍器必须报差异 =="
+    Write-Host "== 6/7 负对照：人为篡改 1 个位模式 + 1 个快照字节，对拍器必须报差异 =="
     # 为什么需要这一步：对拍脚本自己也可能永远打印 IDENTICAL（假阳）。
     # 每次跑都必须证明它真的抓得住人为差异。
     $raw = [System.IO.File]::ReadAllText($txt, [System.Text.UTF8Encoding]::new($false))
@@ -80,7 +96,7 @@ try {
     if ($badCode -eq 0) { throw '负对照失败：对拍器没有发现人为篡改（对拍逻辑是假阳）' }
     Write-Host "   负对照通过：对拍器正确报出差异（退出码 $badCode）"
 
-    Write-Host "== 6/6 正式对拍：跑 wasm 并与 native 逐位比较 =="
+    Write-Host "== 7/7 正式对拍：跑 wasm 并与 native 逐位比较 =="
     node (Join-Path $PSScriptRoot 'run-compare.mjs') $txt
     $code = $LASTEXITCODE
     Write-Host ""

@@ -1,6 +1,15 @@
 # 生成物（每次跑 run-all.ps1 都会重写）
-native.txt
+# native.txt **故意不忽略**：它是 native x86_64 的基准输出（金标准），
+# 入库之后 verify-mincore.ps1 的 [6/7] 在**全新 checkout** 上也能直接跑
+# （它会先编 wasm lib，再拿这份金标准对拍，不需要先编 native bin）。
+# run-all.ps1 每次都会用真实 native 二进制重新生成它，生成的字节与入库版本完全相同
+# （探针确定性实测：连跑两遍逐字节相同），所以跑完之后 git status 仍是干净的。
+#
+# 注意仓库根 .gitignore 里有一条全局的 `native.txt` 规则（给 tools/wasm-smoke 用的），
+# 所以这里必须显式 `!native.txt` 反向覆盖——**更深一级的 .gitignore 优先级更高**。
+!native.txt
 native_bad.txt
 native2.txt
+regenerated.txt
 /target
 /Cargo.lock

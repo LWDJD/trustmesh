@@ -21,7 +21,7 @@
 最后 query 全量账户、normalized / dequantize 读数、quantize 边界、decay 位模式、状态量
 ~~~
 
-每个 cap 记录 **913 个 f32 位模式**（三个 cap共 **2739 个**），布局见 `src/lib.rs` 的模块文档。
+每个 cap 记录 **913 个 f32 位模式**（三个 cap 共 **2739 个**），布局见 `src/lib.rs` 的模块文档。
 所有记录值都被断言为**有限 f32**（NaN 的 payload 跨平台不保证一致，不参与对拍）。
 
 ## 跑法
@@ -49,6 +49,25 @@ node run-compare.mjs native.txt
 * **5/6 负对照**：把 native.txt 里 1 个位模式改成 `0x10000000`、1 个快照字节改掉，
   对拍器**必须**报差异并退出 1。这一步每次跑都做——它证明对拍逻辑本身抓得住差异，
   而不是永远打印 IDENTICAL。
+
+## `native.txt` 是**入库的金标准**
+
+`native.txt` 已经提交进仓库（native x86_64 的基准输出，73 KB）。
+这样 `verify-mincore.ps1` 的「wasm32 逐位对拍」那一步在**全新 checkout** 上也能直接跑：
+它只编 wasm lib，然后拿这份金标准去对拍，不需要先把 native bin 编出来。
+
+金标准的身份：**73273 字节，sha256 = `d93403fe42981ca11608b783011f8246dadbc347c50ad2bb32db2b8c1f9617e6`**
+（在 Windows x86_64-msvc 上生成）。
+
+金标准为什么不会过期：探针是确定性的（实测 native 连跑两遍输出逐字节相同），
+所以 `run-all.ps1` 用真实 native 二进制重新生成出来的字节与入库版本完全一致，
+跑完之后 `git status` 仍是干净的。**但如果 `crates/mincore` 的行为变了而没人重新生成
+`native.txt`，那么金标准会过期**——下面这条单行检查就会响（本机实测 exit=0）：
+
+~~~powershell
+.\target\release\mc_wasm_cli.exe > regenerated.txt
+git diff --no-index --exit-code native.txt regenerated.txt   # 0 = 金标准仍新鲜
+~~~
 
 ## 为什么这件事重要
 
@@ -148,4 +167,25 @@ node run-compare.mjs native.txt
         run: node run-compare.mjs native.txt
 ~~~
 
-（`run-all.ps1` 只在 Windows 上跑；CI 用上面这 4 条就够，负对照是本地开发时的额外保险。）
+**CI 里请用「当场编出来的 native」对拍，不要拿入库的 `native.txt` 当基准**（原因见下）。
+`run-all.ps1` 只在 Windows 上跑；CI 用上面这 4 条就够，负对照是本地开发时的额外保险。
+
+## 金标准 `native.txt` 的适用范围（重要）
+
+入库的 `native.txt` 是在 **Windows + x86_64-pc-windows-msvc** 上生成的。它服务于本机的
+`verify-mincore.ps1`（那一步只编 wasm lib，没有可用的 native 二进制，所以需要一个现成基准）。
+
+在**别的平台**（Linux glibc / macOS）上重新生成的 native 输出**可能**在
+`decay` 的 8 条记录上差 1 个 ulp——因为 `decay` 里的 `0.5f64.powf` 会落到各平台自己的 libm
+（MSVC CRT / glibc / Rust 的 compiler-builtins），这三者不保证逐位一致。
+定点、整数归一化、编码这些**纯整数路径**在任何平台上都必然一致。
+
+所以：
+
+* 本机（Windows）的 `verify-mincore.ps1` 用入库金标准 → 实测 IDENTICAL，没问题；
+* CI（Linux）请**当场编 native 再对拍**（上面的 YAML 就是这么写的）；
+* 如果一定要在 Linux 上校验金标准，请只比较 `decay` 段以外的记录
+  （即每个 cap 段偏移 `0..905`），或者给这一步加 `continue-on-error`。
+
+（这也正是本探针的意义：它把「哪个平台/哪条路径可能漂移」精确到段，
+而不是笼统地报「两个平台不一致」。本机 Windows 上这 8 条完全一致。）

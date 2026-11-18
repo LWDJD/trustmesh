@@ -9,7 +9,8 @@
 #   1. 单元/集成测试（七个 workspace 各自 cargo test）
 #   2. 文档测试（cargo test --doc）
 #   3. clippy（库与测试零警告；exp 的历史实验 bin 不强制）
-#   4. wasm32 逐位对拍（tools/wasm-smoke）
+#      七个 crate 逐个跑，mincore 也进来了
+#   4. wasm32 逐位对拍（tools/wasm-smoke + tools/mincore-wasm）
 #
 # 退出码：0 = 全绿；非 0 = 有失败项（并打印是哪一项）。
 #
@@ -109,11 +110,22 @@ foreach ($c in $crates) {
 }
 Write-Host ""
 
-Write-Host "[5/5] wasm32 逐位对拍" -ForegroundColor Cyan
+Write-Host "[5/5] wasm32 逐位对拍（engine + mincore 两套）" -ForegroundColor Cyan
+# engine 的对拍：tools/wasm-smoke/run-all.ps1
 $wasm = Join-Path $root 'tools/wasm-smoke/run-all.ps1'
 $out = (& $wasm 2>&1 | Out-String)
 $ok = ($LASTEXITCODE -eq 0)
-Report 'wasm32 vs native' $ok ($(if ($ok) { 'IDENTICAL' } else { 'DIFFERS' }))
+Report 'wasm32 vs native (engine)' $ok ($(if ($ok) { 'IDENTICAL' } else { 'DIFFERS' }))
+
+# mincore 的对拍：tools/mincore-wasm/run-all.ps1（2026-11-18 新增）
+$wasm2 = Join-Path $root 'tools/mincore-wasm/run-all.ps1'
+if (Test-Path -LiteralPath $wasm2) {
+    $out = (& $wasm2 2>&1 | Out-String)
+    $ok = ($LASTEXITCODE -eq 0)
+    Report 'wasm32 vs native (mincore)' $ok ($(if ($ok) { 'IDENTICAL' } else { 'DIFFERS' }))
+} else {
+    Write-Host '  [SKIP] tools/mincore-wasm 不存在' -ForegroundColor Yellow
+}
 Write-Host ""
 
 if ($script:failed.Count -eq 0) {

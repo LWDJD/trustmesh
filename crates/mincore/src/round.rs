@@ -173,7 +173,14 @@ impl RoundBitmap {
     /// 均匀抽 `k` 个（本轮内不放回）。`k` 超过本轮剩余时只返回剩余的。
     ///
     /// 抽完最后一个会自动开新一轮（下一次调用从新的一轮开始）。
+    ///
+    /// `k == 0` 是**纯查询**：返回空、不做任何状态变更（不 sync、不 reset、不吃随机数）。
+    /// 否则「本轮已抽空」时调一次 `draw(0)` 会白开一轮，把 `remaining` 从 0 跳回 `round_len` ——
+    /// 那会让调用方的「本轮抽完了吗」判断失效。
     pub fn draw(&mut self, list: &PositiveList, k: usize, rng: &mut Rng) -> Vec<Acc> {
+        if k == 0 {
+            return Vec::new();
+        }
         self.sync(list);
         if self.remaining == 0 {
             if self.order.is_empty() {
@@ -436,31 +443,27 @@ mod tests {
         assert_eq!(distinct(&r2), (0..4u32).collect::<Vec<_>>());
     }
 
-    /// 守：draw(0) 不消耗任何候选；但在**已抽空**的本轮上，它仍会先触发自动重置。
+    /// 守：`draw(0)` 是**纯查询** —— 返回空、不消耗候选、不改变任何状态。
     ///
-    /// ⚠️ 可疑，建议作者确认：draw(list, 0, rng) 在 remaining == 0 时会先把新一轮
-    /// 开起来再返回空向量（remaining 从 0 变回 round_len）。语义上「要 0 个」不该
-    /// 有副作用，但实现是先 sync/重置、再算 take = k.min(remaining)。
-    /// 这里照实钉住当前行为。
+    /// 历史：早期实现先 sync/重置、再算 `take = k.min(remaining)`，所以在本轮已抽空时
+    /// 调一次 `draw(0)` 会**白开一轮**（`remaining` 从 0 跳回 `round_len`）。
+    /// 那会让调用方的「本轮抽完了吗」判断失效 —— 这属于「要 0 个却有副作用」，已修。
     #[test]
-    fn t09_draw_k为零的副作用() {
+    fn t09_draw_k为零是纯查询() {
         let l = list_of(5);
         let mut fresh = RoundBitmap::new();
         let mut rng = Rng::new(3);
+        // 从没 draw 过：draw(0) 不该触发 sync/reset（remaining 仍是初始的 0，不是 5）。
         assert!(fresh.draw(&l, 0, &mut rng).is_empty(), "k = 0 返回空向量");
-        assert_eq!(fresh.remaining(), 5, "首次 sync + reset 之后是满一轮");
-        assert_eq!(fresh.round_len(), 5);
+        assert_eq!(fresh.remaining(), 0, "k = 0 不触发 sync/reset");
+        assert_eq!(fresh.round_len(), 0);
 
-        // 抽空之后再来一次 k = 0：会静默地重新开一轮。
+        // 抽空之后再来一次 k = 0：状态完全不变（不会重新开一轮）。
         let drained = fresh.draw(&l, 5, &mut rng);
         assert_eq!(drained.len(), 5);
         assert_eq!(fresh.remaining(), 0);
         assert!(fresh.draw(&l, 0, &mut rng).is_empty());
-        assert_eq!(
-            fresh.remaining(),
-            5,
-            "当前实现：k = 0 在抽空的本轮上也会重置"
-        );
+        assert_eq!(fresh.remaining(), 0, "k = 0 在抽空的本轮上也不重置");
     }
 
     /// 守：空清单上 draw / draw_all 都安全返回空向量，remaining == 0、round_len == 0。

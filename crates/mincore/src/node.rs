@@ -96,9 +96,21 @@ pub struct Received {
 }
 
 /// 归一化后的声望分布。
+///
+/// # `entries` 的调用方契约
+///
+/// `entries` 是 `pub` 的（方便调用方直接遍历，避免不必要的拷贝），
+/// 但 [`Distribution::get`] 用**二分查找**实现，它**要求 `entries` 按账户号严格升序**。
+///
+/// 由 `Node::distribution()` 产出的分布一定满足这个前提（它用 `BTreeMap` 构造后按序遍历）。
+/// 但如果你**手工构造** `Distribution`（测试里会这么做），必须自己保证升序——
+/// 否则 `get()` 会查不到明明存在的账户。
+///
+/// ⚠️ 未来若要收紧，可把 `entries` 改成 `pub(crate)` + 提供 `entries()` 访问器，
+/// 但这会破坏 `a12_compare` 里 `.entries.into_iter()` 的用法，属于破坏性变更。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Distribution {
-    /// `(账户, 声望)`，按账户号升序，只含 `> 0` 的条目。
+    /// `(账户, 声望)`，**按账户号严格升序**，只含 `> 0` 的条目。
     pub entries: Vec<(Acc, f32)>,
     /// 归一化**之前**的总量（诊断用；正常情况等于 Σ 声望）。
     pub mass: f64,
@@ -114,7 +126,11 @@ impl Distribution {
         }
     }
 
-    /// 归一化之后的总和（应为 1.0；空分布为 0）。
+    /// 归一化之后的总和（应为 1.0；空分布为 **-0.0**）。
+    ///
+    /// 注意空分布返回的是 `-0.0`（`std` 的 `f64::sum()` 以 `-0.0` 为初值），
+    /// 它在数值上等于 `0.0`，但 `to_bits()` 不同（`0x8000000000000000` vs `0x0`）。
+    /// 有测试断言数值而非位模式 —— 如果要逐位比较，请用 `v == 0.0` 而不是位模式。
     #[must_use]
     pub fn sum(&self) -> f64 {
         self.entries.iter().map(|&(_, v)| f64::from(v)).sum()
@@ -162,8 +178,15 @@ pub struct Node {
     cfg: Config,
     list: PositiveList,
     sampler: RoundBitmap,
-    /// 只为「我打过正分」的来源保留观点：别人硬塞过来的观点我根本不收，
-    /// 这样 `|views| ≤ |list|`，内存有界且与攻击者的推送速率无关。
+    /// 只为「我打过正分」的来源保留观点：别人硬塞过来的观点我根本不收
+    /// （`on_view` 的第一条拒绝条件），所以 `|views|` 只在我**主动** rate 新账户时增长，
+    /// 与攻击者的推送速率无关。
+    ///
+    /// ⚠️ 但它**不是**单调有界于 `|list|`：`rate(acc, 0)` 只删清单条目、不清 views，
+    /// 所以反复「rate → on_view → rate(0)」会让 `|views|` 超过 `|list|`（残留记录无份额，
+    /// `weights()` 靠 `list.get(owner) == None` 跳过，计算上无害，但占内存）。
+    /// 需要回收的话得显式加一个清理入口；当前实现不回收。
+    /// 内存上界仍受「我主动 rate 过的不同账户数」约束，不是无界的。
     views: BTreeMap<Acc, Received>,
     rng: Rng,
     stat_views: u64,
@@ -1055,10 +1078,13 @@ mod tests {
 
     /// 守：撤销正分后 views 里的观点**不会**被清理，但因为没有份额，它不再产生任何声望。
     ///
-    /// ⚠️ 可疑，建议作者确认：rate(acc, 0.0, ..) 只删正分清单条目，views 里那份
-    /// 观点会留下（view_count 不降）。weights() 靠 list.get(owner) == None 跳过它，
-    /// 所以**计算上无害**；但内存**不是** node.rs 注释里承诺的 |views| <= |list| ——
-    /// 反复 rate -> on_view -> rate(0) 会让 views 单调增长。这里照实钉住当前行为。
+    /// 为什么这样是安全的：`rate(acc, 0)` 只删清单条目、不清 views，残留观点的
+    /// `weights()` 会靠 `list.get(owner) == None` 跳过，所以它**不产生任何声望**。
+    ///
+    /// 代价是内存：反复 `rate → on_view → rate(0)` 会让 `|views|` 超过 `|list|`。
+    /// 上界仍受「我主动 rate 过的不同账户数」约束（`on_view` 拒收没打过分的来源，
+    /// 所以攻击者无法推高它），不是无界的，但确实不回收。
+    /// 本测试钉住这个行为的**两面**：残留存在（不回收）+ 残留无声望（安全）。
     #[test]
     fn t20_撤销正分后观点残留但无声望() {
         let mut n = Node::new(Config::default(), 1);

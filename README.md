@@ -97,7 +97,7 @@ cd crates/engine && cargo run --example quickstart
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
 | [`tm_mincore`](crates/mincore) | **最小反女巫内核原型**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍 | 17 |
 
-能力矩阵 **694 passed / 0 failed / 1 ignored**（七个 workspace）。
+能力矩阵 **712 passed / 0 failed / 1 ignored**（八个 workspace：七个 crate + 根 v1.0）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 

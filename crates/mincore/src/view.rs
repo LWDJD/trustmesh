@@ -111,7 +111,16 @@ impl SparseView {
         view
     }
 
-    /// 直接由有序槽位构造（内部用；会校验升序与 `q > 0`）。
+    /// 直接由槽位构造，**不做任何校验**（内部用）。
+    ///
+    /// # 调用方契约
+    ///
+    /// 必须保证：`slots.len() <= cap`、按账户号**严格升序**、**每个 `q > 0`**。
+    /// 违反任一条会让 `q_of` 的二分查找失效或让 `Σv ≡ 1` 失真。
+    ///
+    /// 当前唯一调用方是 `Self::decode` 的末尾 —— 它在外层已经把长度、条数、
+    /// 升序、重复、零分、填充区全部校验过一遍，所以这里省掉重复检查。
+    /// **新增调用方时必须自己校验**，或者改用 `Self::from_scores`。
     fn from_slots_unchecked(cap: usize, slots: Vec<(Acc, u16)>) -> Self {
         let total_q = slots.iter().map(|&(_, q)| u32::from(q)).sum();
         Self {
@@ -179,13 +188,22 @@ impl SparseView {
     }
 
     /// 归一化后的全部槽位 `(账户, v)`，`Σv ≡ 1`（空表返回空）。
+    ///
+    /// 与 [Self::normalized] **走同一条 f64 除法路径**，所以同一个账户在这两个
+    /// 接口上读出**逐位相同**的 f32。
+    ///
+    /// 为什么必须是 f64：`total_q` 是 u32，可以超过 2^24（此时 f32 无法精确表示），
+    /// 若先把 `total_q` 转 f32 再除，低位会被舍入掉，导致 `normalized_slots` 与
+    /// `normalized` 差 1 ulp —— 那会让「逐位对拍」在极端视图上失守（S6 的前提）。
     #[must_use]
     pub fn normalized_slots(&self) -> Vec<(Acc, f32)> {
         if self.total_q == 0 {
             return Vec::new();
         }
-        let t = self.total_q as f32;
-        self.slots.iter().map(|&(a, q)| (a, q as f32 / t)).collect()
+        self.slots
+            .iter()
+            .map(|&(a, q)| (a, (f64::from(q) / f64::from(self.total_q)) as f32))
+            .collect()
     }
 
     /// 被 [Self::from_scores] 截断掉的质量占比（`1 − 保留质量 / 全部质量`）。
@@ -922,19 +940,18 @@ mod tests {
         assert!(s.is_finite(), "空表求和不能是 NaN");
     }
 
-    /// ⚠️ 可疑，建议作者确认：normalized 与 normalized_slots 在总质量 > 2^24 时
-    /// 给出**相差 1 ulp** 的两个结果。
+    /// 守：`normalized` 与 `normalized_slots` 在总质量 > 2^24 的极端视图上
+    /// 给出**逐位相同**的 f32。
     ///
-    /// normalized 用 f64 除法（分子分母都是精确整数）再截成 f32——这是正确舍入的；
-    /// normalized_slots 先把 total_q 转成 f32（在 2^24 以上会丢低位）再除，
-    /// 于是偏一格。构型：256 条 1.0 + 1 条 q=257 → total_q = 16777217，
-    /// 而 (16777217 as f32) = 16777216，差 1。
-    /// 影响面：Σv 仍是 1（偏差 6e-8 < 1e-6），但「同一份视图、两条读数 API 位模式不同」
-    /// 足以让逐位对拍在 Σq > 2^24 的极端视图上失守。文档说「归一化一律走整数」，
-    /// normalized_slots 却是 f32 路径——建议确认是否统一到 f64 版本。
+    /// 历史：commit `03f75eb` 之前，`normalized` 走 f64 除法而 `normalized_slots`
+    /// 先把 `total_q` 转 f32 再除（在 2^24 以上会丢低位），两者差 1 ulp。
+    /// 那会让「同一份视图、两条读数 API 位模式不同」，足以让逐位对拍在极端视图上失守。
+    /// 已统一到 f64 路径（见 `normalized_slots` 的文档）。
+    ///
+    /// 构型：256 条满额 + 1 条 q=257 → total_q = 16777217 = 2^24 + 1，
+    /// 而 `(16777217 as f32) = 16777216`（差 1）—— 这正是 f32 路径会出错的地方。
     #[test]
-    fn normalized_与normalized_slots在大总质量下差一个ulp() {
-        // 256 条满额 + 1 条 q=257：总和 16777217 = 2^24 + 1。
+    fn normalized_与normalized_slots在极端总质量下逐位相同() {
         let mut pairs: Vec<(Acc, f32)> = (0..256u32).map(|i| (i, 1.0)).collect();
         pairs.push((256, dequantize(257)));
         let v = SparseView::from_scores(512, &pairs);
@@ -942,7 +959,7 @@ mod tests {
         assert_eq!(v.total_q(), 16_777_217);
         assert_eq!(v.total_q() as f32, 16_777_216.0, "2^24+1 转 f32 会丢一位");
 
-        // 两条读数 API 逐槽位全部差一个 ulp（257 条全中）。
+        // 两条读数 API 逐槽位必须位模式相同（257 条全部）。
         let ns = v.normalized_slots();
         let mut mismatched = 0usize;
         for &(acc, x) in &ns {
@@ -950,17 +967,15 @@ mod tests {
                 mismatched += 1;
             }
         }
-        assert_eq!(
-            mismatched,
-            ns.len(),
-            "极端视图上两个 API 应处处不同（当前实现如此）"
-        );
-        assert_eq!(v.normalized(0).to_bits(), 0x3B7F_FEFF);
-        assert_eq!(ns[0].1.to_bits(), 0x3B7F_FF00);
-        assert_eq!(v.normalized(256).to_bits(), 0x3780_7FFF);
-        assert_eq!(ns[256].1.to_bits(), 0x3780_8000);
+        assert_eq!(mismatched, 0, "两条读数 API 必须逐位相同");
 
-        // 两者都还在 1e-6 容差内——所以 S2 判据本身不受影响，差的只是位模式。
+        // 钉死具体位模式：走 f64 路径的正确舍入值。
+        assert_eq!(v.normalized(0).to_bits(), 0x3B7F_FEFF);
+        assert_eq!(ns[0].1.to_bits(), 0x3B7F_FEFF);
+        assert_eq!(v.normalized(256).to_bits(), 0x3780_7FFF);
+        assert_eq!(ns[256].1.to_bits(), 0x3780_7FFF);
+
+        // Σv ≡ 1（两条路径都要满足）。
         let sum_n: f64 = v
             .slots()
             .iter()
@@ -972,10 +987,11 @@ mod tests {
             (sum_ns - 1.0).abs() < SUM_TOL,
             "normalized_slots 求和 {sum_ns}"
         );
-        assert_ne!(
+        // 两条路径现在误差也相同（都走 f64）。
+        assert_eq!(
             (sum_n - 1.0).abs().to_bits(),
             (sum_ns - 1.0).abs().to_bits(),
-            "两条路径的误差不同（一个 1.8e-12、一个 5.96e-8）"
+            "两条路径误差必须一致"
         );
     }
 
@@ -1079,12 +1095,15 @@ mod tests {
 
     // ═══════════════════ H. 内部构造入口 ═══════════════════
 
-    /// ⚠️ 可疑，建议作者确认：from_slots_unchecked 的文档说「会校验升序与 q > 0」，
-    /// 但函数体**没有任何校验**，直接采信调用方。
+    /// 守：`from_slots_unchecked` **不做任何校验**，直接采信调用方。
     ///
-    /// 守的是「私有入口的契约」：目前唯一的调用方 decode 已在外面校验过，
-    /// 所以现状不产生漏洞；但文档与实现不符，以后新增调用方就等于埋了一个
-    /// 「乱序/零分视图」的口子——编码出去会被自己的 decode 拒绝。
+    /// 这个测试钉住的是「入口的契约边界」，不是缺陷：函数是私有的，唯一调用方
+    /// `decode` 已在外层校验过长度/条数/升序/重复/零分/填充区，所以现状不产生漏洞。
+    /// 但任何新增调用方都必须自己校验 —— 否则能造出「自家 decode 都拒绝」的负载，
+    /// 也就是下面断言的那样。
+    ///
+    /// 文档曾经写成「会校验升序与 q > 0」，与实现不符；2026-11-18 已修正为
+    /// 「不做校验 + 调用方契约」。本测试保留了当时构造的那个反例。
     #[test]
     fn from_slots_unchecked_实际不校验() {
         // 乱序 + 分数为 0，函数照单全收。

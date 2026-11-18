@@ -32,11 +32,33 @@ pub struct Rng {
 
 impl Rng {
     /// 用种子构造。种子为 0 也安全（内部强制非零）。
+    ///
+    /// # 为什么不是 `(seed ^ C) | 1`
+    ///
+    /// 早期实现用 `(seed ^ C) | 1` —— 既避开 xorshift 的不动点 0，又保证状态非零。
+    /// 但那个 `| 1` **把种子的最低位吃掉了**：`seed = 2k` 与 `2k+1` 得到完全相同的状态，
+    /// 于是「相邻 seed」给出同一串随机数，**有效种子空间从 2^64 缩到 2^63**。
+    ///
+    /// 实测后果：`seed 0..64` 只产生 **32 个**不同的首值（应为 64）。
+    /// 更隐蔽的是 `seed 1..=20` 这种「看起来 20 个独立样本」的用法 ——
+    /// 实际只有 **11 个**独立状态，会让标准差被低估、置信区间过窄。
+    ///
+    /// 现在的做法：先用 SplitMix64 的混合函数（双射，`u64 -> u64` 一一对应）
+    /// 把种子铺开，再确保非零。混合函数是双射，所以**不同的 seed 一定得到不同的 state**。
     #[must_use]
     pub fn new(seed: u64) -> Self {
-        // 任何种子都映到非零奇数：xorshift 的不动点只有 0。
+        // SplitMix64 的 finalizer：雪崩性好，且是双射（可逆），不会把两个种子映到同一状态。
+        let mut x = seed;
+        x ^= x >> 30;
+        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x ^= x >> 27;
+        x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+        x ^= x >> 31;
+        // 唯一例外：双射把某个种子映到 0 时（seed 使混合结果为 0），xorshift 会卡在不动点。
+        // 用 | 1 兜底，但**此时状态的最低位本来就被强制**——代价是恰好 2 个种子里有 1 个被改，
+        // 而不是所有种子都丢一位。
         Self {
-            state: (seed ^ 0x9E37_79B9_7F4A_7C15) | 1,
+            state: if x == 0 { 0x9E37_79B9_7F4A_7C15 } else { x },
         }
     }
 
@@ -246,11 +268,11 @@ mod tests {
         assert_eq!(
             got,
             [
-                0x0832_8d7f_03bc_ec1a,
-                0x077e_7279_e17a_b6cd,
-                0x0c4e_098f_541b_b09e,
-                0xd861_fcf4_7b8b_124e,
-                0xce98_0bc1_dbb3_0cbb,
+                0xD75F_B1E8_6299_B002,
+                0x8213_F6CA_8439_876E,
+                0x15BC_4499_6652_71A8,
+                0x9140_4E1B_0070_C26B,
+                0x3EFD_D40D_9132_6EAA,
             ],
             "seed 42 的随机序列变了——这会破坏全部确定性判据"
         );
@@ -284,32 +306,37 @@ mod tests {
         );
     }
 
-    /// 守：种子先被映射成非零奇数，因此**只差最低位**的两个种子给出同一条序列。
+    /// 守：**不同的种子给出不同的序列**（不能两根相邻 seed 撞同一串）。
     ///
-    /// 这是 Rng::new 注释里「任何种子都映到非零奇数」的直接后果：有效种子空间
-    /// 从 2^64 缩到 2^63，(42, 43) 这类相邻对拿到的是同一条抽样序列。
+    /// 历史：早期实现是 `state = (seed ^ C) | 1`。那个 `| 1` **吃掉了种子的最低位**：
+    /// `2k` 与 `2k+1` 得到完全相同的状态，于是相邻 seed 给出同一串随机数，
+    /// **有效种子空间从 2^64 缩到 2^63**。
     ///
-    /// ⚠️ 可疑，建议作者确认：抽样只要求「同 seed 同序列」，这个碰撞本身不影响
-    /// 任何确定性判据；但如果有调用方指望「换个 seed 就换个顺序」，它会静默失效。
+    /// 为什么这是真 bug：调用方会写 `for seed in 1..=20 { ... }` 当作「20 个独立样本」，
+    /// 实际只有 11 个独立状态 —— 标准差被低估、置信区间过窄，而**没有任何报错**。
+    ///
+    /// 现在是 SplitMix64 finalizer（双射混合）后接 `if x == 0 { 兜底 }`，
+    /// 所以不同种子一定映射到不同状态。
     #[test]
-    fn t03_rng_种子最低位被吞掉() {
+    fn t03_rng_相邻种子不碰撞() {
+        // 任何两个不同的 seed 都不该给出同一条序列。
         for pair in [(0u64, 1u64), (42, 43), (100, 101), (u64::MAX - 1, u64::MAX)] {
             let mut a = Rng::new(pair.0);
             let mut b = Rng::new(pair.1);
-            for step in 0..8 {
-                assert_eq!(
-                    a.next_u64(),
-                    b.next_u64(),
-                    "({}, {}) 第 {step} 个数应相同（最低位被 | 1 覆盖）",
-                    pair.0,
-                    pair.1
-                );
-            }
+            let (x, y) = (a.next_u64(), b.next_u64());
+            assert_ne!(
+                x, y,
+                "({}.0, {}.1) 给出了相同的首值 —— 种子最低位被吞掉是 bug",
+                pair.0, pair.1
+            );
         }
-        // 但奇偶不同的种子必须真的不同（否则就是常数序列了）。
-        let mut a = Rng::new(42);
-        let mut b = Rng::new(44);
-        assert_ne!(a.next_u64(), b.next_u64(), "不同奇偶的种子不该同序列");
+        // 更强的判据：0..64 这 64 个种子必须产生 64 个不同的首值（曾经只有 32 个）。
+        let mut seen = std::collections::BTreeSet::new();
+        for seed in 0..64u64 {
+            let mut r = Rng::new(seed);
+            seen.insert(r.next_u64());
+        }
+        assert_eq!(seen.len(), 64, "0..64 这 64 个种子应有 64 个不同的首值");
     }
 
     // ══════════════════════════ 确定性 ══════════════════════════
@@ -339,15 +366,15 @@ mod tests {
         let l = list_of(10);
         let mut s = RoundBitmap::new();
         let mut rng = Rng::new(42);
-        assert_eq!(s.draw(&l, 10, &mut rng), vec![4, 1, 8, 5, 2, 3, 9, 0, 6, 7]);
+        assert_eq!(s.draw(&l, 10, &mut rng), vec![8, 2, 0, 9, 6, 1, 4, 3, 5, 7]);
         assert_eq!(s.remaining(), 0);
         // 抽空之后自动开新一轮。
-        assert_eq!(s.draw(&l, 3, &mut rng), vec![3, 6, 8]);
+        assert_eq!(s.draw(&l, 3, &mut rng), vec![5, 4, 7]);
         assert_eq!(s.remaining(), 7);
-        assert_eq!(s.draw_all(&l), vec![0, 1, 2, 4, 5, 7, 9]);
+        assert_eq!(s.draw_all(&l), vec![0, 1, 2, 3, 6, 8, 9]);
         assert_eq!(s.remaining(), 0);
         // 再来一轮。
-        assert_eq!(s.draw(&l, 4, &mut rng), vec![6, 7, 1, 2]);
+        assert_eq!(s.draw(&l, 4, &mut rng), vec![9, 8, 2, 3]);
         assert_eq!(s.remaining(), 6);
     }
 
@@ -470,7 +497,7 @@ mod tests {
 
         // 新增 9 号：结构变化 ⟹ 重建 + 新一轮（remaining 回到 7）。
         l.set(9, 0.5, 0);
-        assert_eq!(s.draw(&l, 2, &mut rng), vec![9, 1]);
+        assert_eq!(s.draw(&l, 2, &mut rng), vec![3, 1]);
         assert_eq!(s.remaining(), 5);
         assert_eq!(s.round_len(), 7, "快照必须包含新账户");
 
@@ -489,13 +516,13 @@ mod tests {
         let mut l = list_of(4);
         let mut s = RoundBitmap::new();
         let mut rng = Rng::new(5);
-        assert_eq!(s.draw(&l, 2, &mut rng), vec![3, 2]);
+        assert_eq!(s.draw(&l, 2, &mut rng), vec![3, 1]);
         assert_eq!(s.remaining(), 2);
         let version_before = l.version();
         l.set(1, 0.9, 7); // 改分，版本不变
         assert_eq!(l.version(), version_before);
         let rest = s.draw(&l, 2, &mut rng);
-        assert_eq!(rest, vec![0, 1], "改分不该打断本轮");
+        assert_eq!(rest, vec![2, 0], "改分不该打断本轮");
         assert_eq!(s.remaining(), 0);
         assert_eq!(s.round_len(), 4);
     }
@@ -523,12 +550,12 @@ mod tests {
         let l = list_of(10);
         let mut s = RoundBitmap::new();
         let mut rng = Rng::new(42);
-        assert_eq!(s.draw(&l, 3, &mut rng), vec![4, 1, 8]);
+        assert_eq!(s.draw(&l, 3, &mut rng), vec![8, 2, 0]);
         assert_eq!(s.remaining(), 7);
         let rest = s.draw_all(&l);
         assert_eq!(rest.len(), 7);
         assert!(rest.windows(2).all(|w| w[0] < w[1]), "draw_all 必须升序");
-        assert!(!rest.contains(&4) && !rest.contains(&1) && !rest.contains(&8));
+        assert!(!rest.contains(&8) && !rest.contains(&2) && !rest.contains(&0));
         assert_eq!(s.remaining(), 0);
         assert!(s.draw_all(&l).is_empty(), "本轮已空，draw_all 返回空");
         assert_eq!(s.remaining(), 0, "draw_all 不会自动开新一轮");
@@ -562,7 +589,7 @@ mod tests {
         // draw_all 消耗 0 个：先 draw(2)（吃 2 个）再 draw_all，总消耗仍是 2。
         let mut s = RoundBitmap::new();
         let mut rng = Rng::new(77);
-        assert_eq!(s.draw(&l, 2, &mut rng), vec![1, 5]);
+        assert_eq!(s.draw(&l, 2, &mut rng), vec![0, 5]);
         let rest = s.draw_all(&l);
         assert_eq!(rest.len(), 6);
         let mut mirror = Rng::new(77);

@@ -1,0 +1,26 @@
+[package]
+name = "tm_mincore_wasm"
+version = "0.1.0"
+edition = "2021"
+description = "mincore wasm32 逐位对拍：在 Node 里真跑 wasm32，与 native x86_64 比较 f32 位模式与定长编码字节"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# bin 名字必须与 lib 不同，否则 cargo 会报 output filename collision
+[[bin]]
+name = "mc_wasm_cli"
+path = "src/main.rs"
+
+[dependencies]
+# 只依赖被测的内核本身，不依赖任何 registry crate（本仓零外部依赖的约束同样适用）
+tm_mincore = { path = "../../crates/mincore" }
+
+# 独立 workspace 根（与 tools/wasm-smoke、crates/* 同一模式）
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = true

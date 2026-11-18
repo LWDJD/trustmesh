@@ -95,9 +95,9 @@ cd crates/engine && cargo run --example quickstart
 | [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 206 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
-| [`tm_mincore`](crates/mincore) | **最小反女巫内核原型**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍 | 17 |
+| [`tm_mincore`](crates/mincore) | **最小反女巫内核原型**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍 | 128 |
 
-能力矩阵 **712 passed / 0 failed / 1 ignored**（八个 workspace：七个 crate + 根 v1.0）。
+能力矩阵 **822 passed / 0 failed / 4 ignored**（八个 workspace：七个 crate + 根 v1.0）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 

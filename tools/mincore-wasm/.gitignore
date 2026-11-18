@@ -1,0 +1,6 @@
+# 生成物（每次跑 run-all.ps1 都会重写）
+native.txt
+native_bad.txt
+native2.txt
+/target
+/Cargo.lock

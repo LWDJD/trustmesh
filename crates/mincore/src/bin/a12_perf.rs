@@ -65,8 +65,13 @@ fn main() {
             e.rate(i as u32, 0.5, 0);
         }
         // 先把 n-1 份观点装进去，留一份用来计时「接收」
-        for i in 1..n {
-            e.on_view(i as u32, eng_views[i].clone(), 0, 0);
+        //
+        // 用 enumerate().skip(1) 而不是 for i in 1..n：此刻 eng_views 的长度恰好是 n，
+        // 索引 1..n 与 skip(1) 之后剩余的元素是**同一个集合、同一顺序**，
+        // 调用序列逐条完全相同；只是把「按下标取元素」换成迭代器，
+        // 从而消掉 clippy::needless_range_loop（见下方第二条循环同样的处理）。
+        for (i, v) in eng_views.iter().enumerate().skip(1) {
+            e.on_view(i as u32, v.clone(), 0, 0);
         }
         let reps = 50;
         let t0 = Instant::now();
@@ -87,8 +92,8 @@ fn main() {
         for i in 0..n {
             c.rate(i as u32, 0.5, 0);
         }
-        for i in 1..n {
-            c.on_view(i as u32, core_views[i].clone(), 0, 0);
+        for (i, v) in core_views.iter().enumerate().skip(1) {
+            c.on_view(i as u32, v.clone(), 0, 0);
         }
         let t0 = Instant::now();
         for _ in 0..reps {

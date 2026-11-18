@@ -12,6 +12,19 @@ use tm_mincore::{Config as CoreConfig, Node, SparseView};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
 use tm_view::{CompressedView, ViewParams};
 
+// ══════════════════════════ 结果类型别名 ══════════════════════════
+//
+// 三个统计函数返回的都是「一组 seed 上算出来的若干列指标」，列数多、元素类型相同，
+// 直接写在签名里既超长又容易数错，clippy::type_complexity 也会报警。
+// 抽成别名后签名变成「返回 6 列指标 / 返回 4 列指标」，语义反而更清楚。
+// 这些别名**只用于标注类型**，不影响任何运行时行为。
+
+/// 6 列指标：每个元素都是「一个 seed 一个值」，按被调用函数的文档顺序排列。
+type SixSeries = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+
+/// 4 列指标，同上。
+type FourSeries = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
+
 // ══════════════════════════ 公共小工具 ══════════════════════════
 
 /// 账户号 -> 32 字节公钥。两种实现用同一个映射，保证比的是算法不是编码。
@@ -104,7 +117,11 @@ fn prepare(seed: u64, attack: AttackKind, cap: usize, params: ViewParams) -> Pre
     let mut core_views = vec![None; n];
     for i in 0..n {
         let total: f32 = out[i].iter().map(|x| x.1).sum();
-        if !(total > 0.0) {
+        // 语义：total 为 NaN 或 <= 0 都跳过（此时视图全 0，归一化的分母无意义）。
+        // 这里**必须**显式判 NaN——`!(total > 0.0)` 对 NaN 为真，而裸的 `total <= 0.0`
+        // 对 NaN 为假；后者会让 NaN 溜进 `s / total`，把整份视图污染成 NaN。
+        // `is_nan() || <= 0.0` 与原写法在全部 f32 位模式上逐值等价。
+        if total.is_nan() || total <= 0.0 {
             continue;
         }
         let pairs: Vec<([u8; 32], f32)> = out[i]
@@ -190,11 +207,8 @@ fn at_core(m: &BTreeMap<u32, f32>, idx: usize) -> f64 {
 }
 // ══════════════════════════ S1：女巫在诚实观察者眼里的声望 ══════════════════════════
 
-fn s1(
-    seeds: &[u64],
-    cap: usize,
-    params: ViewParams,
-) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+/// S1 的 6 列指标：Engine 的均值/最大/非零占比、mincore 的均值/最大/非零占比。
+fn s1(seeds: &[u64], cap: usize, params: ViewParams) -> SixSeries {
     let mut e_mean = Vec::new();
     let mut e_max = Vec::new();
     let mut e_frac = Vec::new();
@@ -245,7 +259,8 @@ fn cf_calc(vals: &[f64], frac: &mut Vec<f64>, mx: &mut f64) {
 
 // ══════════════════════════ S3：被抬举账户 / 诚实账户均值 ══════════════════════════
 
-fn s3(seeds: &[u64], cap: usize, params: ViewParams) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+/// S3 的 4 列指标：Engine 的倍数/绝对值、mincore 的倍数/绝对值。
+fn s3(seeds: &[u64], cap: usize, params: ViewParams) -> FourSeries {
     let mut e_ratio = Vec::new();
     let mut c_ratio = Vec::new();
     let mut e_val = Vec::new();
@@ -285,11 +300,8 @@ fn s3(seeds: &[u64], cap: usize, params: ViewParams) -> (Vec<f64>, Vec<f64>, Vec
 
 // ══════════════════════════ S4：1000 个只注册不评分的账户 ══════════════════════════
 
-fn s4(
-    seeds: &[u64],
-    cap: usize,
-    params: ViewParams,
-) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+/// S4 的 6 列指标：Engine 的出现率/总信任/最大÷均值、mincore 的同三列。
+fn s4(seeds: &[u64], cap: usize, params: ViewParams) -> SixSeries {
     let mut e_frac = Vec::new();
     let mut e_trust = Vec::new();
     let mut e_over = Vec::new();
@@ -440,7 +452,12 @@ fn s2_s5_rows(cap: usize, params: ViewParams) -> Vec<(String, f64, f64, String)>
     ));
 
     // ④ 重复声明同一条 10 次。
-    let pairs: Vec<(usize, f32)> = std::iter::repeat((10usize, 1.0f32)).take(10).collect();
+    //
+    // 意图：造出「同一条 (账户 10, 分 1.0) 连续出现 10 次」的输入，测接收端会不会把
+    // 重复声明累加成 10——这正是引擎侧可能被刷分的地方。
+    // 原先写 `std::iter::repeat(..).take(10).collect()`，等价于 `repeat_n(.., 10)`：
+    // 两者产出**同一条 Vec**（10 个相同元素，顺序无关），只是少一层适配器。
+    let pairs: Vec<(usize, f32)> = std::iter::repeat_n((10usize, 1.0f32), 10).collect();
     let e = engine_budget(&mk(&pairs), &[10], n);
     let c = core_budget(
         &pairs
@@ -633,7 +650,11 @@ fn s6(seeds: &[u64], cap: usize, params: ViewParams) -> (usize, usize, f64, f64)
 /// 精确参考实现：不量化、不截断、全 f64。只用于量化「u16 + cap」损失了多少。
 fn exact_dist(d: &Prepared, obs: usize, beta: f64) -> BTreeMap<u32, f64> {
     let total: f64 = d.out[obs].iter().map(|&(_, s)| f64::from(s)).sum();
-    if !(total > 0.0) {
+    // 语义：total 为 NaN 或 <= 0 → 观察者没有正分，「精确分布」就是空的。
+    // 必须显式判 NaN：`!(total > 0.0)` 对 NaN 为真，`total <= 0.0` 对 NaN 为假；
+    // 后者会让 NaN 进到后面的除法，把整张分布污染成 NaN 而**不**返回空表。
+    // `is_nan() || <= 0.0` 与原写法在全部 f64 位模式上逐值等价。
+    if total.is_nan() || total <= 0.0 {
         return BTreeMap::new();
     }
     let mut out: BTreeMap<u32, f64> = BTreeMap::new();
@@ -646,7 +667,13 @@ fn exact_dist(d: &Prepared, obs: usize, beta: f64) -> BTreeMap<u32, f64> {
         let share = f64::from(s) / total;
         let view = &d.out[src as usize];
         let vt: f64 = view.iter().map(|&(_, x)| f64::from(x)).sum();
-        if !(vt > 0.0) || !(share > 0.0) {
+        // 语义：来源视图的自身总和 vt 或它在本观察者清单里的份额 share，
+        // 只要有一个是「NaN 或 <= 0」就跳过这条来源。
+        // 两处都必须显式判 NaN：`!(x > 0.0)` 对 NaN 为真，`x <= 0.0` 对 NaN 为假；
+        // 后者会让 NaN 的 vt/share 参与 `wsum += share` 与下面的除法，
+        // 结果是整张精确参考分布变 NaN——参考系一坏，全部误差指标一起失效。
+        // 每个析取项都等价替换，短路顺序与原来相同（先 vt 后 share）。
+        if vt.is_nan() || vt <= 0.0 || share.is_nan() || share <= 0.0 {
             continue;
         }
         wsum += share;
@@ -673,7 +700,8 @@ fn prec() {
     let params = ViewParams::default();
     let beta = 0.3f64;
     let mut seeds = Vec::new();
-    let mut per_cap: BTreeMap<usize, (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> = BTreeMap::new();
+    // 每档 cap 累积 4 列误差指标（平均相对误差 / p95 / 最大 / S3 倍数偏移）。
+    let mut per_cap: BTreeMap<usize, FourSeries> = BTreeMap::new();
     for cap in [128usize, 256, 512, 4096] {
         per_cap.insert(cap, (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     }

@@ -35,7 +35,9 @@ fn main() {
             by_obs.entry(obs).or_default().push((tgt as u32, score));
         }
         for (_, pairs) in by_obs {
-            if pairs.is_empty() { continue; }
+            if pairs.is_empty() {
+                continue;
+            }
             all.push((pairs.len(), 0.0));
         }
     }
@@ -52,7 +54,15 @@ fn main() {
     println!();
     println!("| 分位 | 长度 |");
     println!("|---|---:|");
-    for (name, p) in [("min", 0.0), ("p25", 0.25), ("p50", 0.5), ("p75", 0.75), ("p90", 0.9), ("p99", 0.99), ("max", 1.0)] {
+    for (name, p) in [
+        ("min", 0.0),
+        ("p25", 0.25),
+        ("p50", 0.5),
+        ("p75", 0.75),
+        ("p90", 0.9),
+        ("p99", 0.99),
+        ("max", 1.0),
+    ] {
         let idx = ((n - 1) as f64 * p).round() as usize;
         println!("| {} | {} |", name, lens[idx]);
     }
@@ -65,14 +75,23 @@ fn main() {
         for &(l, _) in &all {
             let pairs: Vec<(u32, f32)> = (0..l).map(|i| (i as u32, 1.0f32 / l as f32)).collect();
             let loss = SparseView::truncated_mass(cap, &pairs);
-            if loss > 0.0 { truncated += 1; }
+            if loss > 0.0 {
+                truncated += 1;
+            }
             loss_sum += loss;
-            if loss > loss_max { loss_max = loss; }
+            if loss > loss_max {
+                loss_max = loss;
+            }
         }
         println!();
         println!("## cap = {}", cap);
-        println!("被截断 {} / {} = {:.1}%，平均损失 {:.2}%，最大损失 {:.2}%",
-            truncated, all.len(), truncated as f64 / all.len() as f64 * 100.0,
-            loss_sum / all.len() as f64 * 100.0, loss_max * 100.0);
+        println!(
+            "被截断 {} / {} = {:.1}%，平均损失 {:.2}%，最大损失 {:.2}%",
+            truncated,
+            all.len(),
+            truncated as f64 / all.len() as f64 * 100.0,
+            loss_sum / all.len() as f64 * 100.0,
+            loss_max * 100.0
+        );
     }
 }

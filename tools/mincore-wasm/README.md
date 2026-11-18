@@ -26,6 +26,17 @@
 
 ## 跑法
 
+**注意一个坑**：本任务验收用的那条 `.\target\release\mc_wasm_cli.exe > native.txt`
+在 PowerShell 5.1 下会把 `native.txt` 写成 **UTF-16 LE + BOM**（而且会覆盖入库的金标准）。
+对拍器照常能跑（`decodeText` 认这种编码），但跑完 `git status` 会显示它为已修改。
+**恢复办法**（两种都行，效果相同）：
+
+~~~powershell
+git checkout -- native.txt      # 从 git 取回金标准
+.\run-all.ps1                   # 或者用真实 native 重新生成（写的是无 BOM UTF-8，与入库版本逐字节相同）
+~~~
+
+
 ~~~powershell
 $env:TMP="<仓库根>/.tmp"; $env:TEMP=$env:TMP
 cd tools/mincore-wasm

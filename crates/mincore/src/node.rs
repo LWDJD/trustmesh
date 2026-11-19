@@ -60,7 +60,11 @@ use crate::list::{Acc, PositiveList, Time};
 use crate::round::{Rng, RoundBitmap};
 use crate::view::SparseView;
 
-/// 内核参数。整个内核只有这 4 个旋钮。
+/// 内核参数。
+///
+/// 「算法」旋钮 4 个（`beta` / `half_life` / `cap` / `decay_enabled`），
+/// 「资源上限」旋钮 2 个（`max_views` / `max_list`）。前者改的是计算结果，
+/// 后者**不改任何计算结果**，只把内存钉死在有界范围内（`0` = 无上限）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Config {
     /// 个人项权重 β。
@@ -71,6 +75,35 @@ pub struct Config {
     pub cap: usize,
     /// 是否启用时间衰减。`false` 时因子恒为 1（消融用）。
     pub decay_enabled: bool,
+    /// 观点缓存的**条目数**上限；`0` = 无上限，默认 4096。
+    ///
+    /// 判定规则见 [`Node::on_view`] 的「容量上限」一节，要点：
+    /// **只有「新 owner 且已满」才丢；已缓存的 owner 更新既有条目永远接受**
+    /// （原地覆盖不增长内存）。
+    ///
+    /// 默认 4096 的依据：`views` 只能装「我**主动 rate 过**的来源」的观点
+    /// （`on_view` 第一条结构性拒绝条件保证），而 A12 图（`n_initial = 400`、
+    /// `steps = 120`、`max_follows = 256`）上单个观察者的清单长度实测
+    /// 「均值 105.1、中位 101、最大 202」，CI 小图（120 账户 / 70 步 /
+    /// `max_follows = 115`）实测 54~61 —— 4096 有 16~20 倍以上余量，
+    /// 正常使用**永远碰不到**这个上限。
+    ///
+    /// 内存上界（条目数即内存上界，因为每份视图的槽位数 `n ≤ cap`）：
+    /// `max_views × (6·n_slots + 24 + 16 + BTreeMap 节点开销)`，
+    /// 用序列化口径可给出最宽松的绝对上界 `max_views × (cap×6 + 2)`
+    /// （`cap = 512` 时 4096 × 3074 B ≈ 12 MiB）。注意这是**上界**：
+    /// 视图在内存里只分配 `n_slots × 6` 字节 + `Vec` 头（24 B），
+    /// `cap×6+2` 是 `encode()` 的**序列化长度**，不是内存占用。
+    pub max_views: usize,
+    /// 正分清单的**条目数**上限；`0` = 无上限，默认 4096。
+    ///
+    /// 语义与 [`PositiveList`] 的 `max_entries` 完全一致（见 list.rs 模块文档）：
+    /// 只拦**新增**，删除与改分永远接受。被拒的新增在 [`Node::rate`] 里是静默的，
+    /// 用 [`Node::try_rate`] 或 [`Node::stat_rejected_list`] 观测。
+    ///
+    /// 默认 4096 的依据与 `max_views` 相同（清单比 `views` 还小：
+    /// A12 图实测均值 105.1、最大 202）。
+    pub max_list: usize,
 }
 
 impl Default for Config {
@@ -80,6 +113,14 @@ impl Default for Config {
             half_life: 72,
             cap: 512,
             decay_enabled: true,
+            // 资源上限默认**打开**：4096 对正常使用有 16~20 倍以上余量（见字段文档），
+            // 而内存由此从「上层喂多少就涨多少」变成有界。
+            // ⚠️ 与 tm_engine::EngineConfig::max_views 的默认值 0（无上限）**不同**是
+            // 刻意的：那边默认 0 是为了让既有实验逐位不变，这里 mincore 是原型内核，
+            // 防内存耗尽优先；需要旧行为（无上限）时显式写 0，判定分支随即不触发，
+            // 逐位退化为引入本字段之前的行为。
+            max_views: 4096,
+            max_list: 4096,
         }
     }
 }
@@ -186,11 +227,17 @@ pub struct Node {
     /// 所以反复「rate → on_view → rate(0)」会让 `|views|` 超过 `|list|`（残留记录无份额，
     /// `weights()` 靠 `list.get(owner) == None` 跳过，计算上无害，但占内存）。
     /// 需要回收的话得显式加一个清理入口；当前实现不回收。
-    /// 内存上界仍受「我主动 rate 过的不同账户数」约束，不是无界的。
+    ///
+    /// 好在这个上界**现在是被钉死的**：`|views|` 只增不减、而新增又被
+    /// [`Config::max_views`] 挡住，所以它恒有 `|views| ≤ max_views`
+    /// （`max_views = 0` 时才退化成「受我主动 rate 过的不同账户数约束」）。
     views: BTreeMap<Acc, Received>,
     rng: Rng,
     stat_views: u64,
     stat_rejected: u64,
+    /// 因 `max_views` 上限被整条丢弃的观点数（**包含**在 `stat_rejected` 里）。
+    /// 单调递增，只增不减。
+    stat_rejected_limit: u64,
 }
 
 impl Node {
@@ -199,20 +246,34 @@ impl Node {
     pub fn new(cfg: Config, seed: u64) -> Self {
         Self {
             cfg,
-            list: PositiveList::new(),
+            list: PositiveList::with_max(cfg.max_list),
             sampler: RoundBitmap::new(),
             views: BTreeMap::new(),
             rng: Rng::new(seed),
             stat_views: 0,
             stat_rejected: 0,
+            stat_rejected_limit: 0,
         }
     }
 
     // ---------------- 正分清单 ----------------
 
     /// 记录一次正分（`score <= 0` 表示撤销），并把 `last_check` 刷新为 `now`。
+    ///
+    /// 超过 [`Config::max_list`] 的**新增**被静默丢弃（撤销与改分永远接受），
+    /// 丢弃只累加 [`Node::stat_rejected_list`]，不影响任何计算结果。
+    /// 需要知道「这次到底写进去没有」时用 [`Node::try_rate`]。
     pub fn rate(&mut self, acc: Acc, score: f32, now: Time) {
-        self.list.set(acc, score, now);
+        let _ = self.list.try_set(acc, score, now);
+    }
+
+    /// 记录一次正分，返回是否被接受。唯一的拒绝情形是
+    /// 「`max_list > 0`、清单已满、且这是一个**新**账户」；
+    /// 删除（`score <= 0`）与更新已有条目**永远返回 `true`**。
+    ///
+    /// 被拒时不写任何字段、不涨清单版本号、不动连败计数。
+    pub fn try_rate(&mut self, acc: Acc, score: f32, now: Time) -> bool {
+        self.list.try_set(acc, score, now)
     }
 
     /// 我的正分清单（只读）。
@@ -253,11 +314,41 @@ impl Node {
     ///
     /// 拒绝条件（全部是结构性的，不需要逐条判脏）：
     /// * 我对 `owner` 没有正分 —— 没关系的来源，观点对我没有权重，存了也没用；
-    /// * 表是空的（`Σq == 0`）—— 没有信息。
+    /// * 表是空的（`Σq == 0`）—— 没有信息；
+    /// * **容量上限**（[`Config::max_views`]，见下）。
     ///
     /// 入库时：`last_check = now`、连败清零。
+    ///
+    /// # 容量上限
+    ///
+    /// 上面两条判定之后（顺序固定，保证既有 `stats()` 期望不变）再判
+    /// `max_views > 0 && views.len() >= max_views && !views.contains_key(&owner)`：
+    ///
+    /// * **新 owner 且已满** → 整条**丢弃**，返回 `false`，只累加
+    ///   [`Node::stat_rejected_limit`] 与 [`Node::stats`] 的被拒项；
+    ///   不写缓存、不刷新 `last_check`、不动连败（调用方本来就分不清成功与失败）；
+    /// * **owner 已在缓存里** → 原地覆盖既有条目，**永远接受**：内存不增长，
+    ///   丢它没有资源保护收益，反而会阻断正常的观点刷新；
+    /// * `max_views = 0` → 这条判定不触发，行为与引入本字段之前**逐位一致**。
+    ///
+    /// 不变式：`stat_rejected_limit() <= stats().1`，`stats()` 的元组形状与含义不变。
+    ///
+    /// 为什么是「拒绝新增」而不是 LRU：LRU 的淘汰顺序依赖**历史到达顺序**，
+    /// 而 `snapshot → restore` 只恢复「当前状态」、不恢复隐式的淘汰序，
+    /// 于是恢复之后的 LRU 行为与关机前不同 —— 那会直接破坏快照能力与逐位确定性。
+    /// 拒绝新增的接受判定只依赖 `(|views|, owner 是否已缓存)`，**无隐式状态**；
+    /// `max_views = 0` 时逐位退化为旧行为。代价是「满了之后新来源进不来」，
+    /// 用 [`Node::stat_rejected_limit`] 让调用方可观测。
     pub fn on_view(&mut self, owner: Acc, view: SparseView, published_at: Time, now: Time) -> bool {
         if !self.list.has(owner) || view.total_q() == 0 {
+            self.stat_rejected += 1;
+            return false;
+        }
+        if self.cfg.max_views > 0
+            && self.views.len() >= self.cfg.max_views
+            && !self.views.contains_key(&owner)
+        {
+            self.stat_rejected_limit += 1;
             self.stat_rejected += 1;
             return false;
         }
@@ -289,6 +380,29 @@ impl Node {
     #[must_use]
     pub fn stats(&self) -> (u64, u64) {
         (self.stat_views, self.stat_rejected)
+    }
+
+    /// 因 [`Config::max_views`] 容量上限被整条丢弃的观点累计条数。
+    ///
+    /// **包含**在 [`Node::stats`] 的被拒项里（不变式
+    /// `stat_rejected_limit() <= stats().1`），与 [`Node::stats`] 分开暴露是刻意的：
+    /// `stats()` 的二元组形状与含义保持不变（既有实验按位置解构它）。
+    ///
+    /// 这个数**单调递增、只增不减**（观点被覆盖或撤销正分都不会让它回退），
+    /// 它是「被拒了多少次」的累计事件计数，不是「现在有多少条被拒」。
+    /// 大于 0 说明缓存正在顶满、资源保护生效。
+    #[must_use]
+    pub fn stat_rejected_limit(&self) -> u64 {
+        self.stat_rejected_limit
+    }
+
+    /// 因 [`Config::max_list`] 容量上限被拒的**新增**正分累计次数
+    /// （转发 [`PositiveList::stat_rejected_limit`]）。
+    ///
+    /// 同样单调递增、只增不减；撤销正分与改分不计入。
+    #[must_use]
+    pub fn stat_rejected_list(&self) -> u64 {
+        self.list.stat_rejected_limit()
     }
 
     // ---------------- 计算 ----------------
@@ -1117,16 +1231,23 @@ mod tests {
         assert_eq!(n.query(50, 0), 0.0);
     }
 
-    // ══════════════════════════ Config 的四个旋钮 ══════════════════════════
+    // ══════════════════════════ Config 的旋钮 ══════════════════════════
 
-    /// 守：Config::default() 的四个值——整个内核只有这四个旋钮，改任何一个都是协议变更。
+    /// 守：Config::default() 的六个值——4 个算法旋钮 + 2 个资源上限旋钮。
+    ///
+    /// 2026-11-19 加了 `max_views` / `max_list`（防内存耗尽）。补两个字段时
+    /// **只给的字面量补字段、不改任何一条既有断言**：四个算法旋钮的默认值
+    /// 仍然是「改任何一个都是协议变更」的那一组。
     #[test]
-    fn t21_config_default四个旋钮() {
+    fn t21_config_default六个旋钮() {
         let c = Config::default();
         assert_eq!(c.beta, 0.3);
         assert_eq!(c.half_life, 72);
         assert_eq!(c.cap, 512);
         assert!(c.decay_enabled);
+        // 资源上限默认 4096（不是 0）：防内存耗尽优先，见 Config::max_views 的文档。
+        assert_eq!(c.max_views, 4096);
+        assert_eq!(c.max_list, 4096);
         // 结构体是可比较的，默认值必须能与之逐字段相等。
         assert_eq!(
             c,
@@ -1134,7 +1255,9 @@ mod tests {
                 beta: 0.3,
                 half_life: 72,
                 cap: 512,
-                decay_enabled: true
+                decay_enabled: true,
+                max_views: 4096,
+                max_list: 4096
             }
         );
     }
@@ -1248,5 +1371,364 @@ mod tests {
         for i in 0..10u32 {
             assert!((d.get(i) - 0.1).abs() < 1e-6, "{i} 号 = {}", d.get(i));
         }
+    }
+
+    // ══════════════════════════ 资源上限：views / list ══════════════════════════
+
+    /// 只改 max_views，其余默认。
+    fn cfg_views(max_views: usize) -> Config {
+        Config {
+            max_views,
+            ..Config::default()
+        }
+    }
+
+    /// 只改 max_list，其余默认。
+    fn cfg_list(max_list: usize) -> Config {
+        Config {
+            max_list,
+            ..Config::default()
+        }
+    }
+
+    /// 两个上限一起改，其余默认。
+    fn cfg_limits(max_views: usize, max_list: usize) -> Config {
+        Config {
+            max_views,
+            max_list,
+            ..Config::default()
+        }
+    }
+
+    /// 守：Config 的默认上限是 **4096 / 4096**（不是「无上限」）；
+    /// 写 0 才是无上限；`Node` 的清单按 `cfg.max_list` 初始化。
+    #[test]
+    fn t24_config默认上限是4096() {
+        let c = Config::default();
+        assert_eq!(c.max_views, 4096);
+        assert_eq!(c.max_list, 4096);
+        assert_ne!(c.max_views, 0, "默认必须是**有限**上限（防内存耗尽优先）");
+        assert_ne!(c.max_list, 0);
+        // 清单上限跟着 Config 走。
+        let n = Node::new(
+            Config {
+                max_list: 3,
+                ..Config::default()
+            },
+            1,
+        );
+        assert_eq!(n.claims().max_entries(), 3, "清单上限来自 Config::max_list");
+        assert_eq!(n.claims().len(), 0);
+        // 默认 Node 的清单上限也是 4096。
+        assert_eq!(Node::new(Config::default(), 1).claims().max_entries(), 4096);
+    }
+
+    /// 守：`max_views = 0` = 无上限——喂 2000 份不同 owner 的观点全部接收，
+    /// 一次容量拒绝都没有（这是「逐位退化为旧行为」的契约）。
+    #[test]
+    fn t25_max_views为0表示无上限() {
+        let mut n = Node::new(cfg_views(0), 1);
+        let view = SparseView::from_scores(8, &[(7, 1.0)]);
+        for i in 0..2000u32 {
+            assert!(n.try_rate(i, 0.5, 0), "默认 max_list 够大，2000 条都能进");
+            assert!(
+                n.on_view(i, view.clone(), 0, 0),
+                "无上限时第 {i} 份必须接收"
+            );
+        }
+        assert_eq!(n.view_count(), 2000);
+        assert_eq!(n.stat_rejected_limit(), 0, "无上限不该产生容量拒绝");
+        assert_eq!(n.stats(), (2000, 0), "stats 也不该有拒绝");
+    }
+
+    /// 守：`max_views = n` 的**恰好满 / 多一条**边界：第 n 份接收，第 n+1 份新
+    /// owner 整条丢弃（不占内存、不计成功、只涨容量计数与 stats 的被拒项）。
+    #[test]
+    fn t26_max_views恰好满与多一条的边界() {
+        let mut n = Node::new(cfg_views(3), 1);
+        let view = SparseView::from_scores(8, &[(7, 1.0)]);
+        for i in 0..3u32 {
+            assert!(n.try_rate(i, 0.5, 0));
+            assert!(
+                n.on_view(i, view.clone(), 0, 0),
+                "第 {i} 份让缓存**恰好满**"
+            );
+        }
+        assert_eq!(n.view_count(), 3, "恰好满 = view_count == max_views");
+        assert_eq!(n.stats(), (3, 0));
+        assert_eq!(n.stat_rejected_limit(), 0);
+        // 第 4 份：新 owner + 已满 → 整条丢弃。
+        assert!(n.try_rate(3, 0.5, 0));
+        assert!(
+            !n.on_view(3, view.clone(), 0, 5),
+            "满了之后的新 owner 必须被拒"
+        );
+        assert_eq!(n.view_count(), 3, "被拒的观点不占内存");
+        assert_eq!(n.stats(), (3, 1), "容量拒绝计入 stats 的被拒项，成功数不变");
+        assert_eq!(n.stat_rejected_limit(), 1);
+        // 被拒时**不**刷新 last_check、不记成功、不动连败。
+        assert_eq!(n.claims().last_check(3), Some(0), "被拒不刷新 last_check");
+        assert_eq!(n.claims().fail_streak(3), 0, "被拒不是「取失败」");
+        // 再送两遍，计数继续涨，缓存仍是 3。
+        // ⚠️ 必须先 rate(4)/rate(5)：否则被拒的原因是「没评过」这条结构性条件，
+        // 而不是容量上限（本测试要钉的是后者）。
+        assert!(n.try_rate(4, 0.5, 0));
+        assert!(n.try_rate(5, 0.5, 0));
+        assert!(!n.on_view(4, view.clone(), 0, 6));
+        assert!(!n.on_view(5, view.clone(), 0, 7));
+        assert_eq!(n.view_count(), 3);
+        assert_eq!(n.stats(), (3, 3));
+        assert_eq!(n.stat_rejected_limit(), 3);
+    }
+
+    /// 守：**已缓存的 owner 在满时仍然接受**（原地覆盖不增长内存）。
+    /// 这是与「整条丢弃」最关键的分界：丢刷新没有任何资源收益，只会阻断正常刷新。
+    #[test]
+    fn t27_已缓存owner满时仍接受并原地覆盖() {
+        let mut n = Node::new(cfg_views(2), 1);
+        assert!(n.try_rate(1, 0.5, 0) && n.try_rate(2, 0.5, 0));
+        assert!(n.on_view(1, SparseView::from_scores(8, &[(40, 1.0)]), 0, 0));
+        assert!(n.on_view(2, SparseView::from_scores(8, &[(41, 1.0)]), 0, 0));
+        assert_eq!(n.view_count(), 2, "已满");
+        // 1 号换一份新观点：必须接受，且是真替换。
+        let nv = SparseView::from_scores(8, &[(42, 1.0)]);
+        assert!(n.on_view(1, nv, 0, 30), "已缓存的 owner 永远接受");
+        assert_eq!(n.view_count(), 2, "原地覆盖，不增长");
+        assert_eq!(n.stats(), (3, 0), "刷新计入成功，不计拒绝");
+        assert_eq!(n.stat_rejected_limit(), 0, "刷新不是容量拒绝");
+        assert_eq!(n.query(40, 30), 0.0, "旧观点被整体替换");
+        // 2 号仍在，说明「满」不是「全部锁死」：它的背书照样产生声望。
+        assert!(n.query(41, 30) > 0.0, "已缓存来源的观点仍有声望");
+        // 但 3 号新 owner 依然进不来。
+        assert!(n.try_rate(3, 0.5, 0));
+        assert!(!n.on_view(3, SparseView::from_scores(8, &[(43, 1.0)]), 0, 0));
+        assert_eq!(n.stat_rejected_limit(), 1);
+    }
+
+    /// 守：容量上限**不破坏 \(\Sigma \equiv 1\)**；被拒的新来源既不产生声望也
+    /// 不稀释别人（它根本没进缓存，等价于「从来没收到过」）。
+    #[test]
+    fn t28_容量上限不破坏归一化() {
+        let mut n = Node::new(cfg_views(2), 1);
+        for i in 0..10u32 {
+            n.rate(i, 0.5, 0);
+        }
+        // 前两份接收，其余 8 份容量拒绝（10 个 owner 都先 rate 过，所以不是结构性拒绝）。
+        for i in 0..10u32 {
+            let accepted = n.on_view(i, SparseView::from_scores(8, &[(100 + i, 1.0)]), 0, 0);
+            assert_eq!(accepted, i < 2, "第 {i} 份的接受性");
+        }
+        assert_eq!(n.view_count(), 2, "只留下最先到的两份");
+        assert_eq!(n.stat_rejected_limit(), 8);
+        let d = n.distribution(0);
+        let sum = d.sum();
+        assert!((sum - 1.0).abs() < 1e-6, "Σ = {sum}");
+        assert_eq!(
+            d.len(),
+            12,
+            "10 个个人项（账户 0~9）+ 2 个群体项（100、101）"
+        );
+        assert!(d.get(100) > 0.0 && d.get(101) > 0.0, "前两份观点的背书有效");
+        assert_eq!(d.get(102), 0.0, "被拒的来源不该出现在分布里");
+    }
+
+    /// 守：同输入跑两遍，位模式完全相同——容量上限的判定不引入任何随机性
+    /// （它只看 `(|views|, owner)`，不看到达时间以外的任何东西）。
+    #[test]
+    fn t29_同输入两遍位模式相同() {
+        let run = || {
+            let mut n = Node::new(cfg_limits(3, 5), 42);
+            for i in 0..10u32 {
+                let _ = n.try_rate(i, 0.1 + (i as f32) * 0.05, 0);
+            }
+            for i in 0..10u32 {
+                let slots: Vec<(u32, f32)> = (0..5u32)
+                    .map(|j| (200 + j, ((i + j) % 6 + 1) as f32))
+                    .collect();
+                let _ = n.on_view(i, SparseView::from_scores(16, &slots), 0, i as u64);
+            }
+            let d = n.distribution(10);
+            (
+                bits(&d),
+                n.stats(),
+                n.stat_rejected_limit(),
+                n.stat_rejected_list(),
+                n.view_count(),
+                n.claims().len(),
+            )
+        };
+        let a = run();
+        let b = run();
+        assert_eq!(a, b, "同一输入两遍必须逐位相同（含统计与计数）");
+        assert_eq!(a.4, 3, "视图数被上限钉在 3");
+        assert_eq!(a.5, 5, "清单数被上限钉在 5");
+        assert_eq!(
+            a.2, 2,
+            "容量拒绝只有 2 次（3、4 号；5~9 号是「没评过」的结构性拒绝）"
+        );
+        assert_eq!(a.3, 5, "清单满了之后 5 次新增被拒（账户 5~9）");
+        assert_eq!(a.1, (3, 7), "stats = (3 成功, 5 结构性 + 2 容量 = 7 被拒)");
+    }
+
+    /// 守：**真喂 100 万份观点**之后 `view_count() <= max_views`、清单也有界，
+    /// 且内存估算落在上界之内。这是本任务的核心验收。
+    ///
+    /// 怎么做到「100 万次尝试」而内存不炸：清单和视图**两道上限都开着**（默认
+    /// 4096/4096）。前 4096 条把两边的空位填满；之后每轮先 `rate(老账户, 0)` 撤销
+    /// 一条腾出清单名额、再 `rate(新账户)` 补进来、再 `on_view(新账户)`。
+    /// 视图这边因为「只拒新增」永远进不去，而清单这边靠撤销维持 4096 条，
+    /// 所以**两边的内存始终有界**——这正是本任务要证明的东西。
+    /// （被撤销正分的账户在 `views` 里留了残留条目，那是既有行为，见 t20。）
+    ///
+    /// 字节估算按**真实内存表示**写，并把「序列化长度 ≠ 内存占用」这条写清楚。
+    /// 每条缓存 ≈ `6·n_slots`（`Vec<(Acc, u16)>` 堆上元素）加 24 B（`Vec` 头）
+    /// 加 16 B（`Received` 的两个 `Time`）加 `BTreeMap` 节点开销（保守取 64 B）。
+    /// 序列化口径 `max_views × (cap×6 + 2)` 才是最宽松的绝对上界（cap = 512 时
+    /// 4096 × 3074 B，约 12.6 MiB），真实占用远小于它。
+    #[test]
+    fn t30_喂百万视图后缓存有界() {
+        const MAX_VIEWS: usize = 4096;
+        const MAX_LIST: usize = 4096;
+        const ATTEMPTS: u32 = 1_000_000;
+        let mut n = Node::new(cfg_limits(MAX_VIEWS, MAX_LIST), 1);
+        let view = SparseView::from_scores(512, &[(7, 1.0)]);
+        let mut accepted = 0u64;
+        for i in 0..ATTEMPTS {
+            // 清单满了就撤销一条最老的（腾名额），保证「尝试次数」能继续涨。
+            if i as usize >= MAX_LIST {
+                let _ = n.try_rate(i - MAX_LIST as u32, 0.0, 0);
+            }
+            let _ = n.try_rate(i, 0.5, 0);
+            if n.on_view(i, view.clone(), 0, 0) {
+                accepted += 1;
+            }
+        }
+        assert_eq!(accepted, MAX_VIEWS as u64, "只有前 max_views 份能进缓存");
+        assert!(
+            n.view_count() <= MAX_VIEWS,
+            "喂了 {ATTEMPTS} 份之后 view_count = {} 超过上限 {MAX_VIEWS}",
+            n.view_count()
+        );
+        assert_eq!(
+            n.view_count(),
+            MAX_VIEWS,
+            "上限会被顶满，说明保护真的在起作用"
+        );
+        assert_eq!(n.claims().len(), MAX_LIST, "清单同样被钉在 max_list");
+        assert_eq!(n.stat_rejected_limit(), u64::from(ATTEMPTS) - 4096);
+        // 内存估算（真实表示，不是序列化长度）。
+        let payload = n
+            .views
+            .values()
+            .map(|r| r.view.len() * 6 + 24 + 16)
+            .sum::<usize>();
+        let node_overhead = n.view_count() * 64;
+        let real_upper = payload + node_overhead;
+        let serialized_upper = n.view_count() * (512 * 6 + 2);
+        assert!(
+            real_upper < serialized_upper,
+            "真实内存估算 {real_upper} B 必须小于序列化口径 {serialized_upper} B"
+        );
+        assert!(
+            real_upper < MAX_VIEWS * (512 * 6 + 2),
+            "绝对上界 4096 × (512×6+2) = {} 字节，实测估算 {real_upper}",
+            MAX_VIEWS * (512 * 6 + 2)
+        );
+    }
+
+    /// 守：`try_rate` 在清单满时返回 `false` 且**一个字都不写**（不涨版本、
+    /// 不改总分、不写 last_check）；`rate` 同路径静默但可观测。
+    #[test]
+    fn t31_try_rate满时返回false且不写() {
+        let mut n = Node::new(cfg_list(2), 1);
+        assert!(n.try_rate(1, 0.5, 10));
+        assert!(n.try_rate(2, 0.25, 20));
+        assert_eq!(n.claims().len(), 2);
+        let before = (
+            n.claims().len(),
+            n.claims().version(),
+            n.claims().total(),
+            n.claims().last_check(1),
+            n.claims().last_check(2),
+        );
+        let acc = n.try_rate(3, 1.0, 30);
+        assert!(!acc, "清单满了，新账户必须被拒");
+        let after = (
+            n.claims().len(),
+            n.claims().version(),
+            n.claims().total(),
+            n.claims().last_check(1),
+            n.claims().last_check(2),
+        );
+        assert_eq!(before, after, "被拒的 try_rate 不许改任何字段");
+        assert_eq!(n.stat_rejected_list(), 1);
+        assert!(!n.claims().has(3));
+        // rate 走同一条路径：静默、但仍被计数。
+        n.rate(4, 1.0, 40);
+        assert_eq!(n.claims().len(), 2, "rate 也一样静默丢弃");
+        assert_eq!(n.stat_rejected_list(), 2);
+        // 改分 / 撤销永远接受。
+        assert!(n.try_rate(1, 0.9, 50), "改分永远接受");
+        assert!(n.try_rate(2, 0.0, 60), "撤销永远接受，并腾出名额");
+        assert!(n.try_rate(5, 0.5, 70), "腾出的名额给新账户");
+        assert_eq!(n.stat_rejected_list(), 2, "改分 / 撤销 / 腾名额都不计数");
+    }
+
+    /// 守：`stat_rejected_limit() <= stats().1` 恒成立，且两者都单调递增；
+    /// `stats()` 的二元组形状与含义不变（成功数不含被拒的）。
+    #[test]
+    fn t32_容量拒绝计数的不变式与单调性() {
+        let mut n = Node::new(cfg_views(1), 1);
+        assert_eq!(n.stats(), (0, 0));
+        assert_eq!(n.stat_rejected_limit(), 0);
+        let view = SparseView::from_scores(8, &[(7, 1.0)]);
+        n.rate(1, 0.5, 0);
+        assert!(n.on_view(1, view.clone(), 0, 0));
+        // 结构性拒绝（没评过 / 空表）与容量拒绝各自走各自的路径。
+        assert!(!n.on_view(2, view.clone(), 0, 0), "没评过的来源");
+        let mut prev_limit = n.stat_rejected_limit();
+        let mut prev_rejected = n.stats().1;
+        for i in 3..50u32 {
+            n.rate(i, 0.5, 0);
+            assert!(!n.on_view(i, view.clone(), 0, 0), "容量拒绝");
+            let (succ, rej) = n.stats();
+            assert!(n.stat_rejected_limit() <= rej, "不变式：容量拒绝 ⊆ 总拒绝");
+            assert!(n.stat_rejected_limit() >= prev_limit, "单调不减");
+            assert!(rej >= prev_rejected, "单调不减");
+            assert_eq!(succ, 1, "被拒的观点不计成功");
+            prev_limit = n.stat_rejected_limit();
+            prev_rejected = rej;
+        }
+        assert_eq!(n.stat_rejected_limit(), 47, "3..50 共 47 份容量拒绝");
+        assert_eq!(n.stats(), (1, 48), "总拒绝 = 1 结构性（2 号）+ 47 容量");
+        assert_eq!(n.view_count(), 1);
+    }
+
+    /// 守：\(\Sigma v \equiv 1\) 不被容量上限破坏（每个 owner 只在缓存里出现一次）；
+    /// 且上限 = 视图数时分布与「无上限」逐位相同（说明上限不是计算路径的一部分）。
+    #[test]
+    fn t33_上限不改变已有缓存上的计算结果() {
+        let build = |max_views: usize| {
+            let mut n = Node::new(cfg_views(max_views), 1);
+            for i in 0..5u32 {
+                n.rate(i, 0.5, 0);
+            }
+            for i in 0..5u32 {
+                let slots: Vec<(u32, f32)> = (0..4u32)
+                    .map(|j| (50 + j, ((i + j) % 5 + 1) as f32))
+                    .collect();
+                let ok = n.on_view(i, SparseView::from_scores(16, &slots), 0, 0);
+                assert!(ok, "上限 {max_views} 装得下 5 份");
+            }
+            bits(&n.distribution(0))
+        };
+        let limited = build(5);
+        let unlimited = build(0);
+        assert_eq!(limited, unlimited, "上限够用时结果必须逐位相同");
+        assert_eq!(
+            limited.len(),
+            9,
+            "5 个个人项（账户 0~4）+ 4 个群体项（账户 50~53）"
+        );
     }
 }

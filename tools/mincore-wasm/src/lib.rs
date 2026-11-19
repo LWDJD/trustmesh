@@ -314,6 +314,10 @@ fn run_cap(cap: usize) -> (Vec<u32>, Vec<Snapshot>) {
         half_life: 72,
         cap,
         decay_enabled: true,
+        // 探针只喂 704 个账户、6 个来源，两个上限都远够用；
+        // 显式写成「无上限」是为了让对拍**只测算法**，不测资源保护路径。
+        max_views: 0,
+        max_list: 0,
     };
     let mut n = Node::new(cfg, 42);
 

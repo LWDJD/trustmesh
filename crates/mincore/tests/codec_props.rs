@@ -10,6 +10,7 @@
 //! | P3 | 模糊测试 | xorshift64 确定性模糊：CI 2 万随机 + 2 万变异；`#[ignore]` 全量 100 万 + 10 万 |
 //! | P4 | 交叉验证 | 测试内独立慢速实现（BTreeMap 合并 → (分数降序, 账户升序) 截断 → 账户升序落表），逐条对拍 |
 //! | P5 | codec 层定点往返 | cap=1 手工字节，`q` 取 1..=65535 全量 encode↔decode 逐字节不变 |
+//! | P6 | 前缀格式（cap 自描述）| 前缀编码的规范性/注入性；撒谎的 cap/截断/多余字节的防御；两种格式互不误判（模 6 同余类的独立验证）；每条违规的独立错误码 |
 //!
 //! # 为什么不重复已有测试
 //!
@@ -38,9 +39,13 @@
 //! # 怎么跑
 //!
 //! ```text
-//! cargo test --test codec_props                                      # CI 口径（2 万 + 2 万）
-//! cargo test --release --test codec_props -- --ignored --nocapture  # 全量模糊（100 万 + 10 万）
+//! cargo test --test codec_props                                      # CI 口径（2 万 + 2 万 + 1 万 + 1 万）
+//! cargo test --release --test codec_props -- --ignored --nocapture  # 全量模糊（100 万 + 10 万 + 50 万 + 5 万）
 //! ```
+//!
+//! P6 一节测的是 dev 新合并的**带前缀格式**（`encode_prefixed` / `decode_prefixed` /
+//! `decode_prefixed_result`）：前缀里自带 cap（u16 小端），总长 `cap×6+4`，
+//! 与旧格式（`cap×6+2`）**逐字节只差头部 2 字节**（`encode_prefixed()[2..] == encode()`）。
 //!
 //! # 已知的 API 面差异（钉住现状，不判为缺陷）
 //!
@@ -53,11 +58,12 @@
 //!   公开路径条数上界是 `MAX_CAP = 4096 < 65536`，不可达。
 //!   见 `附_encode条数无校验但公开路径不可达`。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use tm_mincore::{
-    dequantize, quantize, Acc, SparseView, MAX_CAP, Q_ONE, SLOT_BYTES, VIEW_OVERHEAD,
+    dequantize, quantize, Acc, DecodeError, SparseView, MAX_CAP, PREFIX_BYTES, Q_ONE, SLOT_BYTES,
+    VIEW_OVERHEAD,
 };
 
 // ═══════════════════ 0. 参考实现（独立书写） ═══════════════════
@@ -68,6 +74,8 @@ const REF_SLOT: usize = 6;
 const REF_OVERHEAD: usize = 2;
 /// 参考实现的最大容量（刻意不共享 crate 的 `MAX_CAP`）。
 const REF_MAX_CAP: usize = 4096;
+/// 参考实现的前缀字节数（刻意不共享 crate 的 `PREFIX_BYTES`）。
+const REF_PREFIX: usize = 2;
 
 /// 参考解码器：与被测的 `SparseView::decode` 独立书写，用于差分对拍。
 ///
@@ -208,6 +216,44 @@ fn manual_encode(cap: usize, slots: &[(Acc, u16)]) -> Vec<u8> {
     payload[fixed] = (n & 0xff) as u8;
     payload[fixed + 1] = ((n >> 8) & 0xff) as u8;
     payload
+}
+
+/// 参考**前缀**解码器：与被测的 `decode_prefixed_result` 独立书写。
+///
+/// 与旧格式参考解码器同样的独立性策略（手工拼小端、先算长度再查 cap、不同写法），
+/// 并多两条针对前缀本身的检查：
+///
+/// 1. cap 来自 `[0, 2)` 的**裸 u16**（没有魔数，这是格式的全部鉴别力之所在）；
+/// 2. 长度必须**恰好**等于 `2 + cap×6 + 2`（不是「按长度反推 cap」）。
+fn ref_decode_prefixed(payload: &[u8]) -> Option<(usize, Vec<(Acc, u16)>)> {
+    if payload.len() < REF_PREFIX {
+        return None;
+    }
+    // 手工拼小端：前缀是裸 u16，没有魔数、没有版本号。
+    let cap = (payload[0] as usize) + 256 * (payload[1] as usize);
+    if cap == 0 || cap > REF_MAX_CAP {
+        return None;
+    }
+    let want = REF_PREFIX + cap * REF_SLOT + REF_OVERHEAD;
+    if payload.len() != want {
+        return None;
+    }
+    // 定长体交给旧格式参考解码器（它本来就独立于被测实现）。
+    let (_, slots) = ref_decode(&payload[REF_PREFIX..], cap)?;
+    Some((cap, slots))
+}
+
+/// 手工装配**带前缀**的规范字节串：`[cap(LE u16)] ++ [旧格式手工编码]`。
+fn manual_encode_prefixed(cap: usize, slots: &[(Acc, u16)]) -> Vec<u8> {
+    assert!(
+        (1..=REF_MAX_CAP).contains(&cap),
+        "手工前缀编码的 cap 必须合法，收到 {cap}"
+    );
+    let mut out = Vec::with_capacity(REF_PREFIX + cap * REF_SLOT + REF_OVERHEAD);
+    out.push((cap & 0xff) as u8);
+    out.push(((cap >> 8) & 0xff) as u8);
+    out.extend_from_slice(&manual_encode(cap, slots));
+    out
 }
 
 // ═══════════════════ 0b. 确定性伪随机与负载构造 ═══════════════════
@@ -496,6 +542,150 @@ fn run_fuzz(rand_samples: u64, mut_samples: u64, seed: u64) -> FuzzStats {
     }
 
     stats
+}
+
+/// 前缀格式的模糊驱动：A 段随机字节（4 种构造），B 段前缀合法负载的变异。
+fn run_prefixed_fuzz(rand_samples: u64, mut_samples: u64, seed: u64) -> FuzzStats {
+    let mut rng = XorShift::new(seed);
+    let mut stats = FuzzStats {
+        rand_n: 0,
+        rand_ok: 0,
+        mut_n: 0,
+        mut_ok: 0,
+    };
+
+    for index in 0..rand_samples {
+        let cap = random_cap(&mut rng);
+        let body_len = cap * REF_SLOT + REF_OVERHEAD;
+        let expected_len = REF_PREFIX + body_len;
+        let (payload, must_accept) = match index % 4 {
+            // (a) 长度随机：包括「只有前缀」「只有半截定长体」。
+            0 => {
+                let len = match rng.next_below(6) {
+                    0 => 0,
+                    1 => REF_PREFIX,
+                    2 => expected_len - 1,
+                    3 => expected_len + 1,
+                    4 => rng.next_below(expected_len as u64 + 1) as usize,
+                    _ => expected_len,
+                };
+                let mut payload = vec![0u8; len];
+                fill_random_bytes(&mut rng, &mut payload);
+                (payload, false)
+            }
+            // (b) 长度恰好、内容全随机（前缀也是随机的 ⟹ 大概率 BadCap）。
+            1 => {
+                let mut payload = vec![0u8; expected_len];
+                fill_random_bytes(&mut rng, &mut payload);
+                (payload, false)
+            }
+            // (c) 合法前缀构造：必须被接受。
+            2 => {
+                let body = random_valid_payload(&mut rng, cap);
+                (
+                    manual_encode_prefixed(cap, &decode_slots_of(&body, cap)),
+                    true,
+                )
+            }
+            // (d) 合法前缀构造后变异。
+            _ => {
+                let body = random_valid_payload(&mut rng, cap);
+                let payload = manual_encode_prefixed(cap, &decode_slots_of(&body, cap));
+                (mutate(&mut rng, &payload), false)
+            }
+        };
+        let len = payload.len();
+        let view = xcheck_prefixed(&payload);
+        stats.rand_n += 1;
+        match view {
+            Some(view) => {
+                check_accepted_prefixed(&view, &payload);
+                stats.rand_ok += 1;
+            }
+            None => assert!(
+                !must_accept,
+                "合法前缀构造被自家 decode_prefixed 拒绝：cap={cap}、长度 {len}"
+            ),
+        }
+    }
+
+    for _ in 0..mut_samples {
+        let cap = random_cap(&mut rng);
+        let body = random_valid_payload(&mut rng, cap);
+        let payload = manual_encode_prefixed(cap, &decode_slots_of(&body, cap));
+        let original_len = payload.len();
+        let original_view = xcheck_prefixed(&payload);
+        assert!(
+            original_view.is_some(),
+            "合法前缀负载被自家 decode_prefixed 拒绝：cap={cap}、长度 {original_len}"
+        );
+        let original_view = original_view.expect("刚断言过是 Some");
+        let variant = mutate(&mut rng, &payload);
+        assert_ne!(variant, payload, "变异必须真的改动负载");
+        stats.mut_n += 1;
+        if let Some(view) = xcheck_prefixed(&variant) {
+            assert_ne!(
+                view, original_view,
+                "改过字节的前缀负载必须给出不同视图（cap={cap}）"
+            );
+            check_accepted_prefixed(&view, &variant);
+            stats.mut_ok += 1;
+        }
+    }
+
+    stats
+}
+
+/// 从（已经被随机合法构造的）旧格式负载里解出槽位表，用于再装成前缀格式。
+///
+/// 这条辅助的存在意义：`random_valid_payload` 是「旧格式生成器」，
+/// 前缀生成器必须**独立装配**（而不是直接复制旧生成器），否则前缀格式
+/// 的模糊测试就退化成「旧格式模糊测试套了个壳」。
+fn decode_slots_of(body: &[u8], cap: usize) -> Vec<(Acc, u16)> {
+    match ref_decode(body, cap) {
+        Some((_, slots)) => slots,
+        None => panic!("random_valid_payload 产出的负载必须能被参考解码器接受"),
+    }
+}
+
+/// 前缀格式接受侧的读数性质（与 `check_accepted` 同口径，但走前缀入口）。
+fn check_accepted_prefixed(view: &SparseView, payload: &[u8]) {
+    let cap = view.cap();
+    assert!((1..=REF_MAX_CAP).contains(&cap), "前缀解出的 cap 必须合法");
+    assert_eq!(view.prefixed_bytes(), payload.len(), "长度必须恒定");
+    assert_eq!(
+        view.encode_prefixed().as_slice(),
+        payload,
+        "接受 ⟹ 前缀规范形式：encode_prefixed(decode_prefixed(b)) 必须逐字节等于 b"
+    );
+    assert_eq!(
+        &payload[REF_PREFIX..],
+        view.encode().as_slice(),
+        "前缀负载的 [2..] 必须与旧格式逐字节相同"
+    );
+    for pair in view.slots().windows(2) {
+        assert!(pair[0].0 < pair[1].0, "槽位必须严格升序");
+    }
+    assert!(
+        view.slots().iter().all(|&(_, q)| q > 0),
+        "每槽 q 必须大于 0"
+    );
+    for &(acc, value) in &view.normalized_slots() {
+        assert!(value.is_finite(), "归一化读数不能是 NaN/无穷");
+        assert!((0.0..=1.0).contains(&value), "单条归一化读数越界：{value}");
+        assert!(view.q_of(acc) > 0);
+    }
+    if !view.is_empty() {
+        let sum: f64 = view
+            .normalized_slots()
+            .iter()
+            .map(|&(_, value)| f64::from(value))
+            .sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "非空前缀视图必须 Σv ≡ 1，实测 {sum}"
+        );
+    }
 }
 
 // ═══════════════════ P1. 规范性 / 唯一性 ═══════════════════
@@ -1449,6 +1639,496 @@ fn p5_codec层定点全程往返() {
         manual_encode(cap, &[(acc, Q_ONE)]),
         vec![9, 0, 0, 0, 255, 255, 1, 0]
     );
+}
+
+// ═══════════════════ P6. 前缀格式（cap 自描述） ═══════════════════
+
+/// 前缀差分解码：真实 `decode_prefixed` / 参考前缀解码 / `decode_prefixed_result` 三方对拍。
+///
+/// * 三边都拒绝 ⟹ 一致；真实与参考都接受 ⟹ cap/条数/槽位/total_q 全等，且
+///   `encode_prefixed(decode_prefixed(b)) == b`（接受 ⟹ 规范形式）；
+/// * 任何一边接受而另一边拒绝 ⟹ 立即失败。
+///
+/// 另外单独断言「`decode_prefixed` 与 `decode_prefixed_result` 判据一致」：
+/// 前者必须等价于后者的 `.ok()`（这是 view.rs 文档里写明的契约）。
+fn xcheck_prefixed(payload: &[u8]) -> Option<SparseView> {
+    let len = payload.len();
+    let real = std::panic::catch_unwind(|| SparseView::decode_prefixed(payload))
+        .unwrap_or_else(|_| panic!("decode_prefixed 在长度 {len} 的负载上 panic 了"));
+    let result = std::panic::catch_unwind(|| SparseView::decode_prefixed_result(payload))
+        .unwrap_or_else(|_| panic!("decode_prefixed_result 在长度 {len} 的负载上 panic 了"));
+    // 契约：Option 入口 == Result 入口的 .ok()，判据必须逐条一致。
+    assert_eq!(
+        real.is_some(),
+        result.is_ok(),
+        "decode_prefixed 与 decode_prefixed_result 判据不一致（长度 {len}）"
+    );
+
+    let reference = ref_decode_prefixed(payload);
+    match (real, reference) {
+        (None, None) => None,
+        (Some(view), Some((ref_cap, ref_slots))) => {
+            assert_eq!(view.cap(), ref_cap, "cap 与参考前缀解码不一致");
+            assert_eq!(view.len(), ref_slots.len(), "条数与参考前缀解码不一致");
+            assert_eq!(
+                view.slots(),
+                ref_slots.as_slice(),
+                "槽位与参考前缀解码不一致"
+            );
+            let ref_total: u32 = ref_slots.iter().map(|&(_, q)| u32::from(q)).sum();
+            assert_eq!(view.total_q(), ref_total, "total_q 与参考前缀解码不一致");
+            // 外环：被接受的负载必须已经逐字节就是前缀规范形式。
+            assert_eq!(
+                view.encode_prefixed().as_slice(),
+                payload,
+                "encode_prefixed(decode_prefixed(b)) 必须逐字节等于 b"
+            );
+            // 前缀格式的定长体必须与旧格式逐字节相同，长度关系也必须成立。
+            assert_eq!(view.prefixed_bytes(), payload.len());
+            assert_eq!(view.prefixed_bytes(), view.bytes() + REF_PREFIX);
+            let old_body = view.encode();
+            assert_eq!(
+                &payload[REF_PREFIX..],
+                old_body.as_slice(),
+                "前缀负载的 [2..] 必须与旧格式逐字节相同"
+            );
+            // 前缀里写的 cap 必须是**唯一**的 cap 来源（不是碰巧对上）。
+            let prefix_cap = (payload[0] as usize) + 256 * (payload[1] as usize);
+            assert_eq!(prefix_cap, view.cap(), "前缀里的 cap 必须被真正采用");
+            Some(view)
+        }
+        _ => {
+            panic!("前缀差分不一致：长度 {len}；真实与参考一个接受一个拒绝");
+        }
+    }
+}
+
+/// 前缀编码的布局与「只差一个头」不变式。
+///
+/// `encode_prefixed() == [cap(LE u16)] ++ encode()`，总长 `cap×6+4`；
+/// `prefixed_bytes() == bytes() + 2`；前缀是裸 u16（**没有魔数**）。
+#[test]
+fn p6_前缀布局与只差一个头() {
+    assert_eq!(PREFIX_BYTES, REF_PREFIX, "参考实现的前缀长度过时了");
+    assert_eq!(PREFIX_BYTES, 2);
+
+    for cap in [1usize, 2, 3, 8, 128, 512, REF_MAX_CAP] {
+        for count in [0usize, 1, cap / 2, cap] {
+            let slots: Vec<(Acc, u16)> = (0..count)
+                .map(|i| (i as u32 * 2 + 1, (i as u16 % 1000) + 1))
+                .collect();
+            let view = SparseView::from_scores(
+                cap,
+                &slots
+                    .iter()
+                    .map(|&(a, q)| (a, dequantize(q)))
+                    .collect::<Vec<_>>(),
+            );
+            let old = view.encode();
+            let prefixed = view.encode_prefixed();
+            assert_eq!(prefixed.len(), cap * REF_SLOT + REF_PREFIX + REF_OVERHEAD);
+            assert_eq!(prefixed.len(), view.prefixed_bytes());
+            assert_eq!(view.prefixed_bytes(), view.bytes() + REF_PREFIX);
+            assert_eq!(
+                &prefixed[..REF_PREFIX],
+                &[(cap & 0xff) as u8, ((cap >> 8) & 0xff) as u8][..],
+                "前缀必须是 cap 的小端 u16"
+            );
+            assert_eq!(
+                &prefixed[REF_PREFIX..],
+                old.as_slice(),
+                "前缀负载的 [2..] 必须与旧格式逐字节相同（cap={cap}、条数={count}）"
+            );
+            // 手工装配的版本必须与真实编码逐字节相同。
+            assert_eq!(prefixed, manual_encode_prefixed(cap, view.slots()));
+        }
+    }
+}
+
+/// 前缀格式的往返与规范性：`encode_prefixed → decode_prefixed → encode_prefixed` 逐字节闭合。
+///
+/// 覆盖空表、单条、满表、账户号两端、`q` 两端，以及从 `from_scores` 出发的公开路径。
+#[test]
+fn p6_前缀往返逐字节闭合() {
+    let cases: Vec<(usize, Vec<(Acc, u16)>)> = vec![
+        (1, vec![]),
+        (1, vec![(0, 1)]),
+        (1, vec![(u32::MAX, Q_ONE)]),
+        (2, vec![(0, 1), (u32::MAX, Q_ONE)]),
+        (7, vec![(3, 5), (4, 9), (6, 1)]),
+        (128, (0..128u32).map(|i| (i, Q_ONE)).collect()),
+        (512, (0..300u32).map(|i| (i, i as u16 + 1)).collect()),
+        (
+            REF_MAX_CAP,
+            (0..REF_MAX_CAP as u32).map(|i| (i, Q_ONE)).collect(),
+        ),
+    ];
+    for (cap, slots) in cases {
+        let payload = manual_encode_prefixed(cap, &slots);
+        let view = SparseView::decode_prefixed(&payload);
+        assert!(
+            view.is_some(),
+            "手工构造的前缀规范负载必须被接受（cap={cap}）"
+        );
+        let view = view.expect("刚断言过是 Some");
+        assert_eq!(view.cap(), cap);
+        assert_eq!(view.slots(), slots.as_slice(), "槽位必须原样读回");
+        assert_eq!(
+            view.encode_prefixed().as_slice(),
+            payload.as_slice(),
+            "encode_prefixed(decode_prefixed(b)) 必须逐字节等于 b"
+        );
+        // 同一份视图的两种编码只差头部：语义必须完全相同。
+        assert_eq!(
+            SparseView::decode(&view.encode(), cap).as_ref(),
+            Some(&view),
+            "前缀解出的视图，其旧格式编码也必须能被旧解码器接受"
+        );
+    }
+
+    // 公开构造路径。
+    for cap in [1usize, 2, 3, 8, 128, 512, REF_MAX_CAP] {
+        let pairs: Vec<(Acc, f32)> = (0..cap as u32).map(|i| (i, 1.0)).collect();
+        let view = SparseView::from_scores(cap, &pairs);
+        let payload = view.encode_prefixed();
+        let back = SparseView::decode_prefixed(&payload);
+        assert_eq!(
+            back.as_ref(),
+            Some(&view),
+            "前缀往返必须等于 v（cap={cap}）"
+        );
+        assert_eq!(view.encode_prefixed(), payload, "再编码必须逐字节相同");
+    }
+}
+
+/// 前缀格式的单字节变异注入性：每一个字节位置改成任意不同值，
+/// 只要 `decode_prefixed` 成功，结果视图必与原来不相等。
+#[test]
+fn p6_前缀单字节变异必改变视图() {
+    let configs: [(usize, Vec<(Acc, u16)>); 2] = [
+        (2, vec![(1, 32768), (3, 16384)]),
+        (8, vec![(1, 32768), (3, 16384)]),
+    ];
+    for (cap, slots) in configs {
+        let base = manual_encode_prefixed(cap, &slots);
+        let base_view = SparseView::decode_prefixed(&base).expect("基线必须被接受");
+        let mut accepted = 0usize;
+        for (pos, old) in base.iter().copied().enumerate() {
+            for cand in 0..=255u8 {
+                if cand == old {
+                    continue;
+                }
+                let mut bad = base.clone();
+                bad[pos] = cand;
+                if let Some(view) = xcheck_prefixed(&bad) {
+                    assert_ne!(
+                        view.encode_prefixed(),
+                        base,
+                        "不同字节必须给出不同前缀视图（pos={pos}，{old} -> {cand}）"
+                    );
+                    assert_ne!(
+                        view, base_view,
+                        "前缀单字节变异（pos={pos}，{old} -> {cand}）解出了同一个视图"
+                    );
+                    accepted += 1;
+                }
+            }
+        }
+        assert!(
+            accepted > 0,
+            "cap={cap} 的前缀单字节变异没有一个被接受，注入性测试失去意义"
+        );
+    }
+}
+
+/// 撒谎的 cap：0 / 超过 MAX_CAP / 65535 / 与负载长度不符 —— 一律拒绝且绝不 panic。
+///
+/// 覆盖两种「谎」：一种是与长度完全不符（`BadLength`），
+/// 一种是前缀本身非法（`BadCap`）。两者的**区分**只影响诊断，不影响安全。
+#[test]
+fn p6_撒谎的cap一律拒绝() {
+    let v = SparseView::from_scores(4, &[(1, 0.5), (2, 0.25), (7, 1.0)]);
+    let good = v.encode_prefixed();
+
+    // (a) 前缀非法：0 / MAX_CAP+1 / 65535 —— 必须在长度检查之前被 BadCap 拒绝。
+    for lie in [0u16, REF_MAX_CAP as u16 + 1, 65_535] {
+        let mut bad = good.clone();
+        bad[..REF_PREFIX].copy_from_slice(&lie.to_le_bytes());
+        let r = std::panic::catch_unwind(|| SparseView::decode_prefixed_result(&bad))
+            .unwrap_or_else(|_| panic!("decode_prefixed_result 在前缀 {lie} 上 panic 了"));
+        assert!(
+            r.is_err(),
+            "撒谎的 cap={lie} 必须拒绝（长度 {}）",
+            bad.len()
+        );
+        assert_eq!(
+            SparseView::decode_prefixed(&bad),
+            None,
+            "Option 入口也必须拒绝 cap={lie}"
+        );
+    }
+
+    // (b) 与长度不符：把前缀改成另一个合法 cap —— 长度必然不符。
+    for lie in [1u16, 2, 3, 5, 128, REF_MAX_CAP as u16] {
+        if lie as usize == 4 {
+            continue;
+        }
+        let mut bad = good.clone();
+        bad[..REF_PREFIX].copy_from_slice(&lie.to_le_bytes());
+        assert_eq!(
+            SparseView::decode_prefixed(&bad),
+            None,
+            "cap 与长度不符必须拒绝"
+        );
+        assert_eq!(
+            ref_decode_prefixed(&bad),
+            None,
+            "参考解码器也必须拒绝长度不符的 cap"
+        );
+    }
+
+    // (c) cap 恰好合法但长度差 1 字节。
+    assert!(SparseView::decode_prefixed(&good[..good.len() - 1]).is_none());
+    let mut longer = good.clone();
+    longer.push(0);
+    assert!(SparseView::decode_prefixed(&longer).is_none());
+}
+
+/// 截断与尾部多余字节：0 字节到 `len-1` 的每一种截断、以及任意尾部追加都必须拒绝。
+#[test]
+fn p6_截断与多余字节防御() {
+    let v = SparseView::from_scores(4, &[(1, 0.5), (2, 0.25), (7, 1.0)]);
+    let good = v.encode_prefixed();
+    for cut in 0..good.len() {
+        let part = &good[..cut];
+        assert_eq!(
+            SparseView::decode_prefixed(part),
+            None,
+            "截断到 {cut} 字节必须拒绝"
+        );
+        assert_eq!(ref_decode_prefixed(part), None, "参考解码器也必须拒绝截断");
+    }
+    // 尾部追加：0 / 1 / 0xFF 都要拒绝（长度必须恰好相等）。
+    for extra in [0u8, 1, 0xff] {
+        let mut longer = good.clone();
+        longer.push(extra);
+        assert_eq!(
+            SparseView::decode_prefixed(&longer),
+            None,
+            "尾部追加 1 字节（{extra}）必须拒绝"
+        );
+        // 追加两个字节：对某些 cap 可能恰好又是另一个合法长度 —— 但前缀没变，
+        // 长度仍不可能等于 2+cap*6+2（多了恰好 2 字节），所以也必须拒绝。
+        longer.push(extra);
+        assert_eq!(
+            SparseView::decode_prefixed(&longer),
+            None,
+            "尾部追加 2 字节（{extra}）必须拒绝"
+        );
+    }
+}
+
+/// 两种格式**互不误判**：旧负载喂前缀解码器必拒，前缀负载喂旧解码器必拒。
+///
+/// ENCODING.md §4 的证明是「总长落在模 6 的不同同余类」：旧 `6C+2 ≡ 2`、
+/// 新 `6C+4 ≡ 4`。本测试**独立验证**这条（不引用文档、不复用被测代码），
+/// 并把「靠长度猜 cap 必然猜错」也钉住。
+///
+/// 注意：真正保证安全的是「两个解码器都要求长度**精确**相等」，
+/// 同余类只是这个精确匹配的推论 —— 所以这里同时验证「长度不等就拒绝」。
+#[test]
+fn p6_两种格式互不误判() {
+    for cap in [1usize, 2, 3, 7, 8, 128, 256, 512, REF_MAX_CAP] {
+        let slots: Vec<(Acc, u16)> = (0..cap.min(8))
+            .map(|i| (i as u32 * 2 + 3, (i as u16 % 500) + 1))
+            .collect();
+        let view = SparseView::from_scores(
+            cap,
+            &slots
+                .iter()
+                .map(|&(a, q)| (a, dequantize(q)))
+                .collect::<Vec<_>>(),
+        );
+        let old = view.encode();
+        let prefixed = view.encode_prefixed();
+
+        // 独立验证同余类：旧格式 L ≡ 2 (mod 6)、前缀格式 L ≡ 4 (mod 6)。
+        assert_eq!(old.len() % 6, 2, "旧格式长度必须 ≡ 2 (mod 6)");
+        assert_eq!(prefixed.len() % 6, 4, "前缀格式长度必须 ≡ 4 (mod 6)");
+        assert_eq!(prefixed.len(), old.len() + 2);
+
+        // 1) 旧负载喂前缀解码器：必拒。
+        assert_eq!(
+            SparseView::decode_prefixed(&old),
+            None,
+            "cap={cap} 的旧负载不能被前缀解码器接受"
+        );
+        assert_eq!(
+            ref_decode_prefixed(&old),
+            None,
+            "参考前缀解码器也必须拒绝旧负载"
+        );
+
+        // 2) 前缀负载喂旧解码器：任何 cap 都必拒（不只是原 cap）。
+        for assumed in [1usize, 2, cap, 128, 512, REF_MAX_CAP] {
+            assert_eq!(
+                SparseView::decode(&prefixed, assumed),
+                None,
+                "cap={cap} 的前缀负载用旧入口（assumed={assumed}）必须拒绝"
+            );
+        }
+
+        // 3) 「按长度反推 cap」必然猜错：两种格式的长度都不可能等于 6·(len−2) 或 6·(len−4)。
+        //    前缀格式长度 L：若按旧格式算 cap=(L−2)/6 = (6C+4−2)/6 = C + 1/3 ⟹ 非整数。
+        assert_ne!(
+            (prefixed.len() - REF_OVERHEAD) % REF_SLOT,
+            0,
+            "前缀格式长度不能是旧格式的合法长度"
+        );
+        assert_ne!(
+            (old.len() - REF_PREFIX - REF_OVERHEAD) % REF_SLOT,
+            0,
+            "旧格式长度不能是前缀格式的合法长度"
+        );
+    }
+
+    // 两个边角（ENCODING.md §4.2）：旧空表 / 首账户号低 16 位为 0 的旧负载
+    // 在前缀解码器上会报 **BadCap** 而不是 BadLength —— 但结论一样：解不出来。
+    let old_empty = SparseView::new(1).encode();
+    assert_eq!(old_empty, vec![0u8; 8]);
+    assert_eq!(SparseView::decode_prefixed(&old_empty), None);
+    let old_zero_prefix = SparseView::from_scores(2, &[(65_536, 0.5), (65_537, 1.0)]).encode();
+    assert_eq!(&old_zero_prefix[..REF_PREFIX], &[0u8, 0u8]);
+    assert_eq!(SparseView::decode_prefixed(&old_zero_prefix), None);
+
+    // 前三字节全零（旧空表）必须落在 BadCap；长度恰好是旧格式的 8 字节。
+    assert_eq!(
+        SparseView::decode_prefixed_result(&old_empty),
+        Err(DecodeError::BadCap),
+        "旧空表在前缀解码器上应报 BadCap"
+    );
+}
+
+/// `DecodeError` 的 7 个变体在对应违规上各自出现一次，且标签互不相同。
+///
+/// 这条守的是「拒绝从 None 变成可诊断理由」的**区分度**：
+/// 每条规范检查必须有自己的错误码，否则日志里无法定位「到底是哪条违了」。
+#[test]
+fn p6_每条规范检查都有独立错误码() {
+    let cap = 2usize;
+    let base_slots: Vec<(Acc, u16)> = vec![(1, 32768), (3, 16384)];
+    let base = manual_encode_prefixed(cap, &base_slots);
+    let fixed = cap * REF_SLOT + REF_OVERHEAD; // 前缀之后的定长体长度
+
+    // 先确认基线可解。
+    assert!(SparseView::decode_prefixed(&base).is_some());
+
+    // (1) BadCap：前缀写成 0。
+    let mut bad_cap = base.clone();
+    bad_cap[..REF_PREFIX].copy_from_slice(&0u16.to_le_bytes());
+    assert_eq!(
+        SparseView::decode_prefixed_result(&bad_cap),
+        Err(DecodeError::BadCap)
+    );
+
+    // (2) BadLength：前缀合法但长度差 1。
+    assert_eq!(
+        SparseView::decode_prefixed_result(&base[..base.len() - 1]),
+        Err(DecodeError::BadLength)
+    );
+
+    // (3) BadCount：条数改成 3 > cap。
+    let mut bad_count = base.clone();
+    let count_at = REF_PREFIX + fixed - REF_OVERHEAD;
+    bad_count[count_at..count_at + 2].copy_from_slice(&3u16.to_le_bytes());
+    assert_eq!(
+        SparseView::decode_prefixed_result(&bad_count),
+        Err(DecodeError::BadCount)
+    );
+
+    // (4) NotAscending：第 1 槽的账户号改成 0（小于第 0 槽的 1）。
+    let mut bad_order = base.clone();
+    let slot1 = REF_PREFIX + REF_SLOT;
+    bad_order[slot1..slot1 + 4].copy_from_slice(&0u32.to_le_bytes());
+    assert_eq!(
+        SparseView::decode_prefixed_result(&bad_order),
+        Err(DecodeError::NotAscending)
+    );
+
+    // (5) DuplicateAcc：第 1 槽的账户号改成与第 0 槽相同。
+    let mut dup = base.clone();
+    dup[slot1..slot1 + 4].copy_from_slice(&1u32.to_le_bytes());
+    assert_eq!(
+        SparseView::decode_prefixed_result(&dup),
+        Err(DecodeError::DuplicateAcc)
+    );
+
+    // (6) ZeroScore：第 0 槽的 q 改成 0。
+    let mut zero = base.clone();
+    let slot0_q = REF_PREFIX + 4;
+    zero[slot0_q..slot0_q + 2].copy_from_slice(&0u16.to_le_bytes());
+    assert_eq!(
+        SparseView::decode_prefixed_result(&zero),
+        Err(DecodeError::ZeroScore)
+    );
+
+    // (7) NonZeroPadding：条数改成 1，把第 1 槽的字节留在填充区。
+    let mut padding = base.clone();
+    padding[count_at..count_at + 2].copy_from_slice(&1u16.to_le_bytes());
+    assert_eq!(
+        SparseView::decode_prefixed_result(&padding),
+        Err(DecodeError::NonZeroPadding)
+    );
+
+    // 7 个变体的 as_str 必须互不相同（日志可定位）。
+    let labels = [
+        DecodeError::BadCap.as_str(),
+        DecodeError::BadLength.as_str(),
+        DecodeError::BadCount.as_str(),
+        DecodeError::NotAscending.as_str(),
+        DecodeError::DuplicateAcc.as_str(),
+        DecodeError::ZeroScore.as_str(),
+        DecodeError::NonZeroPadding.as_str(),
+    ];
+    let unique: BTreeSet<&str> = labels.iter().copied().collect();
+    assert_eq!(unique.len(), 7, "7 个错误码的标签必须互不相同");
+}
+
+/// 前缀格式的模糊测试：1 万随机字节 + 1 万前缀负载变异（CI 口径）。
+///
+/// 与 P3 的旧格式模糊等价，但走前缀入口：每个样本都对拍
+/// `decode_prefixed` / `decode_prefixed_result` / 参考前缀解码，被接受时还要求
+/// `encode_prefixed` 逐字节闭合、定长体与旧格式一致、读数有限。
+#[test]
+fn p6_前缀模糊_ci口径() {
+    let start = Instant::now();
+    let stats = run_prefixed_fuzz(10_000, 10_000, 0x1234_5EED_0BAD_C0DE);
+    let elapsed = start.elapsed();
+    let desc = stats.describe();
+    println!("P6 前缀模糊（CI 口径）：{desc}，耗时 {elapsed:?}");
+    assert!(stats.rand_ok > 0, "前缀随机样本没有一条被接受");
+    assert!(stats.mut_ok > 0, "前缀变异样本没有一条被接受");
+    assert!(
+        stats.rand_n > stats.rand_ok,
+        "前缀随机样本必须含被拒绝的输入"
+    );
+    assert!(
+        elapsed.as_secs() < 120,
+        "前缀模糊超出看门狗，实测 {elapsed:?}"
+    );
+}
+
+/// 前缀格式全量模糊：50 万随机 + 5 万变异（`#[ignore]`）。
+#[test]
+#[ignore = "全量前缀模糊：50 万随机 + 5 万变异，用 --release --ignored 手动跑"]
+fn p6_前缀模糊_全量() {
+    let start = Instant::now();
+    let stats = run_prefixed_fuzz(500_000, 50_000, 0xF00D_BABE_5EED_1234);
+    let elapsed = start.elapsed();
+    let desc = stats.describe();
+    println!("P6 前缀模糊（全量）：{desc}，耗时 {elapsed:?}");
+    assert!(stats.rand_ok > 0);
+    assert!(stats.mut_ok > 0);
 }
 
 // ═══════════════════ 附. 已知 API 面差异（钉住现状，不判为缺陷） ═══════════════════

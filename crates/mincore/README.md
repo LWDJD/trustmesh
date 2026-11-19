@@ -71,6 +71,9 @@ let score = me.query(someone, now);
 
 ## 3. 定长编码格式
 
+> 两种编码（旧格式 / 带前缀格式）的完整规范、互不误判的同余类分析、以及
+> 「为什么必须精确长度匹配」见 [`ENCODING.md`](ENCODING.md)。本节只讲旧格式的定长体。
+
 ~~~text
 offset 0            : 槽位 0  ── 4 B 账户号(u32 LE) + 2 B 分数(u16 LE)
 offset 6            : 槽位 1
@@ -89,20 +92,40 @@ offset cap*6        : 条数 len（小端 u16，2 B）
 违反任何一条 ⟹ `decode` 返回 `None`。这让「同一份分布」只有**唯一一种**字节表示，
 所以跨节点比较可以逐字节做，不需要语义比较。
 
-### 3.2 cap 必须全网一致
+### 3.2 cap 自描述：两种编码并存
 
-格式**不自描述 cap**（长度 40,960 B 的 Count Sketch 同理）。所以：
+**旧格式** `encode()` / `decode(bytes, cap)` 不自描述 cap（长度 40,960 B 的 Count Sketch 同理）：
 
-| 发送方 | 接收方 | 结果 |
-|---|---|---|
-| cap=256（1,538 B） | cap=256 | ✅ 正常 |
-| cap=256（1,538 B） | cap=128（期望 770 B） | ❌ **长度不符 ⟹ 整条拒绝 ⟹ 失去联系** |
+| 发送方 | 接收方 | 旧格式 | 前缀格式 |
+|---|---|---|---|
+| cap=256（1 538 B） | cap=256 | ✅ 正常 | ✅ |
+| cap=256（1 538 / 1 540 B） | cap=128（期望 770 B） | ❌ **长度不符 ⟹ 整条拒绝 ⟹ 失去联系** | ✅ 按前缀解成 cap=256 |
 
-⟹ **网络会按 cap 分裂成互不通信的孤岛**。解法有两种：
-1. **全网统一 cap**（最简单，但改 cap 就要全网同时改）
-2. **2 字节自描述头**（cap 写进字节里，接收方按它解析）—— 需要协议变更
+⟹ 只用旧格式时，**网络会按 cap 分裂成互不通信的孤岛**。
 
-当前实现选的是**方案 1**，`Config::cap` 是调用方约定，不是协议保证。
+**带前缀格式**（2026-11-19 新增）在旧负载前面多写 2 字节 cap，接收方不需要预先知道它：
+
+```rust
+let bytes = view.encode_prefixed();          // 长度 cap×6+4
+let back  = SparseView::decode_prefixed(&bytes)?;   // cap 从头部读
+
+// 可诊断版：失败时说出具体理由（BadCap / BadLength / BadCount / ...）
+use tm_mincore::DecodeError;
+match SparseView::decode_prefixed_result(&bytes) {
+    Ok(v) => { /* v.cap() 就是发送方用的 cap */ }
+    Err(DecodeError::BadCap) => { /* 前缀里的 cap 非法 */ }
+    Err(e) => { /* e.as_str() 给出短标签 */ }
+}
+```
+
+* `encode_prefixed()[2..] == encode()`：**定长体一个字节都没动**，所以现有 128 个测试、
+  wasm 金标准快照、`tools/mincore-wasm` 全部不受影响；
+* 两种格式**互不误判**，理由是总长落在模 6 的不同同余类（旧 `≡ 2`、新 `≡ 4`），
+  **不是**前 2 字节的语义 —— 完整分析、以及「为什么分发必须精确长度匹配、
+  为什么第三种格式必须加带内魔数」见 [`ENCODING.md`](ENCODING.md)；
+* 接收方仍应自己施加资源上限（「我只接受 cap ≤ 我允许的最大值」）；
+  `decode_prefixed` 内部已把 `cap > MAX_CAP` 挡掉，最坏分配 24 580 字节;
+* `Config::cap` 现在只是**本机发布用的 cap**，不再是全网协议约定。
 
 ---
 
@@ -131,7 +154,7 @@ offset cap*6        : 条数 len（小端 u16，2 B）
 | `max_views` 等资源上限 | 恶意节点可塞无限条视图 ⟹ **内存耗尽** |
 | non-finite 防护（含 `untrusted_bytes` 那套） | `decode` 只查规范性，不查 f32 是否有限（u16 定点天然有限，所以这条其实安全） |
 | badlist / 判据 / 抽样预算 / `recommended_k` | 那些是 `tm_engine` 的上层机制 |
-| 协议文档 | 本文件是唯一文档 |
+| 协议文档 | 本文件 + [`ENCODING.md`](ENCODING.md)（字节编码规范） |
 | wasm32 对拍 | **正在补**（`tools/mincore-wasm`） |
 | 单元测试 | **正在补**（6 个模块当前零单测） |
 

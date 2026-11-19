@@ -9,7 +9,7 @@
 | 1 | **状态快照** | 🔄 进行中 | 恢复后 `query`/`distribution`/`tick` 逐位一致；往返逐字节相同；防御性解码不 panic | `src/snapshot.rs`（新建） |
 | **2** | **资源上限** | ✅ **已完成**（2026-11-19 10:20） | 喂 100 万视图后 `view_count <= max_views`；拒绝可观测；不破坏确定性 | `Config::max_views`/`max_list` |
 | 3 | **cap 自描述** | 🔄 进行中 | `encode_prefixed`/`decode_prefixed` 往返；跨 cap 明确报错；与旧版 `encode()[2..]` 逐字节相同 | `view.rs` + `ENCODING.md` |
-| 4 | **性能基准** | 🔄 进行中 | 可重复基准（≥20 样本、预热 3 次、black_box）；「撑不住」曲线；与 engine 正面对比 | `benches/bench.rs` + `审计/mincore性能基准.md` |
+| **4** | **性能基准** | ✅ **已完成**（2026-11-19 11:15） | 可重复基准（≥20 样本、预热 3 次、black_box）；「撑不住」曲线；与 engine 正面对比 | `benches/bench.rs`（1477 行）+ `审计/mincore性能基准.md`（435 行） |
 | **5** | **编码器性质测试** | ✅ **已完成**（2026-11-19 11:00） | 规范性/唯一性证明；100 万输入模糊测试；独立参考解码器差分 | `tests/codec_props.rs`（2200 行 / 29 用例）+ `审计/mincore编码器性质.md`（234 行） |
 
 ---

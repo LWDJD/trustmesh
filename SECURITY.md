@@ -5,9 +5,13 @@
 `trustmesh` / `tm_*` 是**纯计算库**：
 
 * 不做网络 I/O、不做存储、不做签名验证、不做节点发现；
-* 它唯一接收**不可信输入**的地方是两个 `decode`：`CompressedView::decode(&[u8])` 与
-  `EngineSnapshot::decode(&[u8])`，两者都返回 `Option`、**任何输入都不 panic**
-  （`crates/engine/tests/untrusted_bytes.rs` 钉住了这一点）。
+* 它唯一接收**不可信输入**的地方是三个 `decode`：
+  `CompressedView::decode(&[u8])`、`EngineSnapshot::decode(&[u8])`、`SparseView::decode(&[u8], cap)`，
+  三者都返回 `Option`、**任何输入都不 panic**
+  （`crates/engine/tests/untrusted_bytes.rs` 与 `crates/mincore/tests/codec_props.rs` 钉住了这一点）。
+
+> 注意：`crates/mincore` 的视图解码**不需要防非有限浮点** —— 它用 u16 定点，天然有限。
+> 这是它比 Count Sketch 少一类攻击面的地方。
 
 所以「这个库有漏洞」通常指两类之一：
 
@@ -45,13 +49,30 @@
 | **零 unsafe** | 6 个 crate 全部 `#![forbid(unsafe_code)]`，编译器强制 |
 | **零外部依赖** | CI 的 `no-external-deps` job 会红 |
 | **不可信字节不崩** | `crates/engine/tests/untrusted_bytes.rs` |
-| **跨平台逐位一致** | CI 的 `wasm-parity` job（wasm32 vs native 36 个 f32 位模式） |
+| **跨平台逐位一致** | CI 的 `wasm-parity` job —— **两套**：engine（36 个 f32 位模式）+ mincore（2739 个 f32 位模式 + 12 张定长编码快照） |
 | **快照可精确恢复** | `crates/engine/src/snapshot.rs` 的 round-trip 测试（200,000 个点最大位差 0） |
 | **资源可设上限** | `EngineConfig::max_views`（**注意默认 0 = 关闭，部署必须显式设**） |
 | **抽样预算可自查** | `Engine::freshness_budget()` 会报 `DecayDiluted` |
 
 ---
 
+## `tm_mincore` 的额外边界（**如果你打算用它，先读这节**）
+
+`crates/mincore` 是另一个实现，它比 `tm_engine` **少一类攻击面，也多一处缺口**：
+
+| 项 | `tm_engine` | `tm_mincore` |
+|---|---|---|
+| 非有限浮点（NaN/Inf） | **需要**防护（f32 草图） | **不需要** —— u16 定点天然有限 |
+| 视图解码 panic | 有测试钉住 | 有测试钉住（`tests/codec_props.rs`） |
+| **资源上限** | `EngineConfig::max_views`（默认 0 = 关闭） | ⚠️ **2026-11-19 之前没有**（正在补 `Config::max_views`/`max_list`） |
+| **视图格式自描述** | 无（长度即长度） | ⚠️ **无 cap 头** ⟹ cap 不一致会整条拒绝 |
+
+**所以：在 `mincore` 的 `max_views` 补齐之前，不要把它暴露给不可信网络。**
+一个恶意节点如果知道你给过谁正分（这是公开信息），无法让 `views` 无限增长（每 owner 一条），
+但如果应用层因为 bug 或恶意输入写入了很多条正分，`views` 会随 `|清单|` 线性增长。
+
+另外：`mincore` 的 `Node` **没有 badlist 机制**，也没有抽样预算自查（`freshness_budget`）。
+这两项如果需要，必须应用层自己做。见 [`crates/mincore/DEPLOY.md`](crates/mincore/DEPLOY.md)。
 ## 不在范围内的
 
 反 DDoS、流量清洗、限流、准入成本、节点发现、连接建立、加密与认证、

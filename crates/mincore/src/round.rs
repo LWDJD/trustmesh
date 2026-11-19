@@ -194,10 +194,9 @@ impl RoundBitmap {
             return None;
         }
         // 「还没同步」时五个字段必须全是默认值。
-        // 写法用 `!(ready || ...)` 而不是 `!ready && !(...)`：两者逐值等价，
-        // 后者会被 clippy 的 nonminimal_bool 判为可简化。
-        let default_sampler = !ready && n == 0 && remaining == 0 && version == 0;
-        if !ready && !default_sampler {
+        // 用德摩根展开成析取，而不是 `!ready && !(全默认)`：两者逐值等价，
+        // 后者会被 clippy 的 nonminimal_bool 判为可简化（readonly 门禁要求零 warning）。
+        if !ready && (n != 0 || remaining != 0 || version != 0) {
             return None;
         }
         Some(Self {

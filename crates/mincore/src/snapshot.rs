@@ -992,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn t34_观点段被篡改时逐项拒绝() {
+    fn t15_观点段被篡改时逐项拒绝() {
         let n = views_only();
         let bytes = n.snapshot().encode();
         let ofs = offsets(&bytes);
@@ -1039,7 +1039,7 @@ mod tests {
     }
 
     #[test]
-    fn t35_逐字节逐位翻转全部不panic() {
+    fn t16_逐字节逐位翻转全部不panic() {
         // 穷举：对整串快照的**每一个字节的每一位**各翻一次。断言两条：
         // (1) 绝不 panic；(2) 能解出来的话，必须能逐字节重编（说明改动落在有效载荷里）。
         let a = rich();
@@ -1075,7 +1075,7 @@ mod tests {
     }
 
     #[test]
-    fn t36_视图cap小于槽位数的负载被拒() {
+    fn t17_视图cap小于槽位数的负载被拒() {
         let n = views_only();
         let mut bytes = n.snapshot().encode();
         let first_view = offsets(&bytes).views[0];
@@ -1085,7 +1085,7 @@ mod tests {
     }
 
     #[test]
-    fn t37_单槽视图能往返() {
+    fn t18_单槽视图能往返() {
         let mut n = Node::new(cfg(), 3);
         n.rate(1, 0.5, 0);
         assert!(n.on_view(1, SparseView::from_scores(8, &[(2, 1.0)]), 0, 0));
@@ -1096,7 +1096,7 @@ mod tests {
     }
 
     #[test]
-    fn t38_大负载往返_512视图全槽位() {
+    fn t19_大负载往返_512视图全槽位() {
         let mut n = Node::new(cfg(), 9);
         for i in 0..64u32 {
             n.rate(i, 0.9, 0);
@@ -1124,7 +1124,7 @@ mod tests {
     // ---------------- 与配置 / 资源上限的交互 ----------------
 
     #[test]
-    fn t39_摘要对不同max_views与max_list敏感() {
+    fn t20_摘要对不同max_views与max_list敏感() {
         let a = Node::new(
             Config {
                 max_views: 4096,
@@ -1162,7 +1162,7 @@ mod tests {
 
     #[test]
     #[allow(non_snake_case)]
-    fn t40_恢复时配置不符也返回None() {
+    fn t21_恢复时配置不符也返回None() {
         let a = rich();
         let snap = a.snapshot();
         assert!(Node::restore(snap.clone(), Config { beta: 0.5, ..cfg() }).is_none());
@@ -1170,7 +1170,7 @@ mod tests {
     }
 
     #[test]
-    fn t41_清单容量拒绝计数原样恢复() {
+    fn t22_清单容量拒绝计数原样恢复() {
         // max_list = 3：第 4 次新增被拒，计数 +1、清单版本不动。
         let mut a = Node::new(
             Config {
@@ -1191,7 +1191,7 @@ mod tests {
     }
 
     #[test]
-    fn t42_视图容量拒绝计数原样恢复() {
+    fn t23_视图容量拒绝计数原样恢复() {
         let mut a = Node::new(
             Config {
                 max_views: 2,
@@ -1212,7 +1212,7 @@ mod tests {
     }
 
     #[test]
-    fn t43_恢复后记录失败接着之前的值往上加() {
+    fn t24_恢复后记录失败接着之前的值往上加() {
         let (_, mut b) = round_trip(&rich());
         assert_eq!(b.claims().fail_streak(2), 1);
         b.on_view_failed(2);
@@ -1225,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn t44_clone出来的快照不改变任何东西() {
+    fn t25_clone出来的快照不改变任何东西() {
         let a = rich();
         let s = a.snapshot();
         let desc = s.bytes();
@@ -1236,28 +1236,7 @@ mod tests {
     }
 
     #[test]
-    fn t46_实测字节数钉住() {
-        // 把「某类状态占多少字节」钉成回归断言：格式一改就会在这里炸，
-        // 而不是等到线上快照变大一倍才发现。
-        //
-        // 空节点 110 = 头 21 + 清单固定 28 + 清单条数 4 + order 条数 4
-        //             + 位图尾 17 + 观点条数 4 + rng 8 + 统计 24。
-        assert_eq!(Node::new(cfg(), 3).snapshot().bytes(), 110);
-        // rich()：110 基线 + 6 条正分（6×16 = 96）+ order 6 项（6×4 = 24）
-        //         + drawn 1 字（8）+ 5 份视图（5×28 头 + 12 个槽 × 6 = 212）= 456。
-        //         （视图槽数：pairs[..1] / [..2] / [..3] 各一份 ×3 位来源 = 1+2+3+1+2+3 = 12。）
-        assert_eq!(rich().snapshot().bytes(), 456);
-        // 64 份塞满 cap=512 的视图：110 + 64×16（正分）+ 64×(28 + 512×6)（视图）。
-        // ⚠️ 公式里**没有** order/drawn 项：那个节点从没抽过，采样器还没 sync。
-        // 用常量而不是字面量算，避免「常量改了这条断言还硬编码旧数」的假绿。
-        assert_eq!(
-            EMPTY_SNAPSHOT_BYTES + 64 * RATING_BYTES + 64 * (VIEW_HEADER_BYTES + 512 * SLOT_BYTES),
-            199_790
-        );
-    }
-
-    #[test]
-    fn t45_配置摘要覆盖全部六个旋钮() {
+    fn t26_配置摘要覆盖全部六个旋钮() {
         // 逐个旋钮单独改动，摘要必须都变（等价于「没有哪个旋钮被漏掉」）。
         let base = cfg();
         let cfgs = [
@@ -1298,7 +1277,7 @@ mod tests {
     }
 
     #[test]
-    fn t15_每份视图逐字节恢复且各自的cap保留() {
+    fn t27_每份视图逐字节恢复且各自的cap保留() {
         let a = rich();
         let (_, b) = round_trip(&a);
         assert_eq!(a.view_count(), b.view_count(), "观点份数必须一致");
@@ -1324,7 +1303,7 @@ mod tests {
     }
 
     #[test]
-    fn t16_编码是确定性的两次编码逐字节相同() {
+    fn t28_编码是确定性的两次编码逐字节相同() {
         let a = rich();
         let s = a.snapshot();
         assert_eq!(s.encode(), s.encode(), "同一份快照两次编码必须相同");
@@ -1333,7 +1312,7 @@ mod tests {
     }
 
     #[test]
-    fn t17_恢复后的节点可以继续被快照() {
+    fn t29_恢复后的节点可以继续被快照() {
         let a = rich();
         let (bytes, b) = round_trip(&a);
         // 恢复 -> 再抓 -> 再编码：仍然是同一串字节。
@@ -1346,7 +1325,7 @@ mod tests {
     // ---------------- 防御 ----------------
 
     #[test]
-    fn t18_每个前缀截断都必须被拒且不panic() {
+    fn t30_每个前缀截断都必须被拒且不panic() {
         let a = rich();
         let bytes = a.snapshot().encode();
         for i in 0..bytes.len() {
@@ -1360,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn t19_空负载与超短负载被拒() {
+    fn t31_空负载与超短负载被拒() {
         for len in 0..HEADER_BYTES {
             assert!(NodeSnapshot::decode(&vec![b'X'; len], cfg()).is_none());
             assert_eq!(
@@ -1375,7 +1354,7 @@ mod tests {
     }
 
     #[test]
-    fn t20_末尾多余字节被拒() {
+    fn t32_末尾多余字节被拒() {
         let a = rich();
         let mut bytes = a.snapshot().encode();
         bytes.push(0);
@@ -1388,7 +1367,7 @@ mod tests {
     }
 
     #[test]
-    fn t21_魔数不符被拒() {
+    fn t33_魔数不符被拒() {
         let a = rich();
         let mut bytes = a.snapshot().encode();
         bytes[0] ^= 0xFF;
@@ -1397,7 +1376,7 @@ mod tests {
     }
 
     #[test]
-    fn t22_版本号不符被拒() {
+    fn t34_版本号不符被拒() {
         let a = rich();
         let mut bytes = a.snapshot().encode();
         bytes[HEADER_BYTES - 12] = 2; // 版本字段在 8..12
@@ -1410,7 +1389,7 @@ mod tests {
     }
 
     #[test]
-    fn t23_六个cfg旋钮任一不符都被拒() {
+    fn t35_六个cfg旋钮任一不符都被拒() {
         let a = rich();
         let bytes = a.snapshot().encode();
         let base_cfg = cfg();
@@ -1457,7 +1436,7 @@ mod tests {
     }
 
     #[test]
-    fn t24_手工摘要为0的负载被拒() {
+    fn t36_手工摘要为0的负载被拒() {
         let a = rich();
         let mut bytes = a.snapshot().encode();
         bytes[HEADER_BYTES - 8..HEADER_BYTES].copy_from_slice(&0u64.to_le_bytes());
@@ -1466,7 +1445,7 @@ mod tests {
     }
 
     #[test]
-    fn t25_随机字节一律不panic() {
+    fn t37_随机字节一律不panic() {
         let mut r = TestRng::new(0xDEAD_BEEF);
         for round in 0..300 {
             let len = (r.next_u32() % 400) as usize;
@@ -1483,7 +1462,7 @@ mod tests {
     }
 
     #[test]
-    fn t26_清单条数撒谎不会预分配() {
+    fn t38_清单条数撒谎不会预分配() {
         let a = Node::new(cfg(), 3);
         let base = a.snapshot().encode();
         // 空节点的清单条数字段 = HEADER(21) + 24。
@@ -1506,7 +1485,7 @@ mod tests {
     }
 
     #[test]
-    fn t27_位图两个数组的条数撒谎都被拒() {
+    fn t39_位图两个数组的条数撒谎都被拒() {
         let a = rich();
         let bytes0 = a.snapshot().encode();
         let ofs = offsets(&bytes0);
@@ -1529,7 +1508,7 @@ mod tests {
     }
 
     #[test]
-    fn t28_清单分数非有限或越界都被拒() {
+    fn t40_清单分数非有限或越界都被拒() {
         let a = Node::new(cfg(), 3);
         let mut a = a;
         a.rate(7, 0.5, 5);
@@ -1568,7 +1547,7 @@ mod tests {
     }
 
     #[test]
-    fn t29_清单条目乱序或重复被拒() {
+    fn t41_清单条目乱序或重复被拒() {
         let mut a = Node::new(cfg(), 3);
         a.rate(7, 0.5, 5);
         a.rate(8, 0.5, 5);
@@ -1587,7 +1566,7 @@ mod tests {
     }
 
     #[test]
-    fn t30_清单填充非零被拒() {
+    fn t42_清单填充非零被拒() {
         let mut a = Node::new(cfg(), 3);
         a.rate(7, 0.5, 5);
         let mut bytes = a.snapshot().encode();
@@ -1603,7 +1582,7 @@ mod tests {
     }
 
     #[test]
-    fn t31_位图五个字段各自被篡改都被拒() {
+    fn t43_位图五个字段各自被篡改都被拒() {
         let a = rich();
         let bytes0 = a.snapshot().encode();
         let ofs = offsets(&bytes0);
@@ -1652,7 +1631,7 @@ mod tests {
     }
 
     #[test]
-    fn t32_随机源状态为0被拒() {
+    fn t44_随机源状态为0被拒() {
         let a = rich();
         let mut bytes = a.snapshot().encode();
         let ofs = offsets(&bytes);
@@ -1662,7 +1641,7 @@ mod tests {
     }
 
     #[test]
-    fn t33_统计不变式被破坏时拒绝() {
+    fn t45_统计不变式被破坏时拒绝() {
         let a = rich();
         let mut bytes = a.snapshot().encode();
         let ofs = offsets(&bytes);
@@ -1671,5 +1650,26 @@ mod tests {
         bytes[ofs.stats + 16..ofs.stats + 24].copy_from_slice(&(rejected + 1).to_le_bytes());
         assert!(NodeSnapshot::decode(&bytes, cfg()).is_none());
         assert_eq!(last_failure_tag(), 8);
+    }
+
+    #[test]
+    fn t46_实测字节数钉住() {
+        // 把「某类状态占多少字节」钉成回归断言：格式一改就会在这里炸，
+        // 而不是等到线上快照变大一倍才发现。
+        //
+        // 空节点 110 = 头 21 + 清单固定 28 + 清单条数 4 + order 条数 4
+        //             + 位图尾 17 + 观点条数 4 + rng 8 + 统计 24。
+        assert_eq!(Node::new(cfg(), 3).snapshot().bytes(), 110);
+        // rich()：110 基线 + 6 条正分（6×16 = 96）+ order 6 项（6×4 = 24）
+        //         + drawn 1 字（8）+ 5 份视图（5×28 头 + 12 个槽 × 6 = 212）= 456。
+        //         （视图槽数：pairs[..1] / [..2] / [..3] 各一份 ×3 位来源 = 1+2+3+1+2+3 = 12。）
+        assert_eq!(rich().snapshot().bytes(), 456);
+        // 64 份塞满 cap=512 的视图：110 + 64×16（正分）+ 64×(28 + 512×6)（视图）。
+        // ⚠️ 公式里**没有** order/drawn 项：那个节点从没抽过，采样器还没 sync。
+        // 用常量而不是字面量算，避免「常量改了这条断言还硬编码旧数」的假绿。
+        assert_eq!(
+            EMPTY_SNAPSHOT_BYTES + 64 * RATING_BYTES + 64 * (VIEW_HEADER_BYTES + 512 * SLOT_BYTES),
+            199_790
+        );
     }
 }

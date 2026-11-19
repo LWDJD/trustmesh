@@ -54,10 +54,12 @@ pub mod fixed;
 pub mod list;
 pub mod node;
 pub mod round;
+pub mod snapshot;
 pub mod view;
 
 pub use fixed::{dequantize, quantize, Q_ONE};
 pub use list::{Acc, Entry, PositiveList, Time};
 pub use node::{decay, Config, Distribution, Node, Received};
 pub use round::{Rng, RoundBitmap};
+pub use snapshot::NodeSnapshot;
 pub use view::{SparseView, MAX_CAP, SLOT_BYTES, VIEW_OVERHEAD};

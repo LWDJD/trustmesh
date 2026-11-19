@@ -175,9 +175,9 @@ pub fn decay(dt: Time, half_life: Time) -> f32 {
 /// 一个节点：正分清单 + 抽样器 + 收到的观点。
 #[derive(Clone, Debug)]
 pub struct Node {
-    cfg: Config,
-    list: PositiveList,
-    sampler: RoundBitmap,
+    pub(crate) cfg: Config,
+    pub(crate) list: PositiveList,
+    pub(crate) sampler: RoundBitmap,
     /// 只为「我打过正分」的来源保留观点：别人硬塞过来的观点我根本不收
     /// （`on_view` 的第一条拒绝条件），所以 `|views|` 只在我**主动** rate 新账户时增长，
     /// 与攻击者的推送速率无关。
@@ -187,10 +187,10 @@ pub struct Node {
     /// `weights()` 靠 `list.get(owner) == None` 跳过，计算上无害，但占内存）。
     /// 需要回收的话得显式加一个清理入口；当前实现不回收。
     /// 内存上界仍受「我主动 rate 过的不同账户数」约束，不是无界的。
-    views: BTreeMap<Acc, Received>,
-    rng: Rng,
-    stat_views: u64,
-    stat_rejected: u64,
+    pub(crate) views: BTreeMap<Acc, Received>,
+    pub(crate) rng: Rng,
+    pub(crate) stat_views: u64,
+    pub(crate) stat_rejected: u64,
 }
 
 impl Node {

@@ -50,6 +50,18 @@ impl PositiveList {
         Self::default()
     }
 
+    /// 由「条目表 + 版本号」直接重建，**不做任何校验**（供快照恢复使用）。
+    ///
+    /// # 调用方契约
+    ///
+    /// `entries` 必须已按账户号升序，且每条 `score` 是 `(0, 1]` 内的有限值
+    /// （即只可能是 [`Self::set`] 产出的合法状态）；`version` 必须是产生这份清单
+    /// 时的结构版本号。违反任一条会让 [`crate::round::RoundBitmap`] 的「版本未变就不重建」
+    /// 判断失效，或者让 `total()` 变成 NaN。
+    pub(crate) fn from_parts(entries: BTreeMap<Acc, Entry>, version: u64) -> Self {
+        Self { entries, version }
+    }
+
     /// 写入/更新一条正分。既有条目与新建条目都会把 `last_check` 刷新为 `now`
     /// （这个字段是诊断用途，不参与衰减计算，见模块文档）。
     ///

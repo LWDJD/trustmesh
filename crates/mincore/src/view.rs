@@ -130,6 +130,34 @@ impl SparseView {
         }
     }
 
+    /// 由**规范形式**的槽位重建：`cap` 合法、条数不超过 `cap`、按账户号严格升序、
+    /// 每槽 `q > 0`。任何一条不满足都返回 `None`（供快照恢复使用）。
+    ///
+    /// 与 [Self::decode] 的区别只是**没有定长填充区**：快照里的视图按
+    /// `条数 + 条数 × 6 字节` 存，省掉空槽区的零填充，恢复时用本入口重建成定长表。
+    ///
+    /// # 为什么 `cap` 由调用方给
+    ///
+    /// 快照不重复存 `cap`（它由 `Config` 决定、而 `Config` 已经折进 digest）。
+    pub(crate) fn from_canonical_slots(cap: usize, slots: Vec<(Acc, u16)>) -> Option<Self> {
+        if cap == 0 || cap > MAX_CAP || slots.len() > cap {
+            return None;
+        }
+        let mut prev: Option<Acc> = None;
+        for &(acc, q) in &slots {
+            if q == 0 {
+                return None; // 规范形式：0 分不占槽位
+            }
+            if let Some(p) = prev {
+                if acc <= p {
+                    return None; // 重复或乱序
+                }
+            }
+            prev = Some(acc);
+        }
+        Some(Self::from_slots_unchecked(cap, slots))
+    }
+
     /// 容量。
     #[must_use]
     pub fn cap(&self) -> usize {

@@ -62,6 +62,22 @@ impl Rng {
         }
     }
 
+    /// 从已保存的内部状态原样恢复（供快照使用）。
+    ///
+    /// # 调用方契约
+    ///
+    /// `state` 必须是 [Self::new] 产出过的状态，且**非零**：xorshift 的状态 0 是
+    /// 不动点，`next_u64` 会永远返回 0、`below` 永远返回 0（抽样退化成「永远抽第 0 个」）。
+    /// [`crate::snapshot::NodeSnapshot::decode`] 把 0 当作非法负载直接拒绝。
+    pub(crate) fn from_state(state: u64) -> Self {
+        Self { state }
+    }
+
+    /// 内部状态（供快照原样搬运）。
+    pub(crate) fn state(&self) -> u64 {
+        self.state
+    }
+
     /// 下一个 u64。
     pub fn next_u64(&mut self) -> u64 {
         let mut x = self.state;
@@ -117,6 +133,76 @@ impl RoundBitmap {
     #[must_use]
     pub fn round_len(&self) -> usize {
         self.order.len()
+    }
+
+    /// 本轮快照里的账户号（升序）。
+    pub(crate) fn order(&self) -> &[Acc] {
+        &self.order
+    }
+
+    /// 已抽位图（最后一字的越界位恒为 1）。
+    pub(crate) fn drawn(&self) -> &[u64] {
+        &self.drawn
+    }
+
+    /// 快照对应的清单版本号。
+    pub(crate) fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// 是否已建过快照（区分「空清单」和「还没同步」）。
+    pub(crate) fn ready(&self) -> bool {
+        self.ready
+    }
+
+    /// 由五个字段直接重建，并逐条校验内部不变量（供快照恢复使用）。
+    ///
+    /// 返回 `None` 表示这份组合在任何时刻都不可能出现——被截断或伪造的负载。
+    /// 校验项（全部是 [`Self::draw`] / [`Self::draw_all`] / [`Self::reset`]
+    /// 会维持的不变量）：
+    ///
+    /// * `order` 按账户号**严格升序**（它本来来自 `PositiveList::indices()`）；
+    /// * `drawn` 的字数恰为 `ceil(order.len() / 64)`；
+    /// * 最后一字的**越界位全为 1**（[Self::reset] 预置的，整字跳过靠它）；
+    /// * `remaining` 等于合法位里的空闲位数，于是自动 `remaining <= order.len()`；
+    /// * `ready == false` 时五个字段必须全是 [Self::new] 的默认值。
+    pub(crate) fn from_parts(
+        order: Vec<Acc>,
+        drawn: Vec<u64>,
+        remaining: usize,
+        version: u64,
+        ready: bool,
+    ) -> Option<Self> {
+        if !order.windows(2).all(|w| w[0] < w[1]) {
+            return None;
+        }
+        let n = order.len();
+        if drawn.len() != n.div_ceil(64) {
+            return None;
+        }
+        let used = n % 64;
+        if used != 0 {
+            let last = *drawn.last()?;
+            let out_of_range = u64::MAX << used;
+            if last & out_of_range != out_of_range {
+                return None;
+            }
+        }
+        // 越界位被强制为 1，所以整张位图的 0 位数恰是「合法区里还能抽的位置数」。
+        let free: usize = drawn.iter().map(|&w| (!w).count_ones() as usize).sum();
+        if free != remaining {
+            return None;
+        }
+        if !ready && !(n == 0 && remaining == 0 && version == 0) {
+            return None;
+        }
+        Some(Self {
+            order,
+            drawn,
+            remaining,
+            version,
+            ready,
+        })
     }
 
     /// 清单变了就重建快照并开新一轮；没变就什么也不做。

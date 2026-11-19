@@ -1,0 +1,47 @@
+# 参考数据：`cargo run --release --bin a12_perf` 在本机的完整输出
+#
+# 用途：把 A12 审计 §4.2 的账面数字与「同机复跑」分开，解释机器差异 vs 口径差异。
+# 命令：cd crates/mincore && cargo run --release --bin a12_perf   （退出码 0，耗时 9 s）
+# 说明：该 bin 无预热门控、无 black_box、reps 固定 50、n>=800 的全量分布仅 3~5 次。
+# 编码：UTF-8
+﻿cargo :     Finished `release` profile [optimized] target(s) in 0.04s
+所在位置 行:3 字符: 1
++ cargo run --release --bin a12_perf 1> "D:\Project\deepseek_harness\去中 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Finished `r...get(s) in 0.04s:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+     Running `target\release\a12_perf.exe`
+## 体积（每份观点的序列化字节数）
+| 实现 | 字节 | 相对 Engine |
+|---|---|---|
+| Engine（2048×5 f32） | 40960 | 100% |
+| mincore cap=128 | 770 | 1.9% |
+| mincore cap=256 | 1538 | 3.8% |
+| mincore cap=512 | 3074 | 7.5% |
+
+## 耗时（µs，中位数）
+| n | 操作 | Engine | mincore | 加速 |
+|---|---|---|---|---|
+| 100 | on_view（解码+校验+入库） | 176.0 | 0.7 | 247× |
+| 100 | 单账户 query | 49.5 | 2.9 | 17× |
+| 100 | 一次全量分布 | 3.78 ms | 0.04 ms | 107× |
+| 200 | on_view（解码+校验+入库） | 192.7 | 0.8 | 250× |
+| 200 | 单账户 query | 97.0 | 16.1 | 6× |
+| 200 | 一次全量分布 | 14.66 ms | 0.05 ms | 287× |
+| 400 | on_view（解码+校验+入库） | 213.4 | 0.8 | 281× |
+| 400 | 单账户 query | 203.6 | 9.8 | 21× |
+| 400 | 一次全量分布 | 64.42 ms | 0.11 ms | 583× |
+| 800 | on_view（解码+校验+入库） | 244.1 | 0.7 | 363× |
+| 800 | 单账户 query | 486.7 | 19.3 | 25× |
+| 800 | 一次全量分布 | 340.60 ms | 0.25 ms | 1364× |
+| 1600 | on_view（解码+校验+入库） | 364.9 | 0.7 | 541× |
+| 1600 | 单账户 query | 838.9 | 46.4 | 18× |
+| 1600 | 一次全量分布 | 2161.94 ms | 0.87 ms | 2494× |
+
+## 全网视图总量（n 份观点，每个账户一份）
+| n | Engine | mincore cap=128 | cap=256 | cap=512 |
+|---|---|---|---|---|
+| 100 | 4000 KB | 75 KB | 150 KB | 300 KB |
+| 400 | 16000 KB | 300 KB | 600 KB | 1200 KB |
+| 1600 | 64000 KB | 1203 KB | 2403 KB | 4803 KB |

@@ -30,6 +30,13 @@ path = "src/bin/a12_compare.rs"
 name = "a12_perf"
 path = "src/bin/a12_perf.rs"
 
+# 性能基准：手写 main，零外部依赖（本仓库纪律：不引 criterion / divan / iai）。
+# 运行：cargo run --release --bench bench -- all
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+harness = false
+
 [profile.release]
 opt-level = 3
 lto = true

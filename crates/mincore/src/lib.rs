@@ -60,4 +60,4 @@ pub use fixed::{dequantize, quantize, Q_ONE};
 pub use list::{Acc, Entry, PositiveList, Time};
 pub use node::{decay, Config, Distribution, Node, Received};
 pub use round::{Rng, RoundBitmap};
-pub use view::{SparseView, MAX_CAP, SLOT_BYTES, VIEW_OVERHEAD};
+pub use view::{DecodeError, SparseView, MAX_CAP, PREFIX_BYTES, SLOT_BYTES, VIEW_OVERHEAD};

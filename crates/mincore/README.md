@@ -43,7 +43,7 @@
 ## 2. 怎么用
 
 ~~~rust
-use tm_mincore::{Config, Node, Time};
+use tm_mincore::{Config, Node, NodeSnapshot, Time};
 
 let cfg = Config { cap: 256, ..Default::default() };   // 默认 cap=512，这里显式改成 256
 let mut me = Node::new(cfg, 0);   // 第二个参数是抽样用的 seed
@@ -63,9 +63,17 @@ me.on_view(owner, incoming, published_at, now);  // 返回 bool：是否接受
 // 4. 查任意账户在我眼里的声望
 let d = me.distribution(now);
 let score = me.query(someone, now);
+
+// 5. 状态快照：重启后逐位回到关机前
+let saved = me.snapshot().encode();              // 落盘
+// ... 重启 ...
+let snap = NodeSnapshot::decode(&saved, cfg).ok_or("非法快照")?;
+let mut me = Node::restore(snap, cfg).ok_or("cfg 不匹配")?;
+// me.tick() 下一次抽到的人与关机前完全相同（rng 状态 + 本轮位图原样装回）
 ~~~
 
-完整可跑的例子见 `examples/`；17 个验收测试见 [`tests/anti_sybil.rs`](tests/anti_sybil.rs)。
+完整可跑的例子见 `examples/`；17 个验收测试见 [`tests/anti_sybil.rs`](tests/anti_sybil.rs)、
+11 个快照测试见 [`tests/snapshot_durability.rs`](tests/snapshot_durability.rs)。
 
 ---
 
@@ -150,8 +158,8 @@ match SparseView::decode_prefixed_result(&bytes) {
 
 | 缺什么 | 影响 |
 |---|---|
-| 状态快照（`SNAPSHOT_VERSION`） | 不能持久化/重启恢复 |
-| `max_views` 等资源上限 | 恶意节点可塞无限条视图 ⟹ **内存耗尽** |
+| ~~状态快照~~ | **已补齐**（`src/snapshot.rs`：`Node::snapshot` / `Node::restore`，重启后逐位回到关机前） |
+| ~~`max_views` 等资源上限~~ | **已补齐**（`Config::max_views` / `max_list`，拒绝新增而非 LRU） |
 | non-finite 防护（含 `untrusted_bytes` 那套） | `decode` 只查规范性，不查 f32 是否有限（u16 定点天然有限，所以这条其实安全） |
 | badlist / 判据 / 抽样预算 / `recommended_k` | 那些是 `tm_engine` 的上层机制 |
 | 协议文档 | 本文件 + [`ENCODING.md`](ENCODING.md)（字节编码规范） |
@@ -179,7 +187,7 @@ match SparseView::decode_prefixed_result(&bytes) {
 $env:TMP="<仓库根>/.tmp"; $env:TEMP=$env:TMP
 cd crates/mincore
 
-cargo test                    # 17 集成 + 1 doctest
+cargo test                    # 166 单测 + 17 + 8(e2e) + 12(资源上限) + 11(快照) + 1 doctest
 cargo clippy --all-targets    # 零 warning
 cargo fmt --check             # 零差异
 

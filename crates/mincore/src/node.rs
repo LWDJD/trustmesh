@@ -58,6 +58,7 @@ use std::collections::BTreeMap;
 
 use crate::list::{Acc, PositiveList, Time};
 use crate::round::{Rng, RoundBitmap};
+use crate::snapshot::NodeSnapshot;
 use crate::view::SparseView;
 
 /// 内核参数。
@@ -216,9 +217,9 @@ pub fn decay(dt: Time, half_life: Time) -> f32 {
 /// 一个节点：正分清单 + 抽样器 + 收到的观点。
 #[derive(Clone, Debug)]
 pub struct Node {
-    cfg: Config,
-    list: PositiveList,
-    sampler: RoundBitmap,
+    pub(crate) cfg: Config,
+    pub(crate) list: PositiveList,
+    pub(crate) sampler: RoundBitmap,
     /// 只为「我打过正分」的来源保留观点：别人硬塞过来的观点我根本不收
     /// （`on_view` 的第一条拒绝条件），所以 `|views|` 只在我**主动** rate 新账户时增长，
     /// 与攻击者的推送速率无关。
@@ -231,13 +232,13 @@ pub struct Node {
     /// 好在这个上界**现在是被钉死的**：`|views|` 只增不减、而新增又被
     /// [`Config::max_views`] 挡住，所以它恒有 `|views| ≤ max_views`
     /// （`max_views = 0` 时才退化成「受我主动 rate 过的不同账户数约束」）。
-    views: BTreeMap<Acc, Received>,
-    rng: Rng,
-    stat_views: u64,
-    stat_rejected: u64,
+    pub(crate) views: BTreeMap<Acc, Received>,
+    pub(crate) rng: Rng,
+    pub(crate) stat_views: u64,
+    pub(crate) stat_rejected: u64,
     /// 因 `max_views` 上限被整条丢弃的观点数（**包含**在 `stat_rejected` 里）。
     /// 单调递增，只增不减。
-    stat_rejected_limit: u64,
+    pub(crate) stat_rejected_limit: u64,
 }
 
 impl Node {
@@ -602,6 +603,28 @@ fn clamp01(x: f32) -> f32 {
         0.0
     } else {
         x.clamp(0.0, 1.0)
+    }
+}
+
+// ---------------- 状态快照 ----------------
+
+impl Node {
+    /// 把整个状态打包成一份快照（**不含** `cfg`，但含它的摘要，见 [`NodeSnapshot`]）。
+    ///
+    /// 快照是纯值：可以对它 `encode()` 落盘、`decode()` 读回，再交给 [Self::restore]。
+    #[must_use]
+    pub fn snapshot(&self) -> NodeSnapshot {
+        NodeSnapshot::capture(self)
+    }
+
+    /// 用一份快照重建节点；`cfg` 必须与产生快照时**逐位一致**，否则返回 `None`。
+    ///
+    /// 恢复后节点的下一次 `tick()` / `probe()` 会抽到与「关机前」完全相同的人，
+    /// 因为 `rng` 状态、本轮位图（`order` / `drawn` / `remaining` / `version` / `ready`）
+    /// 全部原样装回，失败计数与收发统计也一并恢复。
+    #[must_use]
+    pub fn restore(snap: NodeSnapshot, cfg: Config) -> Option<Node> {
+        snap.into_node(cfg)
     }
 }
 

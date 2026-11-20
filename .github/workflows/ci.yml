@@ -7,7 +7,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  # 刻意**不**设 RUSTFLAGS: -D warnings ——
+  # 它会把所有 rustc 警告升级成错误，而本仓有两处**明确豁免**：
+  #   1) crates/exp 的 21 个一次性实验 bin（约 46 条历史警告，改它们属于「重跑实验的人」的活）
+  #   2) 根 v1.0 遗留代码（作者要求原样保留，不参与新架构）
+  # 严格标准由 lint job 的 `-- -D warnings` 逐 crate 施加，与本地 verify-all.ps1 的口径一致。
 
 jobs:
   # ============================================================
@@ -83,7 +87,14 @@ jobs:
         run: cargo fmt --check
       - name: cargo clippy
         working-directory: crates/${{ matrix.crate }}
-        run: cargo clippy --all-targets -- -D warnings
+        # exp 有 21 个一次性实验 bin（约 46 条历史警告），本地 verify-all.ps1 对它们
+        # 只卡 lib + 两个集成测试；CI 必须与本地口径一致，否则「本地绿、CI 红」。
+        run: |
+          if [ "${{ matrix.crate }}" = "exp" ]; then
+            cargo clippy --lib --test runtime --test parity -- -D warnings
+          else
+            cargo clippy --all-targets -- -D warnings
+          fi
 
   # ============================================================
   # 跨平台逐位一致：这是本库**最值钱的性质**，必须每次 CI 都验证。

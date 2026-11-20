@@ -15,12 +15,79 @@ env:
 
 jobs:
   # ============================================================
+  # 变更分类：只有文档改动时，跳过全部重活。
+  # 
+  # 这一项**永远运行**（不依赖任何 needs），因此它可以作为分支保护的必需检查：
+  # 文档 PR 上 heavy job 全部 skip，但这一项仍给出明确的 success。
+  # 
+  # 为什么不用工作流级的 `paths-ignore`：那样文档 PR 根本不会产生任何 check，
+  # 若分支保护要求「必须通过某些 check」，PR 会被**永久卡住**无法合并。
+  # ============================================================
+  changes:
+    name: change scope
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      files: ${{ steps.classify.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 需要完整历史才能算 base...head 的差异
+      - id: classify
+        name: classify changed paths
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in
+            ''|0000000000000000000000000000000000000000)
+              # 新分支/首次推送没有 before，保守起见按「有代码改动」处理
+              echo "base unknown (new branch) -> run full CI"
+              echo 'code=true' >> "$GITHUB_OUTPUT"
+              echo 'files=(unknown base)' >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          CHANGED=$(git diff --name-only "$BASE...HEAD" || true)
+          if [ -z "$CHANGED" ]; then
+            echo "no path changes detected -> run full CI (safe default)"
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            echo 'files=(none)' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CODE=false
+          DOC_ONLY=true
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *.md|LICENSE|LICENSE.*|.gitignore|.gitattributes)
+                continue ;;
+            esac
+            # 任何一个非文档路径都意味着要跑完整 CI
+            DOC_ONLY=false
+            CODE=true
+            break
+          done <<EOF
+          $CHANGED
+          EOF
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          FILES_ONE_LINE=$(printf '%s ' $CHANGED)
+          echo "files=$FILES_ONE_LINE" >> "$GITHUB_OUTPUT"
+          echo "--- changed files ---"
+          echo "$CHANGED"
+          echo "doc_only=$DOC_ONLY  run_full_ci=$CODE"
+
+  # ============================================================
   # 七个独立 workspace 各自跑测试。
-  # 注意：**不能**在根目录跑 `cargo test` 了事 —— 六个 crates 各自是自己的
-  # workspace 根，根 workspace 的 `cargo test` 不会递归进去（README 有警示）。
+  # **不能**在根目录跑 `cargo test` 了事 —— 它们各自是自己的 workspace 根。
   # ============================================================
   test:
     name: test / ${{ matrix.crate }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,6 +105,8 @@ jobs:
   # 根包的 v1.0 遗留代码单独测（作者要求保留，不参与新架构）
   test-legacy:
     name: test / trustmesh (v1.0)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,10 +117,13 @@ jobs:
 
   # ============================================================
   # 文档测试：README 与 crate 文档里的代码必须**真的能跑**。
-  # 这一项抓的是「文档漂移」——最容易发生、最难发现。
+  # 注意：这里只排除「纯 .md 改动」，**不**排除文档测试本身 ——
+  # 因为 crate 里的 doc comment 改动属于代码路径（.rs 文件），会触发 code=true。
   # ============================================================
   doctest:
     name: doc tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -71,6 +143,8 @@ jobs:
   # ============================================================
   lint:
     name: lint / ${{ matrix.crate }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -97,11 +171,13 @@ jobs:
           fi
 
   # ============================================================
-  # 跨平台逐位一致：这是本库**最值钱的性质**，必须每次 CI 都验证。
+  # 跨平台逐位一致：这是本库**最值钱的性质**，必须每次代码改动都验证。
   # native x86_64 与 wasm32 必须给出逐位相同的 f32 位模式。
   # ============================================================
   wasm-parity:
     name: wasm32 bit-parity
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,14 +190,12 @@ jobs:
           node-version: '20'
       - name: build wasm32 (lib → .wasm)
         working-directory: tools/wasm-smoke
-        # 只编 lib：cdylib 才会产出 .wasm 供 run-compare.mjs 读取
         run: cargo build --release --lib --target wasm32-unknown-unknown
       - name: build native (bin)
         working-directory: tools/wasm-smoke
         run: cargo build --release --bin tm_wasm_smoke_cli
       - name: run native and dump
         working-directory: tools/wasm-smoke
-        # 二进制名以 Cargo.toml 为准（bin 名是 tm_wasm_smoke_cli）
         run: ./target/release/tm_wasm_smoke_cli > native.txt
       - name: compare wasm32 vs native
         working-directory: tools/wasm-smoke
@@ -136,7 +210,6 @@ jobs:
         run: cargo build --release --bin mc_wasm_cli
       - name: golden standard freshness (committed native.txt must match a real run)
         working-directory: tools/mincore-wasm
-        # native.txt 入库为金标准。若它是陈旧的，说明有人改了内核却忘了更新金标准。
         run: |
           set -eu
           ./target/release/mc_wasm_cli > /tmp/native_now.txt
@@ -160,7 +233,8 @@ jobs:
 
   # ============================================================
   # 零依赖守卫：本库刻意保持零外部依赖（供应链攻击面最小化）。
-  # 任何人在 [dependencies] 里加了第三方 crate，这一项会红。
+  # 这一项**不**受 changes 门控 —— 它只看 Cargo.toml，成本 2 秒，
+  # 而且是最该在每次推送都守住的纪律。
   # ============================================================
   no-external-deps:
     name: zero-dependency guard
@@ -171,13 +245,8 @@ jobs:
         run: |
           set -eu
           fail=0
-          # 扫描所有 Cargo.toml 的 [dependencies] 段。
-          # 允许仓内 path 依赖（例如 tm_engine 依赖 tm_store/view/agg）；
-          # 只禁止**外部**（registry / git / version）依赖。
-          # 扫描范围必须包含 tools/* —— wasm 辅助 crate 最容易偷偷引入外部依赖。
           for f in crates/*/Cargo.toml Cargo.toml tools/*/Cargo.toml; do
             [ -f "$f" ] || continue
-            # 逐行状态机：只用 grep/sed，不依赖 awk（ubuntu-latest 都有）
             in_deps=0
             while IFS= read -r line; do
               case "$line" in
@@ -185,12 +254,10 @@ jobs:
                 *"["*)            in_deps=0; continue ;;
               esac
               if [ "$in_deps" = 1 ]; then
-                # 去掉行尾空白后判断：空行与注释忽略
                 trimmed=$(printf '%s' "$line" | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//')
                 case "$trimmed" in
                   ''|'#'*) continue ;;
                 esac
-                # 含 path = 的是仓内依赖，合法
                 case "$trimmed" in
                   *"path = "*) continue ;;
                 esac

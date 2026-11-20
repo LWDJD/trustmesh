@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # 刻意**不**设 RUSTFLAGS: -D warnings ——
+  # 它会把所有 rustc 警告升级成错误，而本仓有两处**明确豁免**：
+  #   1) crates/exp 的 21 个一次性实验 bin（约 46 条历史警告，改它们属于「重跑实验的人」的活）
+  #   2) 根 v1.0 遗留代码（作者要求原样保留，不参与新架构）
+  # 严格标准由 lint job 的 `-- -D warnings` 逐 crate 施加，与本地 verify-all.ps1 的口径一致。
+
+jobs:
+  # ============================================================
+  # 七个独立 workspace 各自跑测试。
+  # 注意：**不能**在根目录跑 `cargo test` 了事 —— 六个 crates 各自是自己的
+  # workspace 根，根 workspace 的 `cargo test` 不会递归进去（README 有警示）。
+  # ============================================================
+  test:
+    name: test / ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [store, view, agg, engine, sim, exp, mincore]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+      - name: cargo test
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo test --all-targets
+
+  # 根包的 v1.0 遗留代码单独测（作者要求保留，不参与新架构）
+  test-legacy:
+    name: test / trustmesh (v1.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+      - run: cargo test --all-targets
+
+  # ============================================================
+  # 文档测试：README 与 crate 文档里的代码必须**真的能跑**。
+  # 这一项抓的是「文档漂移」——最容易发生、最难发现。
+  # ============================================================
+  doctest:
+    name: doc tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [store, view, agg, engine, sim, mincore]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+      - name: cargo test --doc
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo test --doc
+
+  # ============================================================
+  # clippy + fmt：风格与 lint 门禁。
+  # ============================================================
+  lint:
+    name: lint / ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [store, view, agg, engine, sim, exp, mincore]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+          components: clippy, rustfmt
+      - name: cargo fmt --check
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo fmt --check
+      - name: cargo clippy
+        working-directory: crates/${{ matrix.crate }}
+        # exp 有 21 个一次性实验 bin（约 46 条历史警告），本地 verify-all.ps1 对它们
+        # 只卡 lib + 两个集成测试；CI 必须与本地口径一致，否则「本地绿、CI 红」。
+        run: |
+          if [ "${{ matrix.crate }}" = "exp" ]; then
+            cargo clippy --lib --test runtime --test parity -- -D warnings
+          else
+            cargo clippy --all-targets -- -D warnings
+          fi
+
+  # ============================================================
+  # 跨平台逐位一致：这是本库**最值钱的性质**，必须每次 CI 都验证。
+  # native x86_64 与 wasm32 必须给出逐位相同的 f32 位模式。
+  # ============================================================
+  wasm-parity:
+    name: wasm32 bit-parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: build wasm32 (lib → .wasm)
+        working-directory: tools/wasm-smoke
+        # 只编 lib：cdylib 才会产出 .wasm 供 run-compare.mjs 读取
+        run: cargo build --release --lib --target wasm32-unknown-unknown
+      - name: build native (bin)
+        working-directory: tools/wasm-smoke
+        run: cargo build --release --bin tm_wasm_smoke_cli
+      - name: run native and dump
+        working-directory: tools/wasm-smoke
+        # 二进制名以 Cargo.toml 为准（bin 名是 tm_wasm_smoke_cli）
+        run: ./target/release/tm_wasm_smoke_cli > native.txt
+      - name: compare wasm32 vs native
+        working-directory: tools/wasm-smoke
+        run: node run-compare.mjs native.txt
+
+      # ---------- mincore 的第二套对拍（2739 个 f32 位模式 + 12 张定长编码快照） ----------
+      - name: build wasm32 (mincore lib → .wasm)
+        working-directory: tools/mincore-wasm
+        run: cargo build --release --lib --target wasm32-unknown-unknown
+      - name: build native (mincore bin)
+        working-directory: tools/mincore-wasm
+        run: cargo build --release --bin mc_wasm_cli
+      - name: golden standard freshness (committed native.txt must match a real run)
+        working-directory: tools/mincore-wasm
+        # native.txt 入库为金标准。若它是陈旧的，说明有人改了内核却忘了更新金标准。
+        run: |
+          set -eu
+          ./target/release/mc_wasm_cli > /tmp/native_now.txt
+          if ! cmp -s native.txt /tmp/native_now.txt; then
+            echo '::error file=tools/mincore-wasm/native.txt::golden file is stale — regenerate with: ./target/release/mc_wasm_cli > native.txt'
+            diff <(head -c 2000 native.txt) <(head -c 2000 /tmp/native_now.txt) || true
+            exit 1
+          fi
+          echo 'golden native.txt is fresh'
+      - name: determinism self-check (run native twice, must be byte-identical)
+        working-directory: tools/mincore-wasm
+        run: |
+          set -eu
+          ./target/release/mc_wasm_cli > /tmp/native_a.txt
+          ./target/release/mc_wasm_cli > /tmp/native_b.txt
+          cmp /tmp/native_a.txt /tmp/native_b.txt
+          echo 'native is deterministic across runs'
+      - name: compare wasm32 vs native (mincore)
+        working-directory: tools/mincore-wasm
+        run: node run-compare.mjs native.txt
+
+  # ============================================================
+  # 零依赖守卫：本库刻意保持零外部依赖（供应链攻击面最小化）。
+  # 任何人在 [dependencies] 里加了第三方 crate，这一项会红。
+  # ============================================================
+  no-external-deps:
+    name: zero-dependency guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: assert no registry dependencies
+        run: |
+          set -eu
+          fail=0
+          # 扫描所有 Cargo.toml 的 [dependencies] 段。
+          # 允许仓内 path 依赖（例如 tm_engine 依赖 tm_store/view/agg）；
+          # 只禁止**外部**（registry / git / version）依赖。
+          # 扫描范围必须包含 tools/* —— wasm 辅助 crate 最容易偷偷引入外部依赖。
+          for f in crates/*/Cargo.toml Cargo.toml tools/*/Cargo.toml; do
+            [ -f "$f" ] || continue
+            # 逐行状态机：只用 grep/sed，不依赖 awk（ubuntu-latest 都有）
+            in_deps=0
+            while IFS= read -r line; do
+              case "$line" in
+                *"[dependencies]") in_deps=1; continue ;;
+                *"["*)            in_deps=0; continue ;;
+              esac
+              if [ "$in_deps" = 1 ]; then
+                # 去掉行尾空白后判断：空行与注释忽略
+                trimmed=$(printf '%s' "$line" | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//')
+                case "$trimmed" in
+                  ''|'#'*) continue ;;
+                esac
+                # 含 path = 的是仓内依赖，合法
+                case "$trimmed" in
+                  *"path = "*) continue ;;
+                esac
+                echo "::error file=$f::EXTERNAL dependency: $trimmed"
+                fail=1
+              fi
+            done < "$f"
+          done
+          if [ "$fail" -eq 0 ]; then
+            echo "OK: zero external dependencies (all deps are in-repo path deps)"
+          fi
+          exit $fail

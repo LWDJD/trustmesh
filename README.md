@@ -85,18 +85,19 @@ cd crates/engine && cargo run --example quickstart
 
 ## 结构
 
-六个**互相独立、零外部依赖**的 crate，每个都是自己的 workspace：
+七个**互相独立、零外部依赖**的 crate，每个都是自己的 workspace：
 
 | crate | 职责 | 测试 |
 |---|---|---:|
 | [`tm_store`](crates/store) | 账户表、正分清单、轮次抽样 + 退避、状态导出 | 157 |
 | [`tm_view`](crates/view) | Count Sketch 定长压缩观点（2048×5 f32 = 40 KB） | 51 |
 | [`tm_agg`](crates/agg) | 指数衰减、聚合（Mean/Median/WeightedMedian/Trimmed）、β 混合 | 63 |
-| [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 199 |
+| [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 206 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
+| [`tm_mincore`](crates/mincore) | **最小反女巫内核**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍。**5 项工程能力已全部补齐**（快照 / 资源上限 / cap 自描述 / 性能基准 / 编码器性质），详见 [`缺口进度`](审计/mincore缺口进度.md)；但**仍不建议现在替换 `tm_engine`**（它缺 badlist 与预算接口），见 [`威胁模型` §8.4.5](审计/威胁模型.md) | 268 |
 
-能力矩阵 **687 passed / 0 failed / 1 ignored**（七个 workspace）。
+能力矩阵 **962 passed / 0 failed / 6 ignored**（八个 workspace：七个 crate + 根 v1.0）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 
@@ -153,7 +154,7 @@ cd crates/exp   && cargo test
 ~~~
 
 ⚠️ **不要只在根目录跑 `cargo test`**——根目录是 v1.0 旧代码，只有 58 条测试。
-上面六个 crate 是独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
+上面七个 crate 是独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
 
 ### wasm32 逐位对拍
 
@@ -164,10 +165,31 @@ cd tools\wasm-smoke
 
 证明**整个引擎**（不是某个纯函数）在 wasm32 与 native 上给出逐位相同的声望值。
 
+## 持续集成
+
+CI 配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，7 个 job：
+
+| job | 内容 |
+|---|---|
+| `test` | 七个 crate 各自 `cargo test`（矩阵） |
+| `test-legacy` | 根 v1.0 workspace 的测试 |
+| `doctest` | 各 crate 的文档测试 |
+| `lint` | `clippy -D warnings` + `cargo fmt --check` |
+| `wasm-parity` | **两套** wasm32 vs native 逐位对拍（engine + mincore） |
+| `no-external-deps` | 只允许 `path =` 依赖（零外部依赖纪律） |
+
+> **注意：本仓库的本地历史里**不含** `.github/workflows/` 下的文件。**
+> 原因：GitHub 要求推送带 workflow 文件的 ref 时，token 必须有 `workflow` scope；
+> 而 OAuth App 授权（`gho_` 开头）的 scope 集合是 App 自己申请的，用户改不了。
+> 所以 CI 文件由 **GitHub 网页上传**，历史由网页合并 —— 两边的 push 都不会被拒。
+
+> 如果你要改 CI：直接在网页上编辑 `.github/workflows/ci.yml`，不要在本地提交它。
+> 本地想验证 CI 里那些断言：`pwsh -File verify-all.ps1`（内容等价，且更严格）。
+
 ## 许可
 
 MIT。见 [LICENSE](LICENSE)。
 
 ---
 
-**最后更新**：2026-11-16。能力矩阵与威胁模型数字均来自 P0 修复后的 **16 seed** 真引擎实测。
+**最后更新**：2026-11-19。能力矩阵含 mincore 的 268 个测试；威胁模型数字来自 P0 修复后的 **16 seed** 真引擎实测。

@@ -106,6 +106,8 @@
 //! 完全一样」这种 `CompressedView::decode` 抓不到的情形（靠快照里的参数指纹挡）。
 //! 格式细节见 `src/snapshot.rs` 的模块文档。
 
+#![forbid(unsafe_code)]
+
 mod badlist;
 pub mod criteria;
 mod snapshot;

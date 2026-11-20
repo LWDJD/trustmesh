@@ -2,14 +2,15 @@
 #
 # 用法：  .\verify-all.ps1
 #
-# 这个脚本存在的原因：本仓库是**六个独立 workspace**（store/view/agg/engine/sim/exp）+ 根 workspace，
+# 这个脚本存在的原因：本仓库是**七个独立 workspace**（store/view/agg/engine/sim/exp/mincore）+ 根 workspace，
 # 每个 crate 都要单独 cargo test。新人不知道这个结构就会只跑根目录的 58 条测试然后以为全绿了。
 #
 # 检查项：
 #   1. 单元/集成测试（七个 workspace 各自 cargo test）
 #   2. 文档测试（cargo test --doc）
 #   3. clippy（库与测试零警告；exp 的历史实验 bin 不强制）
-#   4. wasm32 逐位对拍（tools/wasm-smoke）
+#      七个 crate 逐个跑，mincore 也进来了
+#   4. wasm32 逐位对拍（tools/wasm-smoke + tools/mincore-wasm）
 #
 # 退出码：0 = 全绿；非 0 = 有失败项（并打印是哪一项）。
 #
@@ -23,7 +24,7 @@ $env:TEMP = $env:TMP
 if (-not (Test-Path -LiteralPath $env:TMP)) { New-Item -ItemType Directory -Path $env:TMP -Force | Out-Null }
 
 $script:failed = @()
-$crates = @('store', 'view', 'agg', 'engine', 'sim', 'exp')
+$crates = @('store', 'view', 'agg', 'engine', 'sim', 'exp', 'mincore')
 
 function Report($name, $ok, $detail) {
     if ($ok) {
@@ -84,6 +85,10 @@ foreach ($c in $crates) {
             # exp 只卡 lib + 两个集成测试。那 21 个实验 bin 是一次性脚本，
             # 里面有 46 条历史警告（未读字段、过时变量），改它们属于「重跑实验的人」的活。
             $out = (cargo clippy --lib --test runtime --test parity 2>&1 | Out-String)
+        } elseif ($c -eq 'mincore') {
+            # mincore 的 lib + tests + doctest 严格零警告；两个对照实验 bin（a12_compare /
+            # a12_perf）在 2026-11-18 已被清到零，所以这里也用 --all-targets。
+            $out = (cargo clippy --all-targets 2>&1 | Out-String)
         } else {
             $out = (cargo clippy --all-targets 2>&1 | Out-String)
         }
@@ -105,11 +110,22 @@ foreach ($c in $crates) {
 }
 Write-Host ""
 
-Write-Host "[5/5] wasm32 逐位对拍" -ForegroundColor Cyan
+Write-Host "[5/5] wasm32 逐位对拍（engine + mincore 两套）" -ForegroundColor Cyan
+# engine 的对拍：tools/wasm-smoke/run-all.ps1
 $wasm = Join-Path $root 'tools/wasm-smoke/run-all.ps1'
 $out = (& $wasm 2>&1 | Out-String)
 $ok = ($LASTEXITCODE -eq 0)
-Report 'wasm32 vs native' $ok ($(if ($ok) { 'IDENTICAL' } else { 'DIFFERS' }))
+Report 'wasm32 vs native (engine)' $ok ($(if ($ok) { 'IDENTICAL' } else { 'DIFFERS' }))
+
+# mincore 的对拍：tools/mincore-wasm/run-all.ps1（2026-11-18 新增）
+$wasm2 = Join-Path $root 'tools/mincore-wasm/run-all.ps1'
+if (Test-Path -LiteralPath $wasm2) {
+    $out = (& $wasm2 2>&1 | Out-String)
+    $ok = ($LASTEXITCODE -eq 0)
+    Report 'wasm32 vs native (mincore)' $ok ($(if ($ok) { 'IDENTICAL' } else { 'DIFFERS' }))
+} else {
+    Write-Host '  [SKIP] tools/mincore-wasm 不存在' -ForegroundColor Yellow
+}
 Write-Host ""
 
 if ($script:failed.Count -eq 0) {

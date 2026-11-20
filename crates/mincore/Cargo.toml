@@ -1,0 +1,42 @@
+[package]
+name = "tm_mincore"
+version = "0.1.0"
+edition = "2021"
+description = "最小反女巫内核原型：正分清单 + 轮次位图均匀抽样 + 定长稀疏表 + 精确归一化"
+license = "MIT"
+publish = false
+
+# 独立 workspace 根：本 crate 自带路径依赖，独立构建（与 tm_exp 同一模式）。
+[workspace]
+
+# 生产代码（src/lib.rs 及其模块）只用 std，不 use 下面任何一个 crate。
+# 下面几个**只被 src/bin/ 下的对照实验**使用：它们提供同一张社会图（tm_sim）
+# 和现行实现（tm_engine / tm_view / tm_store），用来做正面比较。
+[dependencies]
+tm_sim = { path = "../sim" }
+tm_engine = { path = "../engine" }
+tm_view = { path = "../view" }
+tm_store = { path = "../store" }
+
+[lib]
+name = "tm_mincore"
+path = "src/lib.rs"
+
+[[bin]]
+name = "a12_compare"
+path = "src/bin/a12_compare.rs"
+
+[[bin]]
+name = "a12_perf"
+path = "src/bin/a12_perf.rs"
+
+# 性能基准：手写 main，零外部依赖（本仓库纪律：不引 criterion / divan / iai）。
+# 运行：cargo run --release --bench bench -- all
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true

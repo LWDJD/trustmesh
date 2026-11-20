@@ -165,6 +165,25 @@ cd tools\wasm-smoke
 
 证明**整个引擎**（不是某个纯函数）在 wasm32 与 native 上给出逐位相同的声望值。
 
+## 持续集成
+
+CI 配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，7 个 job：
+
+| job | 内容 |
+|---|---|
+| `test` | 七个 crate 各自 `cargo test`（矩阵） |
+| `test-legacy` | 根 v1.0 workspace 的测试 |
+| `doctest` | 各 crate 的文档测试 |
+| `lint` | `clippy -D warnings` + `cargo fmt --check` |
+| `wasm-parity` | **两套** wasm32 vs native 逐位对拍（engine + mincore） |
+| `no-external-deps` | 只允许 `path =` 依赖（零外部依赖纪律） |
+
+> **注意：这个文件必须通过 GitHub 网页上传，不要试图从本地 `git push` 新建它。**
+> 如果你的 push token 是 OAuth App 授权（`gho_` 开头）或没有 `workflow` scope 的 PAT，
+> GitHub 会**整体拒绝这个 ref**（`refusing to allow an OAuth App to create or update workflow`）。
+> 这时本地历史里**不应该**包含这个文件 —— 见 `交接文档.md` 的说明。
+
+
 ## 许可
 
 MIT。见 [LICENSE](LICENSE)。

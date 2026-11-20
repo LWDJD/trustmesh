@@ -174,17 +174,20 @@ CI 配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，7 个 job�
 | `test` | 七个 crate 各自 `cargo test`（矩阵） |
 | `test-legacy` | 根 v1.0 workspace 的测试 |
 | `doctest` | 各 crate 的文档测试 |
-| `lint` | `clippy -D warnings` + `cargo fmt --check` |
+| `lint` | `cargo fmt --check` + `clippy -- -D warnings`（**`exp` 只卡 lib + 两个集成测试**，那 21 个一次性实验 bin 在本地同样豁免） |
 | `wasm-parity` | **两套** wasm32 vs native 逐位对拍（engine + mincore） |
 | `no-external-deps` | 只允许 `path =` 依赖（零外部依赖纪律） |
 
-> **注意：本仓库的本地历史里**不含** `.github/workflows/` 下的文件。**
-> 原因：GitHub 要求推送带 workflow 文件的 ref 时，token 必须有 `workflow` scope；
-> 而 OAuth App 授权（`gho_` 开头）的 scope 集合是 App 自己申请的，用户改不了。
-> 所以 CI 文件由 **GitHub 网页上传**，历史由网页合并 —— 两边的 push 都不会被拒。
-
-> 如果你要改 CI：直接在网页上编辑 `.github/workflows/ci.yml`，不要在本地提交它。
-> 本地想验证 CI 里那些断言：`pwsh -File verify-all.ps1`（内容等价，且更严格）。
+> **改 CI 时注意 `workflow` scope。**
+> GitHub 要求推送「引入或修改」`.github/workflows/` 下文件的 ref 时，token 必须有 `workflow` scope。
+> 若你的 token 是 OAuth App 授权（`gho_` 开头），其 scope 集合由该 App 自己申请，用户改不了 ⟹ push 会被整体拒绝。
+>
+> **两个可行做法：**
+> 1. 在 GitHub 网页上直接编辑 `.github/workflows/ci.yml`（网页走的是你自己的登录态，不受 token scope 限制）；
+> 2. 若本地必须改它，用 SSH remote 或带 `workflow` scope 的 classic PAT 推送。
+>
+> 内容不变时仍有例外：GitHub 允许提交**与其它分支上同名同内容**的 workflow 文件，无需 `workflow` scope。
+> 本地验证 CI 断言用 `pwsh -File verify-all.ps1`（内容等价，且更严格）。
 
 ## 许可
 

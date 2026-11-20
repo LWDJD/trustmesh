@@ -178,11 +178,13 @@ CI 配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，7 个 job�
 | `wasm-parity` | **两套** wasm32 vs native 逐位对拍（engine + mincore） |
 | `no-external-deps` | 只允许 `path =` 依赖（零外部依赖纪律） |
 
-> **注意：这个文件必须通过 GitHub 网页上传，不要试图从本地 `git push` 新建它。**
-> 如果你的 push token 是 OAuth App 授权（`gho_` 开头）或没有 `workflow` scope 的 PAT，
-> GitHub 会**整体拒绝这个 ref**（`refusing to allow an OAuth App to create or update workflow`）。
-> 这时本地历史里**不应该**包含这个文件 —— 见 `交接文档.md` 的说明。
+> **注意：本仓库的本地历史里**不含** `.github/workflows/` 下的文件。**
+> 原因：GitHub 要求推送带 workflow 文件的 ref 时，token 必须有 `workflow` scope；
+> 而 OAuth App 授权（`gho_` 开头）的 scope 集合是 App 自己申请的，用户改不了。
+> 所以 CI 文件由 **GitHub 网页上传**，历史由网页合并 —— 两边的 push 都不会被拒。
 
+> 如果你要改 CI：直接在网页上编辑 `.github/workflows/ci.yml`，不要在本地提交它。
+> 本地想验证 CI 里那些断言：`pwsh -File verify-all.ps1`（内容等价，且更严格）。
 
 ## 许可
 

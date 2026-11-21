@@ -171,6 +171,7 @@ CI 配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，7 个 job�
 
 | job | 内容 |
 |---|---|
+| `changes` | **变更分类**：只有 `*.md` / `LICENSE` / `.gitignore` 改动时，跳过下面所有重活（这一项永远运行，可作分支保护的必需检查） |
 | `test` | 七个 crate 各自 `cargo test`（矩阵） |
 | `test-legacy` | 根 v1.0 workspace 的测试 |
 | `doctest` | 各 crate 的文档测试 |

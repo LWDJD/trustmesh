@@ -33,8 +33,8 @@
 //!
 //! 用法：cd crates/engine && cargo run --release --example unbounded_index
 
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
-use tm_view::ViewParams;
 
 fn key(name: &str) -> [u8; 32] {
     let mut k = [0u8; 32];

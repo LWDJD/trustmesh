@@ -18,8 +18,8 @@
 //! 如果哪天有人把 `reading_of` 改回「先除后夹」或改回「分母带 clamp 但分子不带」，
 //! 这些测试会立刻红。
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];

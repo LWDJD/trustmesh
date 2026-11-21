@@ -2,7 +2,7 @@
 //!
 //! 运行：cargo run --release --example noise_report
 
-use tm_view::{AccountKey, CompressedView, ViewParams, XorShift64};
+use tm_engine::view::{AccountKey, CompressedView, ViewParams, XorShift64};
 
 fn pairs(n: usize, seed: u64) -> Vec<(AccountKey, f32)> {
     let mut rng = XorShift64::new(seed);

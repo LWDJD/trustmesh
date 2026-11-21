@@ -12,8 +12,8 @@
 use std::collections::BTreeSet;
 
 #[allow(unused_imports)]
-use tm_store::MAX_SCORE;
-use tm_store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler};
+use tm_engine::store::MAX_SCORE;
+use tm_engine::store::{AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler};
 
 /// 构造互不相同的测试公钥（只动前 4 字节，其余留 0）。
 fn key(n: u32) -> AccountKey {

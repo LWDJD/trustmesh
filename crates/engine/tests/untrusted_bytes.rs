@@ -12,11 +12,11 @@
 //! 2. **绝不分配超过输入规模的内存**（防「一个 20 字节的输入声称有 10^9 个元素」的放大器）；
 //! 3. **解码出来的东西要么完全合法，要么直接 None**（不接受「部分有效」）。
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::EngineSnapshot;
-use tm_view::{CompressedView, ViewParams};
 
 /// xorshift64 伪随机字节源（与库内同算法，但这里是测试专用副本，
-/// 刻意不用 `tm_store::Rng` —— 否则测试与被测代码共用实现，出问题会一起错）。
+/// 刻意不用 `tm_engine::store::Rng` —— 否则测试与被测代码共用实现，出问题会一起错）。
 struct ByteRng(u64);
 
 impl ByteRng {

@@ -6,5 +6,7 @@ description = "trustmesh 的衰减与聚合：指数衰减、四种聚合口径�
 license = "MIT"
 publish = false
 
-# 刻意不声明任何依赖：离线环境只用 std。
+# 本 crate 现在是**兼容层空壳**，内容已合并进 tm_engine。
 [dependencies]
+# 兼容层：内容已合并进 tm_engine
+tm_engine = { path = "../engine" }

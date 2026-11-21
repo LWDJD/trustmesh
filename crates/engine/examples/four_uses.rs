@@ -27,9 +27,9 @@
 
 use std::collections::BTreeMap;
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
-use tm_view::ViewParams;
 
 type Key = [u8; 32];
 

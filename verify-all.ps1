@@ -24,7 +24,10 @@ $env:TEMP = $env:TMP
 if (-not (Test-Path -LiteralPath $env:TMP)) { New-Item -ItemType Directory -Path $env:TMP -Force | Out-Null }
 
 $script:failed = @()
-$crates = @('store', 'view', 'agg', 'engine', 'sim', 'exp', 'mincore')
+# 2026-11-21 合并后：store / view / agg 已并入 engine，只剩兼容层空壳。
+# 它们不再有测试（测试已搬进 engine/tests），所以从测试列表里去掉，只保留编译检查。
+$crates = @('engine', 'sim', 'exp', 'mincore')
+$shims  = @('store', 'view', 'agg')
 
 function Report($name, $ok, $detail) {
     if ($ok) {
@@ -46,6 +49,14 @@ Write-Host "仓库根：$root" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "[1/5] 测试" -ForegroundColor Cyan
+# 兼容层空壳：只验证能编译（它们没有测试）
+foreach ($c in $shims) {
+    Push-Location -LiteralPath (Join-Path $root ("crates/" + $c))
+    try {
+        $null = (cargo check 2>&1 | Out-String)
+        Report ("$c (shim)") ($LASTEXITCODE -eq 0) "compiles"
+    } finally { Pop-Location }
+}
 foreach ($c in $crates) {
     Push-Location -LiteralPath (Join-Path $root ("crates/" + $c))
     try {

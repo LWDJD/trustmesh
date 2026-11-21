@@ -13,11 +13,11 @@
 //! * [AggMode::WeightedMedian]：撒谎者权重**严格过半**时翻到 1.0，50% 及以下仍是 0
 //!   （下侧中位数，平分时判给多数派）。
 //! * [AggMode::Trimmed]：只有 p 不小于撒谎者的权重占比时才完全免疫；
-//!   而 p 被 [tm_agg::MAX_TRIM] 限制在 0.5 以下，所以撒谎者权重过半时它也救不了。
+//!   而 p 被 [tm_engine::agg::MAX_TRIM] 限制在 0.5 以下，所以撒谎者权重过半时它也救不了。
 //!
 //! 看表格：`cargo test --test sybil_report -- --nocapture --test-threads=1`
 
-use tm_agg::{aggregate, combine, decay, AggMode};
+use tm_engine::agg::{aggregate, combine, decay, AggMode};
 
 /// 诚实来源的个数（再加 1 个撒谎者，共 20 个来源）。
 const HONEST: usize = 19;
@@ -440,7 +440,7 @@ fn trimmed_immunity_requires_p_at_least_the_attacker_share() {
     // p 被 MAX_TRIM 限制在 0.5 以下，所以占比过半时 Trimmed 也救不了
     let w = liar_weight_for_share(0.6);
     let items = scenario(w);
-    let r = aggregate(&items, AggMode::Trimmed(tm_agg::MAX_TRIM)).unwrap();
+    let r = aggregate(&items, AggMode::Trimmed(tm_engine::agg::MAX_TRIM)).unwrap();
     assert!(
         r > 0.01,
         "占比 60%、p 取到上限时截尾均值仍应被污染，实际 {r}"
@@ -448,7 +448,7 @@ fn trimmed_immunity_requires_p_at_least_the_attacker_share() {
     println!();
     println!(
         "注意：p 被 MAX_TRIM（{:.7}）卡在 0.5 以下，所以撒谎者权重过半后，Trimmed 也救不回来。",
-        tm_agg::MAX_TRIM
+        tm_engine::agg::MAX_TRIM
     );
 }
 

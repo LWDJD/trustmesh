@@ -21,8 +21,8 @@
 //! 而调用方本来也分不清「成功 / 失败」（失败走的是另一个方法 on_view_failed）。
 //! 可观测性通过 rejected_count() 单独提供，stats() 的四元组一个字节都不变。
 
+use tm_engine::view::{AccountKey, CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig, Rejection};
-use tm_view::{AccountKey, CompressedView, ViewParams};
 
 fn key(i: u32) -> AccountKey {
     let mut k = [0u8; 32];

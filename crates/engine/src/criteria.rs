@@ -45,7 +45,7 @@
 /// β 是 `f32`，`0.3f32` 的精确值是 `0.30000001192…`。
 ///
 /// 所以 `1/β` 不能写成 `10.0/3.0`——那是 f64 的 10/3，与 β 的真实倒数差最后几位。
-/// 这里用 `1.0 / 0.3f32 as f64` 保证与 [crate::EngineConfig::beta] 的默认值**逐位对齐**。
+/// 这里用 `1.0 / 0.3f32 as f64` 保证与 [crate::runtime::EngineConfig::beta] 的默认值**逐位对齐**。
 pub const BETA_DEFAULT: f32 = 0.3;
 
 /// S3 的解析地板 = `1/β`。
@@ -393,7 +393,7 @@ mod tests {
         // 否则算出来的地板会和引擎的真实行为对不上。
         assert_eq!(
             BETA_DEFAULT.to_bits(),
-            crate::EngineConfig::default().beta.to_bits()
+            crate::runtime::EngineConfig::default().beta.to_bits()
         );
     }
 }

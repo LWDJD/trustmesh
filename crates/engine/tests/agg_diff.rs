@@ -5,7 +5,7 @@
 //! * 截尾均值用等权解析解 + 分位数黎曼和两种方式逼近；
 //! * 随机数据用自带的 xorshift64 生成（不引入任何外部 crate）。
 
-use tm_agg::{aggregate, decay, AggMode, MAX_TRIM};
+use tm_engine::agg::{aggregate, decay, AggMode, MAX_TRIM};
 
 // ---------------------------------------------------------------------------
 // 自带的 xorshift64：测试用随机源，不依赖外部 crate

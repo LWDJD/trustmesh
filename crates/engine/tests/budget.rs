@@ -4,10 +4,10 @@
 //! 衰减基准 = `last_check`），纯算术部分由 `src/budget.rs` 的单元测试覆盖。
 //! 每条用例的注释写明「它在防什么回归」。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_engine::budget::{self, BudgetVerdict};
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn params() -> ViewParams {
     ViewParams {

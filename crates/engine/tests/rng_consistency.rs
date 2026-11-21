@@ -6,8 +6,8 @@
 //!
 //! | 实现 | 位置 | 用途 | 独有能力 |
 //! |---|---|---|---|
-//! | `tm_engine::view::XorShift64` | `crates/view/src/rng.rs` | `noise_floor` 造全新 32 字节 key | `next_key()` |
-//! | `tm_engine::store::Rng` | `crates/store/src/lib.rs` | 抽样顺序、退避加权 | `from_state()` / `next_below()` |
+//! | `tm_engine::view::XorShift64` | `crates/engine/src/view/rng.rs` | `noise_floor` 造全新 32 字节 key | `next_key()` |
+//! | `tm_engine::store::Rng` | `crates/engine/src/store/mod.rs` | 抽样顺序、退避加权 | `from_state()` / `next_below()` |
 //!
 //! 两套**不能合并**，因为 `tm_view` 是更底层的 crate（`tm_store` 不能依赖它也不该被它依赖），
 //! 而 `tm_engine::store::Rng` 必须能序列化状态（快照要精确恢复下一个随机数）。

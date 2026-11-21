@@ -1,7 +1,34 @@
 # 单 crate 重构方案（store/view/agg → engine）
 
-> 2026-11-21。**本文只做分析与方案，不含任何代码改动。**
+> 2026-11-21 22:00 写方案，22:20 执行完毕（提交 `09cc80c`）。
+> **六条守卫全部通过，962 → 963 passed / 0 failed / 6 ignored（+1 是新增的 crate 级示例）。**
 > 目标：用户只需要依赖一个 crate，同时**不损失任何能力**。
+
+---
+
+## 执行结果（后记，2026-11-21 22:20）
+
+| 守卫 | 判据 | 结果 |
+|---|---|---|
+| 1. 测试总数 | 454 条非 doctest 一条不丢 | ✅ 139+50+60+205 = 454 全部在 engine |
+| 2. 公开 API | 52 个 pub 项仍可达 | ✅ `tests/public_api_snapshot.rs` 逐项 import |
+| 3. wasm 对拍 | engine + mincore IDENTICAL | ✅ 两套都 IDENTICAL |
+| 4. 快照格式 | MAGIC / VERSION=2 不变 | ✅ 未动 |
+| 5. 确定性 | rng_consistency + S6 | ✅ 全绿，两套 RNG 仍是两套 |
+| 6. 端到端 | multinode 输出逐位相同 | ✅ 6 个场景数值全同（仅 wall clock 15.3s→15.4s 不同） |
+
+**实际花费**：约 55 分钟（估 4 小时）。
+
+**遇到的 4 个真问题**（方案没预见到的）：
+1. `crate::` 前缀重复替换 → `use crate::crate::badlist`（E0433「crate in paths can only be used in start position」）
+2. `snapshot.rs` 访问 `Engine` 的 14 个私有字段 → 全部改 `pub(crate)`（原本同 crate 在 lib.rs，现在跨模块）
+3. 22 个 **doctest** 用旧 crate 名 → 全改成 `tm_engine::store::` 等
+4. 空壳的 doctest 里写 `~~~rust` 会被编译 → 改 `~~~text`
+
+---
+
+## 原始方案（执行前的版本）
+
 
 ---
 

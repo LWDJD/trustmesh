@@ -1,8 +1,8 @@
 //! 真实多节点运行时 × 最终归一化：每节点一个 Engine，输出总和恒为 1 的信任分布。
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, SimConfig};
-use tm_view::ViewParams;
 
 fn key(i: usize) -> [u8; 32] {
     let mut k = [0u8; 32];
@@ -72,7 +72,7 @@ fn run(kind: AttackKind, name: &str) {
     let k = 12usize;
     let rounds = 4usize;
     for r in 0..rounds {
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n];
         for &a in &alive {
             if let Some(e) = &nodes[a] {
                 views[a] = Some(e.export_view(r as u64));

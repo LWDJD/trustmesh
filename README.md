@@ -94,12 +94,11 @@ cd crates/engine && cargo run --example quickstart
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
 | [`tm_mincore`](crates/mincore) | **最小反女巫内核**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍。**5 项工程能力已全部补齐**（快照 / 资源上限 / cap 自描述 / 性能基准 / 编码器性质），详见 [`缺口进度`](审计/mincore缺口进度.md)；但**仍不建议现在替换 `tm_engine`**（它缺 badlist 与预算接口），见 [`威胁模型` §8.4.5](审计/威胁模型.md) | 268 |
 
-另有三个**兼容层空壳** crate（[`tm_store`](crates/store) / [`tm_view`](crates/view) / [`tm_agg`](crates/agg)）：
-它们的内容已于 2026-11-21 合并进 `tm_engine` 的 `store` / `view` / `agg` 三个模块，
-空壳只做 `pub use tm_engine::X::*` 转发，好让既有 `use tm_store::AccountTable;` 路径继续可用。
-依赖方向单向（空壳 → engine），不成环。
+原先是四个独立 crate（`tm_store` / `tm_view` / `tm_agg` / `tm_engine`），2026-11-21 合并进
+`tm_engine` 的四个模块（`store` / `view` / `agg` / `runtime`）。三个原 crate 目录**已删除**——
+本库尚未发布过任何版本，没有依赖旧路径的外部用户，留兼容层只会变成未来的包袱。
 
-能力矩阵 **963 passed / 0 failed / 6 ignored**（五个 workspace：四个 crate + 根 v1.0，另三个空壳只做编译检查）。
+能力矩阵 **963 passed / 0 failed / 6 ignored**（五个 workspace：四个 crate + 根 v1.0）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 
@@ -142,7 +141,7 @@ cd crates/engine && cargo run --example quickstart
 .\verify-all.ps1
 ~~~
 
-它会跑五个 workspace 的测试、文档测试、clippy、以及 wasm32 逐位对拍（外加三个兼容层空壳的编译检查），最后打印汇总。
+它会跑五个 workspace 的测试、文档测试、clippy、以及 wasm32 逐位对拍，最后打印汇总。
 
 **手动跑某个 crate**（每个 crate 是独立 workspace，要分别 cd 进去）：
 
@@ -154,7 +153,7 @@ cd crates/mincore && cargo test
 ~~~
 
 ⚠️ **不要只在根目录跑 `cargo test`**——根目录是 v1.0 旧代码，只有 58 条测试。
-上面四个 crate（+ 三个只做转发的兼容层空壳）是各自独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
+上面四个 crate 是各自独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
 
 ### wasm32 逐位对拍
 

@@ -40,10 +40,10 @@ use std::hint::black_box;
 use std::process::Command;
 use std::time::Instant;
 
+use tm_engine::view::{AccountKey, CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_mincore::{Acc, Config as CoreConfig, Node, SparseView, SLOT_BYTES, VIEW_OVERHEAD};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{AccountKey, CompressedView, ViewParams};
 
 // ══════════════════════════════ 采样与统计 ══════════════════════════════
 

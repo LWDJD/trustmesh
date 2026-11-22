@@ -37,10 +37,10 @@
 //!   d3_offline smoke      单格冒烟（p=50%, seed=11, 三模式）
 //!   d3_offline probe      只打衰减因子表
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, Life, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 const N_INIT: usize = 300;
 const STEPS: u64 = 400;

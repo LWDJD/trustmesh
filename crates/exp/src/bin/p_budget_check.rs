@@ -29,11 +29,11 @@
 
 use std::collections::BTreeMap;
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_engine::budget::{self, BudgetVerdict};
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::SimConfig;
-use tm_view::{CompressedView, ViewParams};
 
 /// 与 EngineConfig::default() 一致的半衰期（A10 的 H = 72h）。
 const H: u64 = 72;

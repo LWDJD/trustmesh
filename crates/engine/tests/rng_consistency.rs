@@ -9,8 +9,11 @@
 //! | `tm_engine::view::XorShift64` | `crates/engine/src/view/rng.rs` | `noise_floor` 造全新 32 字节 key | `next_key()` |
 //! | `tm_engine::store::Rng` | `crates/engine/src/store/mod.rs` | 抽样顺序、退避加权 | `from_state()` / `next_below()` |
 //!
-//! 两套**不能合并**，因为 `tm_view` 是更底层的 crate（`tm_store` 不能依赖它也不该被它依赖），
-//! 而 `tm_engine::store::Rng` 必须能序列化状态（快照要精确恢复下一个随机数）。
+//! 两套**不能合并**，因为**能力集不同**（2026-11-21 合并后它们同属一个 crate 的两个模块）：
+//! * `view::XorShift64` 有 [`next_key()`]（造全新 32 字节 key，噪声底采样用）；
+//! * `store::Rng` 有 `from_state()/state()`（快照要**精确恢复**下一个随机数）与 `next_below()`（拒绝采样）。
+//!
+//! 注意：两套的**输出序列逐位相同**，本文件第 1 条断言就是钉死这一点。
 //!
 //! 但**它们必须保持在算法上一致**——否则：
 //!

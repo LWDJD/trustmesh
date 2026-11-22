@@ -8,11 +8,8 @@ license = "MIT"
 [workspace]
 
 [dependencies]
-tm_sim   = { path = "../sim" }
-tm_view  = { path = "../view" }
-tm_agg   = { path = "../agg" }
-tm_store = { path = "../store" }
-tm_engine = { path = "../engine" }
+tm_sim    = { path = "../sim" }
+tm_engine = { path = "../engine" }   # store / view / agg 已并入 engine 的模块
 
 [profile.release]
 opt-level = 3

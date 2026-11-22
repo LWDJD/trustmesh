@@ -22,10 +22,10 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 // ---------------------------------------------------------------------------
 // 参数

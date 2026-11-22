@@ -17,6 +17,7 @@
 | 5. 确定性 | rng_consistency + S6 | ✅ 全绿，两套 RNG 仍是两套 |
 | 6. 端到端 | multinode 输出逐位相同 | ✅ 6 个场景数值全同（仅 wall clock 15.3s→15.4s 不同） |
 | 6b. 兼容层（额外验证） | 只写旧路径的 crate 能编译 | ✅ `use tm_store::AccountTable` / `tm_view::CompressedView` / `tm_agg::decay` 全部可用 |
+| **7. 后续：删掉兼容层** | 作者确认「还没发布过」 | ✅ 2026-11-22：三个空壳 crate 已删除，35 个仓内文件的 import 改到 `tm_engine::X::Y` |
 
 **实际花费**：约 55 分钟（估 4 小时）。
 

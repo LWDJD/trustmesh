@@ -33,10 +33,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 const N_INIT: usize = 300;
 const STEPS: usize = 400;

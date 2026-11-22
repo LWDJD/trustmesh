@@ -29,10 +29,10 @@
 //!   测的就不是传播口径）；
 //! * 比较点数 = n²（没有漏比）。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::SimConfig;
-use tm_view::{CompressedView, ViewParams};
 
 use tm_exp::{key_of, run_case_full, PropConfig};
 

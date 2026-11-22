@@ -67,10 +67,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 // ============================== 固定参数 ==============================
 

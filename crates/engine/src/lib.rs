@@ -23,10 +23,11 @@
 //! * [`AccountKey`] / [`Score`] 取 **store 版本**（类型与原 view/agg 版本完全相同，语义兼容）；
 //! * 需要 view 版本语义时用 [`view::AccountKey`]。
 //!
-//! ## 兼容性
+//! ## 命名说明
 //!
-//! 原 `tm_store` / `tm_view` / `tm_agg` 三个 crate 保留为空壳转发层，
-//! 所以既有 `use tm_store::AccountTable;` 路径**仍然可用**。
+//! 四个模块的内容原先是四个独立 crate（`tm_store` / `tm_view` / `tm_agg` / `tm_engine`），
+//! 2026-11-21 合并进本 crate。合并时**没有保留兼容层空壳**——本库尚未发布过任何版本，
+//! 不存在依赖旧路径的外部用户，留着空壳只是给未来的自己挖坑。
 //!
 //! ## 引擎本身不做任何 I/O
 //!

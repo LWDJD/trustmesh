@@ -193,7 +193,7 @@ impl Distribution {
 
 /// 指数衰减因子 `0.5^(dt / half_life)`。
 ///
-/// 边界与 [tm_agg::decay] 逐位一致（这里重写了一份，因为生产代码只允许 std）：
+/// 边界与 [tm_engine::agg::decay] 逐位一致（这里重写了一份，因为生产代码只允许 std）：
 /// `half_life == 0` 按 1 处理；`dt == 0` 精确返回 1.0；下溢时返回最小正 f32，
 /// 永不返回 0 / NaN / 负数。
 #[must_use]

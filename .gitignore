@@ -17,4 +17,5 @@ wt/*/crates/*/.tmp/
 Thumbs.db
 
 # wasm 对拍的 native 侧输出（run-compare.mjs 的输入，每次重新生成）
-native.txt
+# **限定到 wasm-smoke**：tools/mincore-wasm/native.txt 是入库的金标准，不能被忽略。
+/tools/wasm-smoke/native.txt

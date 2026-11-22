@@ -1,8 +1,8 @@
 //! 潜伏实验：异步多节点 × 离线-回归 × 观点陈旧
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, SimConfig};
-use tm_view::ViewParams;
 
 fn key(i: usize) -> [u8; 32] {
     let mut k = [0u8; 32];
@@ -78,7 +78,7 @@ fn run(cfg: SimConfig, rounds: u64, samples: usize) -> Out {
 
     for r in 0..=rounds {
         let now = r * tick;
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n];
         for &a in &alive {
             if online[a][r as usize] {
                 if let Some(e) = &nodes[a] {

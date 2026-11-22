@@ -99,7 +99,7 @@ use crate::view::{CompressedView, NoiseStats, ViewParams};
 
 use crate::runtime::{Engine, EngineConfig, StoredView};
 
-/// 快照格式的版本号（当前 = 1）。
+/// 快照格式的版本号（当前 = 2）。
 ///
 /// 版本号写在编码字节的第 8..12 字节：先读版本、再解析其余字段，
 /// 就是「自描述」。将来若要改布局，把版本号抬上去，旧 [EngineSnapshot::decode]

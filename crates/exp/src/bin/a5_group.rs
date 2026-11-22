@@ -13,10 +13,10 @@
 //!
 //! 输出全部是「前缀,列,列,...」的 UTF-8 行，方便脚本汇总；不写文件，不依赖外部 crate。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 const ROUND_LEN: u64 = 20;
 const SAMPLES: usize = 12;

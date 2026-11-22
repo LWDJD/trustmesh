@@ -14,10 +14,10 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::ViewParams;
 
 const N: usize = 300;
 const STEPS: usize = 400;
@@ -329,7 +329,7 @@ fn run_case(seed: u64, s: usize, p_target: f64, dormancy: f64, sleep: (u64, u64)
     let mut prev_on = vec![false; n];
     for r in 0..=ROUNDS {
         let t = r * (STEPS as u64 / ROUNDS);
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n];
         for &a in &alive {
             if online[a][r as usize] {
                 if let Some(e) = &nodes[a] {

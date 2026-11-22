@@ -3,9 +3,9 @@
 //!
 //! 这里断言的都是「真刀真枪」的性质，不是集中式近似。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(i: u8) -> [u8; 32] {
     let mut k = [0u8; 32];

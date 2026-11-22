@@ -81,9 +81,8 @@ jobs:
           echo "doc_only=$DOC_ONLY  run_full_ci=$CODE"
 
   # ============================================================
-  # 四个独立 workspace 各自跑测试。
+  # 四个独立 workspace 各自跑测试（store / view / agg 已于 2026-11-21 并入 engine）。
   # **不能**在根目录跑 `cargo test` 了事 —— 它们各自是自己的 workspace 根。
-  # 另三个兼容层空壳（store / view / agg）只做编译检查，见 shims job。
   # ============================================================
   test:
     name: test / ${{ matrix.crate }}
@@ -103,25 +102,7 @@ jobs:
         working-directory: crates/${{ matrix.crate }}
         run: cargo test --all-targets
 
-  # 兼容层空壳：store / view / agg 已并入 tm_engine，只剩 `pub use tm_engine::X::*` 转发。
-  # 它们没有测试，只验证能编译 —— 这保证旧 import 路径没断。
-  shims:
-    name: shims (compat layer)
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.96.0
-      - name: cargo check (store / view / agg)
-        run: |
-          for c in store view agg; do
-            ( cd "crates/$c" && cargo check )
-          done
-
-  # 根包的 v1.0 遗留代码单独测（作者要求保留，不参与新架构）
+# 根包的 v1.0 遗留代码单独测（作者要求保留，不参与新架构）
   test-legacy:
     name: test / trustmesh (v1.0)
     needs: changes

@@ -4,10 +4,10 @@
 //! 观点年龄真实增长（衰减生效）；回归节点做快速刷新。
 //!
 //! 网格：离线比例 p ∈ {30,50,70,90}% × 离线时长 D ∈ {72,216,720}h × 潜伏者 s ∈ {1,5,20}
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, SimConfig};
-use tm_view::ViewParams;
 
 const N: usize = 200;
 const STEPS: usize = 300;
@@ -146,7 +146,7 @@ fn run_world(dormancy: f64, d: u64, seed: u64, sleepers: usize, with_sleeper: bo
     let mut prev_on = vec![false; n];
     for r in 0..=ROUNDS {
         let now = r * (STEPS as u64 / ROUNDS);
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n];
         for &a in &alive {
             if online[a][r as usize] {
                 if let Some(e) = &nodes[a] {

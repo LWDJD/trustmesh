@@ -16,10 +16,10 @@
 //!   cargo run --release --bin l1_churn -- grid12          # 跑满 16 格 × 12 seed（压噪声）
 //!   cargo run --release --bin l1_churn -- cell 0.2 0.004  # 只跑一格（3 seed）
 //!   cargo run --release --bin l1_churn -- seed 0.2 0.004 11  # 单次运行（诊断）
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Life, SimConfig};
-use tm_view::ViewParams;
 
 const N_INIT: usize = 300;
 const STEPS: usize = 400;
@@ -265,7 +265,7 @@ fn run_one(join: f64, leave: f64, dormancy: f64, seed: u64, sleepers: f64) -> Ra
 
     for r in 0..=ROUNDS {
         let now = r * TICK;
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n];
         for &a in &alive {
             if online[a][r as usize] {
                 if let Some(e) = &nodes[a] {

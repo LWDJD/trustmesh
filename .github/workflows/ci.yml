@@ -81,7 +81,7 @@ jobs:
           echo "doc_only=$DOC_ONLY  run_full_ci=$CODE"
 
   # ============================================================
-  # 七个独立 workspace 各自跑测试。
+  # 四个独立 workspace 各自跑测试（store / view / agg 已于 2026-11-21 并入 engine）。
   # **不能**在根目录跑 `cargo test` 了事 —— 它们各自是自己的 workspace 根。
   # ============================================================
   test:
@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [store, view, agg, engine, sim, exp, mincore]
+        crate: [engine, sim, exp, mincore]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -102,7 +102,7 @@ jobs:
         working-directory: crates/${{ matrix.crate }}
         run: cargo test --all-targets
 
-  # 根包的 v1.0 遗留代码单独测（作者要求保留，不参与新架构）
+# 根包的 v1.0 遗留代码单独测（作者要求保留，不参与新架构）
   test-legacy:
     name: test / trustmesh (v1.0)
     needs: changes
@@ -128,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [store, view, agg, engine, sim, mincore]
+        crate: [engine, sim, mincore]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -149,7 +149,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [store, view, agg, engine, sim, exp, mincore]
+        crate: [engine, sim, exp, mincore]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

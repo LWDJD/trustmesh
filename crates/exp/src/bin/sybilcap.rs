@@ -1,5 +1,5 @@
 //! 影响力预算：来源打的人越多，每份越轻。能否限制"一个渗透点批量引入女巫"？
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_exp::{run_case_inject, view_params, PropConfig};
 use tm_sim::{AttackKind, Kind, SimConfig};
 

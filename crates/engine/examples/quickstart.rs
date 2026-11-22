@@ -17,8 +17,8 @@
 //! 库**不负责**：网络、文件、签名、限流、DDoS 防护、内容托管。
 //! 详细边界见仓库根目录的 `设计规格.md` §0.2。
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 /// 账户号。真实部署里它是公钥的 32 字节表示；这里用便于阅读的短名。
 type Key = [u8; 32];

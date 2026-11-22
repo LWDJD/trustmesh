@@ -1,6 +1,6 @@
 //! 噪声底实测：空视图、100/1000/10000 条写入，以及不同种子的量级一致性。
 
-use tm_view::{AccountKey, CompressedView, NoiseStats, ViewParams, XorShift64};
+use tm_engine::view::{AccountKey, CompressedView, NoiseStats, ViewParams, XorShift64};
 
 /// 生成 n 条 (key, score)，分数均匀落在 [0.1, 1.0]。
 fn pairs(n: usize, seed: u64) -> Vec<(AccountKey, f32)> {

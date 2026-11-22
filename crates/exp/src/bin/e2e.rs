@@ -1,5 +1,5 @@
 //! 影响力预算对全部攻击场景的效果。
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_exp::{mean_rep_from_honest, run_case, win_rate, PropConfig};
 use tm_sim::{AttackKind, SimConfig};
 

@@ -11,10 +11,10 @@
 //!
 //! 每轮对全部在线诚实观察者算一次完整 trust_distribution（归一化，总和恒为 1），
 //! 于是「声望」= 别人分给它的份额，且能拿到它在全体用户中的百分位。
-use tm_agg::{decay, AggMode};
+use tm_engine::agg::{decay, AggMode};
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, Life, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 const N_INIT: usize = 300;
 const STEPS: u64 = 400;

@@ -55,9 +55,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
+use tm_engine::view::{AccountKey, CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{AccountKey, CompressedView, ViewParams};
 
 // ─────────────────────────────────────────────────────────────────────────
 // 固化参数（报告里必须逐条抄一遍；任何「大致」都是错的）

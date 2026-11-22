@@ -92,14 +92,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use tm_store::{
+use crate::store::{
     AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler, Score, Time, MAX_SCORE,
 };
-use tm_view::{CompressedView, NoiseStats, ViewParams};
+use crate::view::{CompressedView, NoiseStats, ViewParams};
 
-use crate::{Engine, EngineConfig, StoredView};
+use crate::runtime::{Engine, EngineConfig, StoredView};
 
-/// 快照格式的版本号（当前 = 1）。
+/// 快照格式的版本号（当前 = 2）。
 ///
 /// 版本号写在编码字节的第 8..12 字节：先读版本、再解析其余字段，
 /// 就是「自描述」。将来若要改布局，把版本号抬上去，旧 [EngineSnapshot::decode]
@@ -687,7 +687,7 @@ fn valid_view_bytes(bytes: &[u8]) -> bool {
     if bytes.len() < cell || !bytes.len().is_multiple_of(cell) {
         return false;
     }
-    // 单元数上限与 tm_view 的口径一致（2^26 个 f32 = 256 MiB）。
+    // 单元数上限与 [`crate::view`] 的口径一致（2^26 个 f32 = 256 MiB）。
     let max_bytes = ViewParams::MAX_CELLS.saturating_mul(cell);
     if bytes.len() > max_bytes {
         return false;

@@ -10,13 +10,11 @@ publish = false
 [workspace]
 
 # 生产代码（src/lib.rs 及其模块）只用 std，不 use 下面任何一个 crate。
-# 下面几个**只被 src/bin/ 下的对照实验**使用：它们提供同一张社会图（tm_sim）
-# 和现行实现（tm_engine / tm_view / tm_store），用来做正面比较。
+# 下面两个**只被 src/bin/ 下的对照实验**使用：它们提供同一张社会图（tm_sim）
+# 和现行实现（tm_engine —— store / view / agg 已并入它），用来做正面比较。
 [dependencies]
 tm_sim = { path = "../sim" }
 tm_engine = { path = "../engine" }
-tm_view = { path = "../view" }
-tm_store = { path = "../store" }
 
 [lib]
 name = "tm_mincore"

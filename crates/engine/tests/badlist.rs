@@ -4,9 +4,9 @@
 //! 多次报告取 min、边界与非法输入、确定性/顺序无关、export_view 传播、
 //! 手动撤销、惩罚跨 tick 持久、tick 不自动生效。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];

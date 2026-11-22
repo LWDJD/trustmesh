@@ -27,9 +27,9 @@
 
 use std::time::Instant;
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 /// 引擎配置。桶数由环境变量 `P_SCALE_BUCKETS` 决定（默认 512）。
 ///

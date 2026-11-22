@@ -85,19 +85,20 @@ cd crates/engine && cargo run --example quickstart
 
 ## 结构
 
-七个**互相独立、零外部依赖**的 crate，每个都是自己的 workspace：
+**用户只需要依赖一个 crate：[`tm_engine`](crates/engine)。**
 
 | crate | 职责 | 测试 |
 |---|---|---:|
-| [`tm_store`](crates/store) | 账户表、正分清单、轮次抽样 + 退避、状态导出 | 157 |
-| [`tm_view`](crates/view) | Count Sketch 定长压缩观点（2048×5 f32 = 40 KB） | 51 |
-| [`tm_agg`](crates/agg) | 指数衰减、聚合（Mean/Median/WeightedMedian/Trimmed）、β 混合 | 63 |
-| [`tm_engine`](crates/engine) | 运行时：badlist 受害者反馈、判据、抽样预算、状态快照 | 206 |
+| **[`tm_engine`](crates/engine)** | **运行时（唯一入口）**：账户表 / 压缩观点 / 衰减聚合 / 抽样 / 查询 / badlist / 预算 / 快照，全部在一处 | 479 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
 | [`tm_mincore`](crates/mincore) | **最小反女巫内核**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍。**5 项工程能力已全部补齐**（快照 / 资源上限 / cap 自描述 / 性能基准 / 编码器性质），详见 [`缺口进度`](审计/mincore缺口进度.md)；但**仍不建议现在替换 `tm_engine`**（它缺 badlist 与预算接口），见 [`威胁模型` §8.4.5](审计/威胁模型.md) | 268 |
 
-能力矩阵 **962 passed / 0 failed / 6 ignored**（八个 workspace：七个 crate + 根 v1.0）。
+原先是四个独立 crate（`tm_store` / `tm_view` / `tm_agg` / `tm_engine`），2026-11-21 合并进
+`tm_engine` 的四个模块（`store` / `view` / `agg` / `runtime`）。三个原 crate 目录**已删除**——
+本库尚未发布过任何版本，没有依赖旧路径的外部用户，留兼容层只会变成未来的包袱。
+
+能力矩阵 **963 passed / 0 failed / 6 ignored**（五个 workspace：四个 crate + 根 v1.0）。
 
 **全部零外部依赖**——`[dependencies]` 里没有第三方 crate。这是刻意的：供应链攻击面最小化。
 
@@ -140,21 +141,19 @@ cd crates/engine && cargo run --example quickstart
 .\verify-all.ps1
 ~~~
 
-它会跑七个 workspace 的测试、文档测试、clippy、以及 wasm32 逐位对拍，最后打印汇总。
+它会跑五个 workspace 的测试、文档测试、clippy、以及 wasm32 逐位对拍，最后打印汇总。
 
 **手动跑某个 crate**（每个 crate 是独立 workspace，要分别 cd 进去）：
 
 ~~~bash
-cd crates/store && cargo test
-cd crates/view  && cargo test
-cd crates/agg   && cargo test
-cd crates/engine && cargo test
-cd crates/sim   && cargo test
-cd crates/exp   && cargo test
+cd crates/engine && cargo test     # 原 store + view + agg + engine 的全部测试都在这里
+cd crates/sim    && cargo test
+cd crates/exp    && cargo test
+cd crates/mincore && cargo test
 ~~~
 
 ⚠️ **不要只在根目录跑 `cargo test`**——根目录是 v1.0 旧代码，只有 58 条测试。
-上面七个 crate 是独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
+上面四个 crate 是各自独立的 workspace，根目录的测试**不会**覆盖它们。这是新人最容易踩的坑。
 
 ### wasm32 逐位对拍
 
@@ -172,7 +171,7 @@ CI 配置在 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，7 个 job�
 | job | 内容 |
 |---|---|
 | `changes` | **变更分类**：只有 `*.md` / `LICENSE` / `.gitignore` 改动时，跳过下面所有重活（这一项永远运行，可作分支保护的必需检查） |
-| `test` | 七个 crate 各自 `cargo test`（矩阵） |
+| `test` | 四个 crate 各自 `cargo test`（矩阵） |
 | `test-legacy` | 根 v1.0 workspace 的测试 |
 | `doctest` | 各 crate 的文档测试 |
 | `lint` | `cargo fmt --check` + `clippy -- -D warnings`（**`exp` 只卡 lib + 两个集成测试**，那 21 个一次性实验 bin 在本地同样豁免） |

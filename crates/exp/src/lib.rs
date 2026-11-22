@@ -15,7 +15,7 @@
 //! | 视图总质量 | 接收时对 0..n 求和、max(1e-6)，并记 mass_covers | 同 |
 //! | 视图覆盖上界 | target >= mass_covers 的读数一律按「这份观点没表态」 | 同 |
 //! | 聚合范围 | 观点缓存**跨轮累积**，不是「本轮抽到的 k 个」 | 同 |
-//! | 抽样 | tm_store::RoundSampler::draw_backoff（轮次位图 + 拒绝采样，无取模偏差） | 同 |
+//! | 抽样 | tm_engine::store::RoundSampler::draw_backoff（轮次位图 + 拒绝采样，无取模偏差） | 同 |
 //!
 //! 等价性由 tests/parity.rs 钉住：同一份 SimConfig 同时跑真 tm_engine 多节点网络
 //! 与 run_case_full，逐 (观察者, 目标) 比较**绝对值差**（< 1%）。
@@ -36,10 +36,10 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use tm_agg::{aggregate, combine, decay, AggMode};
+use tm_engine::agg::{aggregate, combine, decay, AggMode};
+use tm_engine::store::{AccountIdx, PositiveList, Rng, RoundSampler, MAX_SCORE};
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_sim::{Kind, SimConfig, World};
-use tm_store::{AccountIdx, PositiveList, Rng, RoundSampler, MAX_SCORE};
-use tm_view::{CompressedView, ViewParams};
 
 pub const PARAMS_BUCKETS: usize = 2048;
 pub const PARAMS_HASHERS: usize = 5;
@@ -592,7 +592,7 @@ pub fn run_case_full(
     // 每个观察者的正分清单（按目标号升序、同一目标只留一条）：
     // - 同一 (观察者, 被评者) 只保留最后一条 —— 等价于 Engine::rate 的覆盖语义；
     // - 非有限 / <= 0 的分数等价于删除该条目 —— 与 PositiveList::set 一致；
-    // - 超过 tm_store::MAX_SCORE 截断，与存储层上界一致。
+    // - 超过 tm_engine::store::MAX_SCORE 截断，与存储层上界一致。
     let mut maps: Vec<BTreeMap<usize, f32>> = (0..n).map(|_| BTreeMap::new()).collect();
     for &(o, t, s) in observed.iter().chain(inject.iter()) {
         if o >= n || t >= n {

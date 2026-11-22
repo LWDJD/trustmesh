@@ -12,10 +12,10 @@
 //! - 女巫只能被「引入它的那个潜伏者」打 1.0 分；它不进任何诚实账户的正分清单
 //! - 统计诚实 / 潜伏者 / 女巫一律分开计数，不共用分母
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig};
-use tm_view::ViewParams;
 
 const N_INIT: usize = 300;
 const STEPS: usize = 300;
@@ -263,7 +263,7 @@ fn engine_phase(world: &tm_sim::World, n_per: usize) -> Row {
     let mut prev_on = vec![false; n0];
     for r in 0..=ROUNDS {
         let now = r * TICK;
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n_total];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n_total];
         for &a in &alive {
             if online[a][r as usize] {
                 if let Some(e) = &nodes[a] {

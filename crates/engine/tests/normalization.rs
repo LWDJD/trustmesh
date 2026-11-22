@@ -1,8 +1,8 @@
 //! 验证四阶段归一化：本地打分、群体项、3:7 混合、最终输出，每一层总和都是 1。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(i: u8) -> [u8; 32] {
     let mut k = [0u8; 32];

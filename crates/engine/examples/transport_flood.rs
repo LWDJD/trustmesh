@@ -14,8 +14,8 @@
 //!
 //! 用法：cd crates/engine && cargo run --release --example transport_flood
 
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
-use tm_view::ViewParams;
 
 fn key(i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];

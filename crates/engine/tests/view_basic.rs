@@ -1,6 +1,6 @@
 //! 结构性质测试：定长、单点精确、合并线性、编码往返、参数边界。
 
-use tm_view::{AccountKey, CompressedView, ViewParams, XorShift64};
+use tm_engine::view::{AccountKey, CompressedView, ViewParams, XorShift64};
 
 /// 用固定种子生成 n 个互不相同的 32 字节 key。
 fn keys(n: usize, seed: u64) -> Vec<AccountKey> {

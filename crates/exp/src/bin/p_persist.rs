@@ -32,10 +32,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::store::Rng;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig, EngineSnapshot};
-use tm_store::Rng;
-use tm_view::ViewParams;
 
 /// 网络规模（账户数 = 节点数）。
 const N: usize = 200;
@@ -111,7 +111,8 @@ fn build_network() -> Vec<Engine> {
 fn advance_round(nodes: &mut [Engine], round: u64) -> u64 {
     let now = round * ROUND_HOURS;
     // 1. 全体快照式发布：这一轮所有观点都基于「轮首」状态。
-    let views: Vec<tm_view::CompressedView> = nodes.iter().map(|e| e.export_view(now)).collect();
+    let views: Vec<tm_engine::view::CompressedView> =
+        nodes.iter().map(|e| e.export_view(now)).collect();
     // 2. 各自抽样，并把抽到的观点回填（线性下标，200 个节点全在线）。
     for i in 0..nodes.len() {
         let reqs = nodes[i].tick(now, SAMPLES);

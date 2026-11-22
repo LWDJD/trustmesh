@@ -9,8 +9,8 @@
 //!
 //! 用法：cd crates/engine && cargo run --release --example flood_strangers
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(tag: u8, i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];

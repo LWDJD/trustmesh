@@ -1,6 +1,6 @@
 //! β 扫描：个人项权重能不能让"近邻"自己识别出被污染的目标？
 use std::collections::VecDeque;
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_exp::{run_case, PropConfig};
 use tm_sim::{AttackKind, Kind, SimConfig};
 

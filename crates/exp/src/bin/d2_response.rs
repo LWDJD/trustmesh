@@ -43,10 +43,10 @@
 //!   d2_response modes=std,floor,off 改模式
 //!   d2_response arm=wash,dark       只跑指定臂
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, Life, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 // ───────────────────────────── 固定参数 ─────────────────────────────
 

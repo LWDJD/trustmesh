@@ -1,5 +1,5 @@
 //! 攻击者不带归一化时，能放大多少影响力？
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_exp::{run_case_full, PropConfig};
 use tm_sim::{AttackKind, Kind, SimConfig};
 

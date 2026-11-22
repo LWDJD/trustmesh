@@ -18,9 +18,9 @@
 
 use std::collections::HashSet;
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig, FreshnessStats};
-use tm_view::{CompressedView, ViewParams};
 
 // ===========================================================================
 // 公共场景

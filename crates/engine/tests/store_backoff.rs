@@ -13,7 +13,7 @@
 
 use std::collections::BTreeSet;
 
-use tm_store::{AccountIdx, PositiveList, Rng, RoundSampler, Score, Time};
+use tm_engine::store::{AccountIdx, PositiveList, Rng, RoundSampler, Score, Time};
 
 /// 构造 [0, n) 的连续编号。
 fn members(n: u32) -> Vec<AccountIdx> {

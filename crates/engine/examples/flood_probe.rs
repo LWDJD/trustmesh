@@ -11,8 +11,8 @@
 //!
 //! 用法：cd crates/engine && cargo run --example flood_probe
 
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
-use tm_view::ViewParams;
 
 fn key(i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];
@@ -76,7 +76,7 @@ fn run(k: usize, n_honest: usize, n_garbage: usize, endorse: usize, own_garbage:
         for h in 0..n_honest {
             pairs.push((key((1 + h) as u32), 0.6));
         }
-        published.push(tm_view::CompressedView::from_pairs(params, &pairs));
+        published.push(tm_engine::view::CompressedView::from_pairs(params, &pairs));
     }
 
     // 收观点

@@ -8,9 +8,9 @@
 
 use std::time::Instant;
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_mincore::{Config as CoreConfig, Node, SparseView};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(idx: usize) -> [u8; 32] {
     let mut k = [0u8; 32];

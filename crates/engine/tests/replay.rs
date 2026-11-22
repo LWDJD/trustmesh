@@ -27,8 +27,8 @@
 //! 换句话说：它们是「缺陷的温度计」，不是「契约」。修 D4 时应当把它们改成
 //! 断言「拒绝」，而不是删掉。
 
+use tm_engine::view::{AccountKey, CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{AccountKey, CompressedView, ViewParams};
 
 fn key(i: u32) -> AccountKey {
     let mut k = [0u8; 32];
@@ -239,7 +239,7 @@ fn d4_characterization_older_published_at_can_roll_back_newer_content() {
 #[test]
 fn d4_characterization_decay_would_have_killed_the_view_without_replay() {
     let dt = 288u64 + 100 * 72;
-    let honest = tm_agg::decay(dt, 72);
+    let honest = tm_engine::agg::decay(dt, 72);
     assert!(
         honest < 1e-30,
         "不重放的话，104 个半衰期之后权重是 0.5^104 ≈ 4.9e-32，实际 {honest:e}"

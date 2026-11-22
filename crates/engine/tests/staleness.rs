@@ -11,10 +11,10 @@
 //! 4. **衰减是相对的**：加权平均对权重的均匀缩放免疫，所有来源一起变旧时
 //!    结果纹丝不动；只有「谁比谁更新」才会改变话语权。
 
-use tm_agg::decay;
+use tm_engine::agg::decay;
+use tm_engine::store::{AccountIdx, AccountKey};
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_store::{AccountIdx, AccountKey};
-use tm_view::{CompressedView, ViewParams};
 
 /// 构造一个容易区分、且不会互相撞车的公钥。
 fn key(n: u8) -> AccountKey {
@@ -573,7 +573,7 @@ fn time_rollback_is_clamped_to_zero_age() {
 // 7. 边界
 // ===========================================================================
 
-/// 半衰期为 0 是非法降级输入：按 1 处理（与 `tm_agg::decay` 的约定一致），
+/// 半衰期为 0 是非法降级输入：按 1 处理（与 `tm_engine::agg::decay` 的约定一致），
 /// 这样「半衰期内」的判定与衰减因子严格对齐。
 #[test]
 fn freshness_stats_treats_zero_half_life_as_one() {

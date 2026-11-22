@@ -8,10 +8,10 @@
 //! 2. 连败 n 次的来源被抽中的概率降为 2^-n，但一轮抽完它仍然会被问到一次。
 //! 3. 兜底探测（probe）不走退避：本轮剩下的条目全部返回，按编号升序。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::store::AccountKey;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_store::AccountKey;
-use tm_view::{CompressedView, ViewParams};
 
 fn key(n: u8) -> AccountKey {
     let mut k = [0u8; 32];

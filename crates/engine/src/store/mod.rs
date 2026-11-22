@@ -35,7 +35,7 @@
 //! ## 快速上手
 //!
 //! ~~~rust
-//! use tm_store::{AccountTable, PositiveList, RoundSampler, Rng};
+//! use tm_engine::store::{AccountTable, PositiveList, RoundSampler, Rng};
 //!
 //! // 1. 账户表：公钥 -> 编号
 //! let mut accounts = AccountTable::new();
@@ -126,7 +126,7 @@ const SHARE_FLOOR: Score = f32::MIN_POSITIVE;
 /// # 例子
 ///
 /// ~~~
-/// use tm_store::AccountTable;
+/// use tm_engine::store::AccountTable;
 ///
 /// let mut t = AccountTable::new();
 /// assert_eq!(t.intern([7u8; 32]), 0);
@@ -209,7 +209,7 @@ impl AccountTable {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::AccountTable;
+    /// use tm_engine::store::AccountTable;
     ///
     /// let mut t = AccountTable::new();
     /// t.intern([1u8; 32]);
@@ -234,7 +234,7 @@ impl AccountTable {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::AccountTable;
+    /// use tm_engine::store::AccountTable;
     ///
     /// let mut t = AccountTable::new();
     /// t.intern([1u8; 32]);
@@ -306,7 +306,7 @@ struct Entry {
 /// # 例子
 ///
 /// ~~~
-/// use tm_store::PositiveList;
+/// use tm_engine::store::PositiveList;
 ///
 /// let mut list = PositiveList::new();
 /// list.set(3, 0.5, 10);
@@ -456,7 +456,7 @@ impl PositiveList {
     /// # 例子
     ///
     /// ~~~rust
-    /// use tm_store::PositiveList;
+    /// use tm_engine::store::PositiveList;
     ///
     /// let mut list = PositiveList::new();
     /// list.set(7, 0.5, 1000);
@@ -485,7 +485,7 @@ impl PositiveList {
     /// # 例子
     ///
     /// ~~~rust
-    /// use tm_store::PositiveList;
+    /// use tm_engine::store::PositiveList;
     ///
     /// let mut list = PositiveList::new();
     /// list.set(7, 0.5, 1000);
@@ -530,7 +530,7 @@ impl PositiveList {
     /// # 例子
     ///
     /// ~~~rust
-    /// use tm_store::PositiveList;
+    /// use tm_engine::store::PositiveList;
     ///
     /// let mut list = PositiveList::new();
     /// list.set(7, 0.5, 1000);
@@ -585,7 +585,7 @@ impl PositiveList {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::PositiveList;
+    /// use tm_engine::store::PositiveList;
     ///
     /// let mut list = PositiveList::new();
     /// list.set(3, 0.5, 10);
@@ -616,7 +616,7 @@ impl PositiveList {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::PositiveList;
+    /// use tm_engine::store::PositiveList;
     ///
     /// let mut list = PositiveList::new();
     /// list.set(3, 0.5, 100);
@@ -687,7 +687,7 @@ impl PositiveList {
 /// # 例子
 ///
 /// ~~~
-/// use tm_store::{RoundSampler, Rng};
+/// use tm_engine::store::{RoundSampler, Rng};
 ///
 /// let mut s = RoundSampler::new();
 /// s.reset(&[10, 20, 30]);
@@ -795,7 +795,7 @@ impl RoundSampler {
     /// # 例子
     ///
     /// ~~~rust
-    /// use tm_store::{PositiveList, RoundSampler, Rng};
+    /// use tm_engine::store::{PositiveList, RoundSampler, Rng};
     ///
     /// let mut list = PositiveList::new();
     /// list.set(1, 0.5, 0);
@@ -866,7 +866,7 @@ impl RoundSampler {
     /// # 例子
     ///
     /// ~~~rust
-    /// use tm_store::{PositiveList, RoundSampler, Rng};
+    /// use tm_engine::store::{PositiveList, RoundSampler, Rng};
     ///
     /// let mut list = PositiveList::new();
     /// for idx in 0..4u32 {
@@ -917,7 +917,7 @@ impl RoundSampler {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::{RoundSampler, Rng};
+    /// use tm_engine::store::{RoundSampler, Rng};
     ///
     /// let mut s = RoundSampler::new();
     /// s.reset(&[4, 5, 6]);
@@ -959,7 +959,7 @@ impl RoundSampler {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::{RoundSampler, Rng};
+    /// use tm_engine::store::{RoundSampler, Rng};
     ///
     /// let mut s = RoundSampler::new();
     /// s.reset(&[1, 2, 3]);
@@ -1152,7 +1152,7 @@ fn pick_weighted(streaks: &[u32], rng: &mut Rng) -> usize {
 /// # 例子
 ///
 /// ~~~
-/// use tm_store::Rng;
+/// use tm_engine::store::Rng;
 ///
 /// let mut rng = Rng::new(2024);
 /// assert!(rng.next_below(10) < 10);
@@ -1224,7 +1224,7 @@ impl Rng {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::Rng;
+    /// use tm_engine::store::Rng;
     ///
     /// let mut a = Rng::new(2024);
     /// let _ = a.next_u64();
@@ -1240,7 +1240,7 @@ impl Rng {
     /// # 例子
     ///
     /// ~~~
-    /// use tm_store::Rng;
+    /// use tm_engine::store::Rng;
     ///
     /// let mut a = Rng::new(2024);
     /// let _ = a.next_u64();

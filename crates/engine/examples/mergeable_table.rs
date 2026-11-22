@@ -34,7 +34,7 @@
 //!
 //! 用法：cd crates/view && cargo run --release --example mergeable_table
 
-use tm_view::{CompressedView, ViewParams};
+use tm_engine::view::{CompressedView, ViewParams};
 
 fn key(i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];

@@ -11,9 +11,9 @@
 //! 这些断言钉住的是「库对外承诺」而不是「内部实现细节」，所以引擎侧改实现
 //! 也不会误报。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig, EngineSnapshot};
-use tm_view::{CompressedView, ViewParams};
 
 const N: usize = 24;
 

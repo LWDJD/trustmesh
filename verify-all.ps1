@@ -24,7 +24,9 @@ $env:TEMP = $env:TMP
 if (-not (Test-Path -LiteralPath $env:TMP)) { New-Item -ItemType Directory -Path $env:TMP -Force | Out-Null }
 
 $script:failed = @()
-$crates = @('store', 'view', 'agg', 'engine', 'sim', 'exp', 'mincore')
+# 2026-11-21 合并后：store / view / agg 已并入 engine（三个原 crate 目录已删除）。
+# 四个 workspace：engine / sim / exp / mincore + 根 v1.0。
+$crates = @('engine', 'sim', 'exp', 'mincore')
 
 function Report($name, $ok, $detail) {
     if ($ok) {
@@ -46,6 +48,7 @@ Write-Host "仓库根：$root" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "[1/5] 测试" -ForegroundColor Cyan
+
 foreach ($c in $crates) {
     Push-Location -LiteralPath (Join-Path $root ("crates/" + $c))
     try {

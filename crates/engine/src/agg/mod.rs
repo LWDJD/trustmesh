@@ -97,7 +97,7 @@ pub const MAX_TRIM: f32 = 0.5 - f32::EPSILON / 2.0;
 /// # 例子
 ///
 /// ```
-/// use tm_agg::decay;
+/// use tm_engine::agg::decay;
 /// assert_eq!(decay(0, 72), 1.0);
 /// assert_eq!(decay(72, 72), 0.5);
 /// assert_eq!(decay(144, 72), 0.25);
@@ -174,7 +174,7 @@ pub enum AggMode {
 /// * 否则返回 clamp 到 [0, 1] 的聚合值。
 ///
 /// ```
-/// use tm_agg::{aggregate, AggMode};
+/// use tm_engine::agg::{aggregate, AggMode};
 /// let items = [(1.0f32, 0.0f32), (1.0, 1.0)];
 /// // 均值被单个极端值拉走，中位数纹丝不动
 /// assert!((aggregate(&items, AggMode::Mean).unwrap() - 0.5).abs() < 1e-6);
@@ -332,7 +332,7 @@ fn clamp01(x: f32) -> f32 {
 /// * 只衰减别人的观点，不衰减自己的评分 —— 所以 personal 是裸值，直接参与合成。
 ///
 /// ```
-/// use tm_agg::combine;
+/// use tm_engine::agg::combine;
 /// assert_eq!(combine(1.0, 0.7, Some(0.2)), 0.7);
 /// assert_eq!(combine(0.0, 0.7, Some(0.2)), 0.2);
 /// assert_eq!(combine(0.5, 0.8, None), 0.4); // 没有群体项 ⇒ 群体项按 0 算

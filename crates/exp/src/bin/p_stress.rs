@@ -45,9 +45,9 @@
 
 use std::time::{Duration, Instant};
 
+use tm_engine::store::AccountIdx;
+use tm_engine::view::{AccountKey, CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_store::AccountIdx;
-use tm_view::{AccountKey, CompressedView, ViewParams};
 
 /// 观测目标账户的 key 基址（与 owner 的 key 段分开，避免撞号）。
 const TARGET_BASE: u32 = 2_000_000;
@@ -264,7 +264,7 @@ fn scenario_a(args: &Args) -> Outcome {
         .collect();
     // 每个 owner 都先打正分：现实里「我会去请求观点的来源」就是正分清单里的人，
     // 而且只有正分清单里的条目才记连败（on_view_failed 对未评分账户是 no-op，
-    // 见 tm_store::PositiveList::record_failure 的既有语义）。这样才验得到
+    // 见 tm_engine::store::PositiveList::record_failure 的既有语义）。这样才验得到
     // 「被拒 = 视同失败 = 下次 tick 退避它」这条链路。同时顺带压测正分清单本身。
     for &o in &owners {
         e.rate(o, 1.0, 0);

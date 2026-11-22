@@ -21,8 +21,8 @@
 //!
 //! 脚本会自己跑一遍 native 侧再对比，最后打印「IDENTICAL」或第一个差异位置。
 
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
-use tm_view::ViewParams;
 
 /// 探针里用的账户号：可读、可复现。
 fn key(i: u32) -> [u8; 32] {

@@ -14,8 +14,7 @@ name = "tm_wasm_smoke_cli"
 path = "src/main.rs"
 
 [dependencies]
-tm_engine = { path = "../../crates/engine" }
-tm_view = { path = "../../crates/view" }
+tm_engine = { path = "../../crates/engine" }   # view 已并入 engine 的 view 模块
 
 [workspace]
 

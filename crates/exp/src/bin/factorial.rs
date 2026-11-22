@@ -1,6 +1,6 @@
 //! 2×2 因子实验：攻击者连接度（普通/高连接）× 攻击者数量（单个/多个）
 //! 衡量指标：被引入女巫的声望 ÷ 诚实账户基线。全部开启影响力预算 + 接收方归一化。
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
 use tm_exp::{run_case_full, PropConfig};
 use tm_sim::{AttackKind, Kind, SimConfig};
 

@@ -9,9 +9,8 @@ license = "MIT"
 [workspace]
 
 [dependencies]
-tm_store = { path = "../store" }
-tm_view  = { path = "../view" }
-tm_agg   = { path = "../agg" }
+# 零外部依赖：原 tm_store / tm_view / tm_agg 已于 2026-11-21 合并进本 crate 的
+# store / view / agg 三个模块，所以这里不再需要 path 依赖。
 
 [profile.release]
 opt-level = 3

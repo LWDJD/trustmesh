@@ -96,7 +96,7 @@
 //! * 加权平均本来就不高于 ā（G_A ≤ ā）时，闭式解给出 f ≥ 1，夹紧后就是 1：
 //!   本来没被放大，不用管。
 
-use tm_store::AccountIdx;
+use crate::store::AccountIdx;
 
 /// 除法保护阈值。
 ///
@@ -319,7 +319,7 @@ pub(crate) struct SourceSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tm_store::Rng;
+    use crate::store::Rng;
 
     /// 把 [0,1) 的 u64 变成 [0,1) 的 f64。
     fn unit(rng: &mut Rng) -> f64 {

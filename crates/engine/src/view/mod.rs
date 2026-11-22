@@ -34,7 +34,7 @@
 //! ## 例子
 //!
 //! ```
-//! use tm_view::{AccountKey, CompressedView, ViewParams};
+//! use tm_engine::view::{AccountKey, CompressedView, ViewParams};
 //!
 //! let mut view = CompressedView::new(ViewParams::default());
 //! let alice: AccountKey = [1u8; 32];

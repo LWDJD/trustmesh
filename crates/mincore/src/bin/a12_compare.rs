@@ -7,10 +7,10 @@
 
 use std::collections::BTreeMap;
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_mincore::{Config as CoreConfig, Node, SparseView};
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 // ══════════════════════════ 结果类型别名 ══════════════════════════
 //

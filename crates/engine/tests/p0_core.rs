@@ -11,9 +11,9 @@
 //!
 //! 每组都有一条「合规输入没变」的测试：满足前提时新旧口径**逐位相同**。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
-use tm_view::{CompressedView, ViewParams};
 
 fn key(i: u32) -> [u8; 32] {
     let mut k = [0u8; 32];

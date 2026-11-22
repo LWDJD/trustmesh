@@ -30,10 +30,10 @@
 //!   1. 账户编号一律取 world.accounts().len()，绝不用 alive_count()；
 //!   2. sleeper / promoted / honest 三个累加器完全分开。
 
-use tm_agg::AggMode;
+use tm_engine::agg::AggMode;
+use tm_engine::view::ViewParams;
 use tm_engine::{Engine, EngineConfig};
 use tm_sim::{AttackKind, Kind, SimConfig};
-use tm_view::ViewParams;
 
 const N_INIT: usize = 300;
 const STEPS: usize = 400;
@@ -484,7 +484,7 @@ fn run_cell(
     let mut prev_on = vec![false; n];
     for r in 0..=rn {
         let now = r * tick;
-        let mut views: Vec<Option<tm_view::CompressedView>> = vec![None; n];
+        let mut views: Vec<Option<tm_engine::view::CompressedView>> = vec![None; n];
         for &a in &alive {
             if online[a][r as usize] {
                 if let Some(e) = &nodes[a] {

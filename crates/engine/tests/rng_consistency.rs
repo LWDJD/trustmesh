@@ -1,4 +1,4 @@
-//! 两套 xorshift64 的交叉一致性：`tm_view::XorShift64` 与 `tm_store::Rng`。
+//! 两套 xorshift64 的交叉一致性：`tm_engine::view::XorShift64` 与 `tm_engine::store::Rng`。
 //!
 //! ## 为什么要有这个测试
 //!
@@ -6,11 +6,14 @@
 //!
 //! | 实现 | 位置 | 用途 | 独有能力 |
 //! |---|---|---|---|
-//! | `tm_view::XorShift64` | `crates/view/src/rng.rs` | `noise_floor` 造全新 32 字节 key | `next_key()` |
-//! | `tm_store::Rng` | `crates/store/src/lib.rs` | 抽样顺序、退避加权 | `from_state()` / `next_below()` |
+//! | `tm_engine::view::XorShift64` | `crates/engine/src/view/rng.rs` | `noise_floor` 造全新 32 字节 key | `next_key()` |
+//! | `tm_engine::store::Rng` | `crates/engine/src/store/mod.rs` | 抽样顺序、退避加权 | `from_state()` / `next_below()` |
 //!
-//! 两套**不能合并**，因为 `tm_view` 是更底层的 crate（`tm_store` 不能依赖它也不该被它依赖），
-//! 而 `tm_store::Rng` 必须能序列化状态（快照要精确恢复下一个随机数）。
+//! 两套**不能合并**，因为**能力集不同**（2026-11-21 合并后它们同属一个 crate 的两个模块）：
+//! * `view::XorShift64` 有 [`next_key()`]（造全新 32 字节 key，噪声底采样用）；
+//! * `store::Rng` 有 `from_state()/state()`（快照要**精确恢复**下一个随机数）与 `next_below()`（拒绝采样）。
+//!
+//! 注意：两套的**输出序列逐位相同**，本文件第 1 条断言就是钉死这一点。
 //!
 //! 但**它们必须保持在算法上一致**——否则：
 //!
@@ -35,8 +38,8 @@
 //!
 //! 不允许的是"只改一边、测试默默变红又被人忽略"。
 
-use tm_store::Rng;
-use tm_view::XorShift64;
+use tm_engine::store::Rng;
+use tm_engine::view::XorShift64;
 
 /// 抽样用的种子集合：0（不动点边界）、1、小值、大值、以及一个"看起来随机"的常量。
 const SEEDS: [u64; 6] = [0, 1, 2, 7, 0xC1BA_D151_0000_0001, u64::MAX];

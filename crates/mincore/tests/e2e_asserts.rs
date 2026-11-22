@@ -43,12 +43,12 @@
 
 use std::collections::BTreeMap;
 
+use tm_engine::view::{CompressedView, ViewParams};
 use tm_engine::{Engine, EngineConfig};
 use tm_mincore::{
     quantize, Config as CoreConfig, Node, SparseView, MAX_CAP, Q_ONE, SLOT_BYTES, VIEW_OVERHEAD,
 };
 use tm_sim::{AttackKind, Kind, SimConfig, World};
-use tm_view::{CompressedView, ViewParams};
 
 // ══════════════════════════ 规模参数（全部写死，不用随机） ══════════════════════════
 

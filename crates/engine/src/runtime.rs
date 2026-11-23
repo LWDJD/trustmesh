@@ -247,18 +247,56 @@ pub struct FetchRequest {
     pub key: AccountKey,
 }
 
-/// [Engine::on_view] 丢弃一份观点的原因（安全加固 P2）。
+/// [Engine::on_view] 丢弃一份观点的原因（安全加固 P2；参数护栏补第三类）。
 ///
-/// 两种原因的**处理语义完全相同**（见 [Engine::on_view]）：整条丢弃、按
-/// [Engine::on_view_failed] 的语义只给 owner 累计连败、不刷新 `last_check`、
-/// 不进缓存、不计命中。区分它们只为可观测性：容量丢弃说明 `max_views` 已经
-/// 顶满（资源保护在起作用）；非有限丢弃说明**有人在喂脏视图**（安全信号）。
+/// 三种原因的**共同点**（见 [Engine::on_view]）：整条丢弃、不进缓存、不刷新
+/// `last_check`、不计 [Engine::stats] 的命中，只累加 [Engine::rejected_count]
+/// 与 [Engine::rejected_breakdown] 里对应的一项。
+///
+/// 区分它们是为了可观测性：容量丢弃说明 [EngineConfig::max_views] 已经顶满
+/// （资源保护在起作用）；非有限丢弃说明**有人在喂脏视图**（安全信号）；
+/// 参数不符说明**对面配错了**（部署配置错误）。
+///
+/// # 退避语义不同（这是刻意的，不是疏漏）
+///
+/// * [Rejection::Capacity] / [Rejection::NonFinite] **视同失败**：按
+///   [Engine::on_view_failed] 的语义给 owner 累计连败（规格 §0.3 原文
+///   「超出即丢弃并视同失败」）；
+/// * [Rejection::ParamsMismatch] **只计数、不累计连败**：它不是「这一次没取到」，
+///   而是「对面配错了」，原地重试永远不会成功；但给一个**网络本身正常**的邻居
+///   记连败，会让 [Engine::tick] 的退避改变后续抽样序列 —— 那是把部署配置错误
+///   伪装成网络故障，并且凭空改变既有行为。可观测性交给计数，退避一律不动。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rejection {
     /// 缓存已达 [EngineConfig::max_views] 且这是新 owner。
     Capacity,
     /// 这份观点的 `total_mass` 不是有限值（NaN / ±∞）。
     NonFinite,
+    /// 这份观点的 ViewParams 与本地 [EngineConfig::view_params] 不一致。
+    ///
+    /// **这是最该告警的一项**：两个节点的形状参数（buckets / hashers / seed）
+    /// 不一致时，视图被一条条静默丢掉 —— 引擎看起来在正常工作（没 panic、
+    /// 没报错），但群体项永远在缩水。与 [Rejection::Capacity]（资源保护生效）
+    /// 和 [Rejection::NonFinite]（有人在喂脏数据）不同，这一项指向的是
+    /// **部署配置错误**。
+    ///
+    /// 计数走 [Engine::rejected_count] 与 [Engine::rejected_breakdown]；
+    /// 退避不动（理由见 [Rejection] 的「退避语义不同」一节）。
+    ParamsMismatch,
+}
+
+/// 观点被丢弃的原因细分。三项之和恒等于 [Engine::rejected_count]。
+///
+/// 三个字段对应 [Rejection] 的三个变体，逐项语义见那里的文档。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RejectedBreakdown {
+    /// 缓存已达 [EngineConfig::max_views] 且这是新 owner
+    /// （[EngineConfig::max_views] 在起作用）。
+    pub capacity: u64,
+    /// 观点里含 NaN / ∞。有人在喂脏视图（安全信号）。
+    pub nonfinite: u64,
+    /// **ViewParams 与本地配置不一致**。对面配错了 —— 这是最该告警的一项。
+    pub params_mismatch: u64,
 }
 
 pub struct Engine {
@@ -290,15 +328,22 @@ pub struct Engine {
     /// 被 [Engine::on_view] **整条丢弃**的观点累计数（安全加固 P2）。
     ///
     /// 与 [Engine::stats] 分开记，是为了让 `stats()` 的四元组**形状与含义
-    /// 一个字节都不变**（既有实验与测试直接按位置解构它）。这里含两类丢弃：
-    /// 容量（[EngineConfig::max_views]）与非有限读数；`view.params()` 不匹配
-    /// 的那类仍然**只**静默丢弃、不计入——它属于协议层的「无法解释的字节」，
-    /// 与「可解释但被拒」是两件事。细分计数见 [Engine::rejected_breakdown]。
+    /// 一个字节都不变**（既有实验与测试直接按位置解构它）。这里含三类丢弃：
+    /// 容量（[EngineConfig::max_views]）、非有限读数、以及 `view.params()` 不匹配
+    /// （参数护栏：对面配错了）。三者的细分计数见 [Engine::rejected_breakdown]。
+    ///
+    /// 参数不匹配这一项在引入护栏前是**完全静默**的；现在它进计数但不累计连败，
+    /// 所以这台引擎的可观测状态里唯一的变化就是这个计数（见 [Rejection]）。
     pub(crate) stat_rejected_view: u64,
     /// 其中因容量上限被丢的条数。
     pub(crate) stat_rejected_capacity: u64,
     /// 其中因读数非有限（NaN / ±∞）被丢的条数。
     pub(crate) stat_rejected_nonfinite: u64,
+    /// 其中因 ViewParams 与本地配置不一致被丢的条数（参数护栏）。
+    ///
+    /// 这一项指向的是**部署配置错误**：两个节点的 buckets / hashers / seed 不一致时，
+    /// 视图会被一条条丢掉，群体项随之缩水，而引擎本身不报任何错。
+    pub(crate) stat_rejected_params: u64,
     /// 最近一次 [Engine::tick] 传入的抽样预算 k（一次都没 tick 过时为 0）。
     ///
     /// 只用于 [Engine::freshness_budget] 的**观测**：它不参与抽样、不改任何
@@ -306,6 +351,15 @@ pub struct Engine {
     /// 是因为 refresh_period = ⌈n_list·T/k⌉ 必须用「**实际**用过的 k」，
     /// 而不是调用方事后回忆的配置值。
     pub(crate) last_k: usize,
+    /// 最近一次 [Engine::tick] 时的正分清单长度（一次都没 tick 过时为 0）。
+    ///
+    /// 与 [Engine::last_k] 一样只用于观测：[Engine::last_tick_warning] 要用
+    /// **tick 那一刻**的清单长度去算刷新周期 ⌈n_list·T/k⌉ —— 事后取
+    /// `ratings.len()` 拿到的是「现在」的清单长度，评分在两次 tick 之间增删时
+    /// 会与那条 k 对不上号（体检结论会在两个正确读数之间凭空抖一下）。
+    ///
+    /// 它不参与抽样、不改任何评分或时间戳，也不影响后续任何计算结果。
+    pub(crate) last_n_list: usize,
 }
 
 impl Engine {
@@ -329,7 +383,9 @@ impl Engine {
             stat_rejected_view: 0,
             stat_rejected_capacity: 0,
             stat_rejected_nonfinite: 0,
+            stat_rejected_params: 0,
             last_k: 0,
+            last_n_list: 0,
         }
     }
 
@@ -401,6 +457,9 @@ impl Engine {
         // 记下这一轮实际用的预算，供只读的 [Engine::freshness_budget] 体检。
         // 这行不参与抽样：随机流、轮次位图、退避权重的推进与之前逐位一致。
         self.last_k = k;
+        // 同一时刻的清单长度：体检要拿它和 k 配对算刷新周期（见字段文档）。
+        // 同样只写不读地推进观测，随机流与轮次位图不受影响。
+        self.last_n_list = self.ratings.len();
 
         let current: Vec<AccountIdx> = self.ratings.iter().map(|(idx, _, _)| idx).collect();
         self.sampler.sync(&current);
@@ -476,6 +535,12 @@ impl Engine {
     /// 不计 [Engine::stats] 的命中、不进缓存、不清退避计数、也不更新时钟 ——
     /// 对这个引擎来说它是无法解释的字节。
     ///
+    /// **但丢弃是可观测的**（参数护栏）：它计入 [Engine::rejected_count] 与
+    /// [Rejection::ParamsMismatch] 那一栏（[Engine::rejected_breakdown]），
+    /// 且**不**给 owner 累计连败（理由见 [Rejection] 的「退避语义不同」一节）。
+    /// 两个节点配错 [ViewParams] 时群体项会一条条缩水而引擎不报错 —— 这个计数
+    /// 就是给上层告警用的唯一信号，**值得接到日志 / 监控里**。
+    ///
     /// 这是必需的输入校验，不是优化：`hashers` 由对端声明，不校验时 16×4096
     /// 的视图能把单次 `on_view` 从 0.9 ms 拉到 572 ms（×609），单视图体积
     /// 上限 2^26 单元 = 256 MiB 也会原样进入缓存。
@@ -526,7 +591,13 @@ impl Engine {
         now: Time,
     ) {
         // 参数（形状 + 种子）是全网约定；不一致的草图桶布局不同，读数没有意义。
+        //
+        // 丢弃本身是必需的（不可解释的字节不能进缓存），但**静默**丢弃不是：
+        // 两个节点配错 ViewParams 时，群体项一条条缩水而引擎看起来一切正常。
+        // 这里走与容量 / 非有限丢弃**同一条**入口，把「对面配错了」变成可观测的；
+        // 「不计连败」的差异由 [Engine::reject_view] 按原因分叉，不在调用点各写一半。
         if view.params() != self.cfg.view_params {
+            self.reject_view(owner, Rejection::ParamsMismatch);
             return;
         }
         self.clock = now;
@@ -601,11 +672,26 @@ impl Engine {
         self.ratings.record_failure(owner);
     }
 
-    /// 统一的「观点被拒」路径：累加计数，并按失败语义处理 owner。
+    /// 统一的「观点被拒」路径：**唯一的入口**，累加计数，并按各原因的语义处理 owner。
     ///
-    /// 规格 §0.3 的原文是「超出即丢弃并**视同失败**」。这里刻意直接复用
-    /// [Engine::on_view_failed] 的两条效果（时钟前移 + 连败 +1），而不是另写一遍，
-    /// 免得两条路径日后漂移。
+    /// 规格 §0.3 的原文是「超出即丢弃并**视同失败**」。容量与脏数据两条路径直接复用
+    /// [Engine::on_view_failed] 的那一条效果（连败 +1），而不是另写一遍，免得两条路径
+    /// 日后漂移。
+    ///
+    /// # 为什么连败语义按 `why` 分叉
+    ///
+    /// [Rejection::Capacity] / [Rejection::NonFinite] → **视同失败**，连败 +1：
+    /// 前者是「这次资源不够」，后者是「对面在喂脏数据」，两者都值得让
+    /// [Engine::tick] 退避它。
+    ///
+    /// [Rejection::ParamsMismatch] → **只计数，不动连败**：它不是「这一次没取到」，
+    /// 而是「对面配错了」，原地重试永远不会成功；但给一个**网络本身正常**的邻居记
+    /// 连败，会让 [Engine::tick] 的退避改变后续抽样序列 —— 那是把部署配置错误
+    /// 伪装成网络故障，并且凭空改变既有行为。
+    ///
+    /// 这条分叉**必须**在这里，而不是散在 [Engine::on_view] 的调用点：两条路径各自
+    /// 记一半语义，将来有人把调用点改成单一入口时就会静默引入连败。
+    /// （`crates/engine/tests/capacity.rs` 里有用例钉住「参数不符不计连败」。）
     ///
     /// 代价说明：丢弃一条视图是 O(log n)（计数 + [`crate::store::PositiveList`] 里的
     /// 一次 BTreeMap 查询），而被丢弃的 `view` 参数在函数返回时立刻释放——
@@ -613,11 +699,18 @@ impl Engine {
     fn reject_view(&mut self, owner: AccountIdx, why: Rejection) {
         self.stat_rejected_view += 1;
         match why {
-            Rejection::Capacity => self.stat_rejected_capacity += 1,
-            Rejection::NonFinite => self.stat_rejected_nonfinite += 1,
+            Rejection::Capacity => {
+                self.stat_rejected_capacity += 1;
+                // 与 on_view_failed 完全同一语义：只加连败，不刷新 last_check。
+                self.ratings.record_failure(owner);
+            }
+            Rejection::NonFinite => {
+                self.stat_rejected_nonfinite += 1;
+                self.ratings.record_failure(owner);
+            }
+            // 配置错误不是网络故障：只计数，不给邻居记连败（见上面的分叉说明）。
+            Rejection::ParamsMismatch => self.stat_rejected_params += 1,
         }
-        // 与 on_view_failed 完全同一语义：只加连败，不刷新 last_check。
-        self.ratings.record_failure(owner);
     }
 
     /// 完整的信任分布：所有账户分到的比值，**只要我给至少一个人打过正分，
@@ -1185,6 +1278,76 @@ impl Engine {
         self.last_k
     }
 
+    /// [Engine::last_tick_warning] 的固定文案。
+    ///
+    /// 刻意不把推荐 k 拼进来（见该方法的「为什么文案里没有推荐 k」一节）：
+    /// 拼动态数字就必须 `format!` 出一个 `String`，每次调用分配一次。
+    const TICK_BUDGET_WARNING: &'static str =
+        "刷新周期超过半个半衰期：衰减已退化为噪声，请增大 k 或缩短轮间隔（用 recommended_k 现算可行预算）";
+
+    /// 上一次 [Engine::tick] 的抽样预算体检。
+    ///
+    /// 用 **tick 那一刻**的清单长度与预算 k，配合调用方自己的轮间隔 `period`，
+    /// 判定刷新周期是否超过半个半衰期（[crate::budget::is_healthy]）。
+    ///
+    /// 返回 `None` 的三种情况：
+    /// * 一次都没 tick 过（`last_k == 0`）—— 无从判断；
+    /// * 清单为空；
+    /// * 参数健康（刷新周期 ≤ H/2）。
+    ///
+    /// 返回 `Some(msg)` 说明**衰减已经退化为噪声**：实测 n=600、k=8、T=30h 时
+    /// 刷新周期 2250h、90.7% 的来源衰减因子 < 0.1、ESS 600 → 55.8
+    /// （见 docs/audit/A10-抽样参数k与轮次节奏.md §6.2）。
+    ///
+    /// # 为什么文案里没有推荐 k
+    ///
+    /// 返回值刻意是 `&'static str` 而不是 `String`：零分配、无 OOM 可能，
+    /// 上层可以直接 match 或原样交给日志系统。代价是**推荐值不在文案里** ——
+    /// 需要具体数字时调 [Engine::recommended_k] 当场算（它按**当前**清单长度
+    /// 反解最小可行预算），两者是互补而不是重复：
+    /// 本方法报「已经不合格」，[Engine::recommended_k] 报「改到多少才合格」。
+    ///
+    /// # 口径
+    ///
+    /// 判定用的清单长度是 **tick 那一刻**的正分清单长度（字段 `last_n_list`），
+    /// 不是调用时的 `ratings.len()`：评分在两次 tick 之间增删时，后者会和那条 k
+    /// 对不上号，体检结论会在两个正确读数之间凭空抖动。
+    ///
+    /// `period` 只能由调用方给：引擎不维护定时器（见 [Engine::tick] 的节奏说明），
+    /// 轮间隔本来就是应用层的部署参数。
+    ///
+    /// # 一个哨兵值共用带来的边界
+    ///
+    /// 字段 `last_k` 的初值是 0，所以「一次都没 tick 过」与「`tick` 时显式传了
+    /// `k = 0`」共用这一个哨兵值、无法区分。后者其实是最不健康的配置（一条都抽
+    /// 不到，刷新周期按无穷处理，见 [crate::budget::refresh_period] 的边界说明），
+    /// 本方法对它同样返回 `None`。需要体检这种配置时直接用
+    /// [crate::budget::assess]：它按调用方给的 k 算，不依赖引擎记录的哨兵值。
+    ///
+    /// # 与 [Engine::probe] 的关系
+    ///
+    /// [Engine::probe] 每次把本轮剩余条目**全部**扫一遍，等价于 `k = n_list`，
+    /// 于是刷新周期恰好等于一个轮间隔、天然满足 `(n_list/k)·T ≤ H/2`
+    /// （前提是 T 本身不超 H/2）。所以 `probe` 不需要也不应该被本方法覆盖：
+    /// 本方法只回答「**上一轮 `tick` 用的 k 够不够**」，`probe` 不改变这个读数。
+    ///
+    /// 只读：不改任何状态，连续两次调用返回同一结论。
+    #[must_use]
+    pub fn last_tick_warning(&self, period: Time) -> Option<&'static str> {
+        // 没 tick 过（last_k 仍是初值 0）或 tick 时清单为空：都没有可判断的对象。
+        // 清单为空时 budget::refresh_period 本来就返回 0（判定健康），这里提前
+        // 返回只是把「无从判断」表达清楚，不改变结论。
+        if self.last_k == 0 || self.last_n_list == 0 {
+            return None;
+        }
+        let refresh = crate::budget::refresh_period(self.last_n_list, self.last_k, period);
+        if crate::budget::is_healthy(refresh, self.cfg.half_life) {
+            None
+        } else {
+            Some(Self::TICK_BUDGET_WARNING)
+        }
+    }
+
     // ---------- 统计 ----------
 
     pub fn stats(&self) -> (u64, u64, usize, usize) {
@@ -1198,27 +1361,38 @@ impl Engine {
 
     /// 被 [Engine::on_view] **整条丢弃**的观点累计条数（安全加固 P2）。
     ///
-    /// 含两类：容量上限（[EngineConfig::max_views]）与非有限读数。
-    /// `view.params()` 不匹配的视图仍然只静默丢弃、不计入这里。
+    /// 含三类：容量上限（[EngineConfig::max_views]）、非有限读数、以及
+    /// **ViewParams 不一致**（参数护栏：对面配错了）。
     ///
     /// 与 [Engine::stats] 分开暴露是刻意的：`stats()` 的四元组形状与含义
     /// 保持不变（既有实验按位置解构它），新计数走新接口。
     ///
     /// 这个数字**单调递增**、只增不减（[Engine::prune_stale] 清理旧观点不会让它
     /// 回退），它是「被拒了多少次」的累计事件计数，不是「现在有多少条被拒」。
+    ///
+    /// 含三类（见 [Rejection]）：容量上限、非有限读数、ViewParams 不一致。
+    /// 三者的细分见 [Engine::rejected_breakdown]。
     #[must_use]
     pub fn rejected_count(&self) -> u64 {
         self.stat_rejected_view
     }
 
-    /// 丢弃原因的细分计数：`(因容量被丢, 因读数非有限被丢)`。
+    /// 丢弃原因的细分计数（见 [RejectedBreakdown]）。
     ///
-    /// 两者之和恒等于 [Engine::rejected_count]。容量那一项大于 0 说明
-    /// [EngineConfig::max_views] 正在顶满（资源保护生效）；非有限那一项大于 0
-    /// 说明有人在喂脏视图（安全信号，值得上层告警）。
+    /// 三项之和恒等于 [Engine::rejected_count]。
+    ///
+    /// * `capacity` 大于 0 说明 [EngineConfig::max_views] 正在顶满（资源保护生效）；
+    /// * `nonfinite` 大于 0 说明有人在喂脏视图（安全信号，值得上层告警）；
+    /// * `params_mismatch` 大于 0 说明**对面用了另一套 [ViewParams]** ——
+    ///   这是最该告警的一项：它不是攻击，而是部署配置错误，且后果最隐蔽
+    ///   （视图被一条条丢掉、群体项缩水，引擎本身不报错）。
     #[must_use]
-    pub fn rejected_breakdown(&self) -> (u64, u64) {
-        (self.stat_rejected_capacity, self.stat_rejected_nonfinite)
+    pub fn rejected_breakdown(&self) -> RejectedBreakdown {
+        RejectedBreakdown {
+            capacity: self.stat_rejected_capacity,
+            nonfinite: self.stat_rejected_nonfinite,
+            params_mismatch: self.stat_rejected_params,
+        }
     }
 }
 

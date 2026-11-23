@@ -702,7 +702,7 @@ fn scenario3_with_abstainers(k: u32) -> (Engine, u32, u32, Vec<u32>) {
 /// ~~~
 ///
 /// 旧闭式解（不把弃权票并进分母）在同一场景给出 f = 1/3、G_A = 1/(k+3)；
-/// k = 1 时正是 `审计/P0-core.md` §7.3 记录的 **0.25**。
+/// k = 1 时正是 `docs/audit/P0-core.md` §7.3 记录的 **0.25**。
 #[test]
 fn abstentions_are_folded_into_the_solver_denominator() {
     for k in [1u32, 2, 3] {

@@ -139,7 +139,7 @@ match SparseView::decode_prefixed_result(&bytes) {
 
 ## 4. cap 该设多大
 
-完整实测见 [`审计/cap截断损失曲线.md`](../../审计/cap截断损失曲线.md)。结论：
+完整实测见 [`../../docs/audit/cap截断损失曲线.md`](../../docs/audit/cap截断损失曲线.md)。结论：
 
 | 你的关注上限 | 建议 cap | 字节 | 截断损失 |
 |---|---:|---:|---|
@@ -167,7 +167,7 @@ match SparseView::decode_prefixed_result(&bytes) {
 | 单元测试 | **正在补**（6 个模块当前零单测） |
 
 ⟹ **不要现在把 engine 换成它。** 两者并存，用 S1~S6 长期对照。
-替换的正确时机见 [`审计/威胁模型.md` §8.4.4](../../审计/威胁模型.md)。
+替换的正确时机见 [`../../docs/audit/威胁模型.md` §8.4.4](../../docs/audit/威胁模型.md)。
 
 ---
 
@@ -178,9 +178,9 @@ match SparseView::decode_prefixed_result(&bytes) {
 | [`PROTOCOL.md`](PROTOCOL.md) | 接入协议：内核保证什么/不保证什么、每轮四步、eclipse 防护、部署检查 |
 | [`DEPLOY.md`](DEPLOY.md) | 上线前逐条打勾的清单（含 cap 实测表、读数消费的坑） |
 | [`ENCODING.md`](ENCODING.md) | 字节格式（补齐中：cap 自描述头） |
-| [`../../审计/威胁模型.md`](../../审计/威胁模型.md) §8.4 | 与 engine 的对照、5 项缺口、补完之后仍缺什么 |
-| [`../../审计/cap决策.md`](../../审计/cap决策.md) | cap 该设多大（两个探针的实测） |
-| [`../../审计/mincore-rng种子缺陷.md`](../../审计/mincore-rng种子缺陷.md) | 一个「不影响数字但确实错了」的 bug 复盘 |
+| [`../../docs/audit/威胁模型.md`](../../docs/audit/威胁模型.md) §8.4 | 与 engine 的对照、5 项缺口、补完之后仍缺什么 |
+| [`../../docs/audit/cap决策.md`](../../docs/audit/cap决策.md) | cap 该设多大（两个探针的实测） |
+| [`../../docs/audit/mincore-rng种子缺陷.md`](../../docs/audit/mincore-rng种子缺陷.md) | 一个「不影响数字但确实错了」的 bug 复盘 |
 ## 6. 验证命令
 
 ~~~powershell

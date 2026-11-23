@@ -1,14 +1,14 @@
 //! # 反女巫判据的**验收口径**
 //!
 //! 这个模块存在的理由：判据本身必须写死在代码里，否则每次重跑都会换一套口径，
-//! 数字就没法比较。历史上就吃过这个亏——`审计/A6-ablation.md` 定义的六条判据
+//! 数字就没法比较。历史上就吃过这个亏——`docs/audit/A6-ablation.md` 定义的六条判据
 //! （S1~S6）散落在十几份报告里，其中 S2 有两种粒度（逐观察者对 vs 逐女巫均值）、
 //! S4 有五档清单长度下的完全不同结论、S5 有四套互不可比的算法。
 //!
 //! 本模块把这些口径**固化成常量与公式**，供 `crates/exp` 的验证装置与
 //! 应用层的自检共用。它**不改变任何计算行为**，只提供判据。
 //!
-//! ## 六条判据（口径逐字照抄 `审计/A6-ablation.md` §1.2）
+//! ## 六条判据（口径逐字照抄 `docs/audit/A6-ablation.md` §1.2）
 //!
 //! * 观察者 = 活着的诚实账户；分布 = [crate::Engine::trust_distribution]（总和恒为 1）
 //! * `hm` = 该观察者眼中**所有诚实账户**的均值（没出现在分布里的按 0 计入）
@@ -192,7 +192,7 @@ pub fn judge_s2(cross_rate: f64) -> Verdict {
 ///
 /// 为什么阈值取 1.0：1.0 意为「群体项把收益方顶到了 `1/β` 这个理论极限」，
 /// 而 B0 实测背书场景是 1.31（最坏观察者 2.44），说明确实存在额外放大通道
-/// （`审计/B0-baseline.md` §2.3）。这是**已知的失败项**，不是判据设计问题。
+/// （`docs/audit/B0-baseline.md` §2.3）。这是**已知的失败项**，不是判据设计问题。
 #[must_use]
 pub fn judge_s3(s3_value: f64, beta: f32) -> (Verdict, f64) {
     match s3_relative_to_floor(s3_value, beta) {
@@ -207,7 +207,7 @@ pub fn judge_s3(s3_value: f64, beta: f32) -> (Verdict, f64) {
     }
 }
 
-/// S4 的判定：三条都要满足（采用 `审计/A3-view.md` §10 的**最宽松**成文口径）。
+/// S4 的判定：三条都要满足（采用 `docs/audit/A3-view.md` §10 的**最宽松**成文口径）。
 ///
 /// * 空账户出现率 ≤ 1%
 /// * 空账户合计份额 ≤ 0.1%
@@ -227,7 +227,7 @@ pub fn judge_s4(present_rate: f64, total_share: f64, max_ratio: f64) -> Verdict 
 /// S5 的判定：自吹倍数 ≤ 1.0（伪造不该有收益）。
 ///
 /// 「自吹 + 塞壳」通常 ≤ 1（防线有效），「纯自吹」实测 1.83（**未改善**，
-/// 见 `审计/B0-baseline.md` §2.5）。
+/// 见 `docs/audit/B0-baseline.md` §2.5）。
 #[must_use]
 pub fn judge_s5(self_inflation: f64) -> Verdict {
     if !self_inflation.is_finite() {

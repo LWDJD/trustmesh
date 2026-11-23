@@ -34,7 +34,7 @@
 //! §3/§5/§6 共用一次状态构造（publish 内部就是 distribution，分开建节点会白烧
 //! 一遍），耗时算在一起。
 //!
-//! 输出是可以直接贴进 Markdown 报告的表格；配套报告见 审计/mincore性能基准.md。
+//! 输出是可以直接贴进 Markdown 报告的表格；配套报告见 docs/audit/mincore性能基准.md。
 
 use std::hint::black_box;
 use std::process::Command;

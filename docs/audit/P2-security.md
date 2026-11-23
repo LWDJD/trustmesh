@@ -499,4 +499,4 @@ cargo run --release --bin p_stress -- --only=d --updates=100000
 | [crates/exp/src/bin/c2_report.rs](crates/exp/src/bin/c2_report.rs) | 同上 |
 | [crates/exp/src/bin/d4_health.rs](crates/exp/src/bin/d4_health.rs) | 同上 |
 | [crates/exp/src/bin/p_stress.rs](crates/exp/src/bin/p_stress.rs) | **新增**，911 行压力测试 |
-| [审计/P2-security.md](审计/P2-security.md) | **新增**，本文件 |
+| [审计/P2-security.md](P2-security.md) | **新增**，本文件 |

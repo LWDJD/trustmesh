@@ -1,7 +1,7 @@
 //! C1 · badlist 仿真（**已迁移到 C2 的一次性事件 API**）。
 //!
 //! 历史背景：C1 用「清单 + 每 tick 重算」实现，原始数字记录在
-//! `crates/exp/c1_result.txt` 与 `审计/C1-badlist.md`。C2 把接口改成事件后，
+//! `crates/exp/c1_result.txt` 与 `docs/audit/C1-badlist.md`。C2 把接口改成事件后，
 //! 本文件保留为**同一场景在新接口下的复现**：
 //!
 //! * 清单语义由应用层模拟——维护一个 `Vec<u32>`，每个 tick 对其中每个账户
@@ -17,7 +17,7 @@
 //! ~~~
 //!
 //! 输出：每个 seed 的明细 + 跨 seed 均值表。C2 的正式对照见
-//! `crates/exp/src/bin/c2_report.rs` 与 `审计/C2-report.md`。
+//! `crates/exp/src/bin/c2_report.rs` 与 `docs/audit/C2-report.md`。
 
 use std::collections::BTreeMap;
 use std::time::Instant;

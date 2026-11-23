@@ -298,10 +298,13 @@ fn scenario_a(args: &Args) -> Outcome {
         elapsed.as_secs_f64() * 1e6 / args.owners as f64
     );
     println!("  缓存条数 = {views}（上限 {}）", args.cap);
+    let br = e.rejected_breakdown();
     println!(
-        "  rejected_count = {}，细分 = {:?}",
+        "  rejected_count = {}，细分：capacity = {}，nonfinite = {}，params_mismatch = {}",
         e.rejected_count(),
-        e.rejected_breakdown()
+        br.capacity,
+        br.nonfinite,
+        br.params_mismatch
     );
     println!("  实际被接受的条数（喂入时观察到满） = {accepted}");
     assert_eq!(views, expected, "缓存条数必须取 min(喂入数, max_views)");
@@ -316,10 +319,11 @@ fn scenario_a(args: &Args) -> Outcome {
         overflow,
         "超出上限的每一个新 owner 都必须被拒"
     );
+    assert_eq!(br.capacity, overflow, "容量丢弃数不对");
+    assert_eq!(br.nonfinite, 0, "场景 A 不该出现非有限丢弃");
     assert_eq!(
-        e.rejected_breakdown(),
-        (overflow, 0),
-        "场景 A 不该出现非有限丢弃"
+        br.params_mismatch, 0,
+        "场景 A 的视图参数与引擎一致，不该出现参数不匹配"
     );
     assert_eq!(
         e.stats().1,
@@ -652,7 +656,8 @@ fn scenario_c(args: &Args) -> Outcome {
     }
     let elapsed = t0.elapsed();
 
-    let (cap_rej, nonfinite_rej) = dirty.rejected_breakdown();
+    let dirty_br = dirty.rejected_breakdown();
+    let (cap_rej, nonfinite_rej) = (dirty_br.capacity, dirty_br.nonfinite);
     // 第 0..64 号 owner 已经在缓存里（缓存恰好满），后面的新 owner 会被**容量**
     // 先挡下（那条判定在质量扫描之前），所以它们计入 capacity 而不是 nonfinite。
     // 这正是设计意图：脏视图不会给缓存制造新条目，也就谈不上「被它的读数污染」。
@@ -835,11 +840,14 @@ fn scenario_d(args: &Args) -> Outcome {
         "  耗时 {elapsed:?}（{:.2} µs/次），tick {ticks} 次、probe {probes} 次、on_view {views_fed} 次、on_view_failed {fails} 次、prune {prunes} 次",
         elapsed.as_secs_f64() * 1e6 / args.updates as f64
     );
+    let br = e.rejected_breakdown();
     println!(
-        "  缓存条数 = {}（峰值 {max_views_seen}，上限 {}），丢弃 = {:?}，命中 = {}",
+        "  缓存条数 = {}（峰值 {max_views_seen}，上限 {}），丢弃：capacity = {}、nonfinite = {}、params_mismatch = {}，命中 = {}",
         e.stats().2,
         args.cap,
-        e.rejected_breakdown(),
+        br.capacity,
+        br.nonfinite,
+        br.params_mismatch,
         e.stats().1
     );
     assert!(max_views_seen <= args.cap);
@@ -873,8 +881,8 @@ fn scenario_d(args: &Args) -> Outcome {
         ops: args.updates,
         elapsed,
         extra: format!(
-            "峰值缓存 {max_views_seen}、丢弃 {:?}",
-            e.rejected_breakdown()
+            "峰值缓存 {max_views_seen}、丢弃 capacity={} / nonfinite={} / params_mismatch={}",
+            br.capacity, br.nonfinite, br.params_mismatch
         ),
     }
 }

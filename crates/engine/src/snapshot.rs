@@ -216,10 +216,14 @@ pub struct EngineSnapshot {
     pub stat_hits: u64,
     /// 抽样随机流的**内部状态**（不是种子）：装回去后序列从同一个位置继续。
     pub rng_state: u64,
-    /// 被整条丢弃的观点累计数（容量 + 非有限读数两类之和）。
+    /// 被整条丢弃的观点累计数（容量 + 非有限读数 + 参数不匹配，三类之和）。
     ///
     /// 这不是「运行状态」而是「可观测状态」：运维会看这个数判断有没有人在撑爆缓存。
     /// 恢复后必须与关机前一致，否则「快照 = 完整状态」这个承诺就是假的。
+    ///
+    /// 后两类（[Self::stat_rejected_capacity] / [Self::stat_rejected_nonfinite]）单独存；
+    /// 参数不匹配那一项是**导出量**（总数减去这两类），由 [Engine::restore] 还原，
+    /// 因此加第三类拒绝原因不需要改快照格式。
     pub stat_rejected_view: u64,
     /// 其中因容量上限被丢的条数。
     pub stat_rejected_capacity: u64,
@@ -826,10 +830,25 @@ impl Engine {
             stat_rejected_view: snap.stat_rejected_view,
             stat_rejected_capacity: snap.stat_rejected_capacity,
             stat_rejected_nonfinite: snap.stat_rejected_nonfinite,
-            // last_k 是**观测值**（最近一次 tick 传的 k），不是运行状态：
-            // 恢复后还没 tick 过，按「一次都没 tick 过」置 0。
-            // 它只用于 freshness_budget 的 refresh_period 推算，不影响任何计算。
+            // 参数不匹配计数**不单独**进 EngineSnapshot：快照格式 v2 的尾部只有三个
+            // 拒绝计数（view / capacity / nonfinite），加第四项就必须抬
+            // SNAPSHOT_VERSION + 重新生成黄金字节，那是比本护栏大得多的破坏性改动。
+            //
+            // 但它可以从已有字段**精确还原**：被拒原因只有三类且互斥，
+            // 所以「总数 − 容量 − 非有限」必然就是参数不匹配那一项。
+            // 这样既不用改格式，又保住了 rejected_breakdown() 的
+            // 「三项之和恒等于 rejected_count()」不变量（恢复后依然成立）。
+            // 用 saturating_sub 而不是直接减：畸形快照里容量+非有限可能大于总数，
+            // 这里退化成 0 而不是回绕成天文数字（结构校验在 validate 里，这是兜底）。
+            stat_rejected_params: snap
+                .stat_rejected_view
+                .saturating_sub(snap.stat_rejected_capacity + snap.stat_rejected_nonfinite),
+            // last_k / last_n_list 是**观测值**（最近一次 tick 传的 k 与当时的
+            // 清单长度），不是运行状态：恢复后还没 tick 过，按「一次都没 tick 过」置 0。
+            // 它们只用于 freshness_budget / last_tick_warning 的刷新周期推算，
+            // 不影响任何计算，也不进快照字节。
             last_k: 0,
+            last_n_list: 0,
         })
     }
 }

@@ -44,7 +44,7 @@ cd crates/engine && cargo run --example quickstart
 
 ## 部署前必读
 
-[审计/威胁模型.md](../../审计/威胁模型.md) —— 什么条件下它安全、什么条件下不安全。
+[../../docs/audit/威胁模型.md](../../docs/audit/威胁模型.md) —— 什么条件下它安全、什么条件下不安全。
 
 最短版本：
 

@@ -7,11 +7,11 @@
 //! * crates/engine/src/lib.rs:767-771：mass_covers —— 观点缓存之后才登记的账户
 //!   按「没表态」处理。
 //!
-//! 三条都是结构性改动，审计/A6-ablation.md 与 A1~A13 / B1 / C1 / C2 里全部 S1~S6
+//! 三条都是结构性改动，docs/audit/A6-ablation.md 与 A1~A13 / B1 / C1 / C2 里全部 S1~S6
 //! 数字都出自改前口径，只能读方向、不能当基线（交接文档 7.1 节）。本 bin 用同一套
 //! 判据定义、同一组参数、同一组 seed 在真 Engine 上重跑，给出新基线。
 //!
-//! 【判据定义】唯一成文出处是审计/A6-ablation.md 第 52-64 行，逐条照抄：
+//! 【判据定义】唯一成文出处是docs/audit/A6-ablation.md 第 52-64 行，逐条照抄：
 //! * 观察者 = 活着的诚实账户；分布 = trust_distribution(now)，总和恒为 1；
 //! * hm = 该观察者眼中「所有诚实账户」的均值（没出现在分布里的按 0 计入）；
 //! * 所有比值 = 该账户在分布里的值 ÷ hm；
@@ -42,7 +42,7 @@
 //! 编号 → 同样的抽样序列）。所以「本文比值 / present_frac」与 A6 第 2 节基线相减时，
 //! 差异只来自 P0 代码改动。报告里必须写清楚这一点，否则会把口径差当成 P0 效应。
 //!
-//! 【参数】逐位照抄审计/A6-ablation.md 第 41-47 行：
+//! 【参数】逐位照抄docs/audit/A6-ablation.md 第 41-47 行：
 //! * 人口：n_initial = 200，跑 100 步（= 100 小时），join_rate = 0.15、
 //!   leave_rate = 0.00012；
 //! * 关注：follow_min = 20 / follow_max = 30 / max_follows = 40；
@@ -74,7 +74,7 @@ use tm_sim::{AttackKind, Kind, SimConfig, World};
 
 // ============================== 固定参数 ==============================
 
-/// 世界初始人口（审计/A6-ablation.md 第 41 行）。
+/// 世界初始人口（docs/audit/A6-ablation.md 第 41 行）。
 const N_INITIAL: usize = 200;
 /// 世界推进步数，一步一小时。
 const STEPS: usize = 100;
@@ -82,7 +82,7 @@ const STEPS: usize = 100;
 const ROUNDS: u64 = 4;
 /// 每轮多少小时；最终统计时刻 = STEPS + (ROUNDS − 1) × HPR。
 const HPR: u64 = 24;
-/// 每轮每引擎的抽样条数（审计/A6-ablation.md 第 44 行）。
+/// 每轮每引擎的抽样条数（docs/audit/A6-ablation.md 第 44 行）。
 const SAMPLES: usize = 12;
 /// S4：已 intern、但没有被任何人评分的空账户个数。
 const EMPTY_COUNT: usize = 40;
@@ -101,7 +101,7 @@ const DIGITS: usize = 8;
 
 /// S3 的解析下限：1/β（β = 0.3 ⇒ 3.3333）。
 ///
-/// 见审计/审计总账.md 第 70-75 行：
+/// 见docs/audit/审计总账.md 第 70-75 行：
 ///   包含沉默：group[u] = 0.5 → 比值 = 1/β = 3.33
 ///   排除沉默：group[u] = 1.0 → 比值 = 1 + (1−β)/(β·0.5) = 5.67
 /// 也就是说：只要「我把收益方当成我评过的来源之一、且群体项对它满值」，它相对
@@ -121,7 +121,7 @@ fn key(i: usize) -> [u8; 32] {
     k
 }
 
-/// 全网约定的视图参数（审计/A6-ablation.md 第 45 行）。
+/// 全网约定的视图参数（docs/audit/A6-ablation.md 第 45 行）。
 fn view_params() -> ViewParams {
     ViewParams {
         buckets: 2048,
@@ -312,7 +312,7 @@ impl Scenario {
     }
 }
 
-/// 场景 → 世界配置。attack_ratio 恒为 0.08（审计/A6-ablation.md 第 46 行），
+/// 场景 → 世界配置。attack_ratio 恒为 0.08（docs/audit/A6-ablation.md 第 46 行），
 /// 三种场景的区别只在 AttackKind：女巫 16 人 3 集群 / 渗透 16 人 / 背书 40 人。
 fn scenario_cfg(name: &str, seed: u64) -> SimConfig {
     let kind = match name {
@@ -591,7 +591,7 @@ fn sum_of_dist(dist: &BTreeMap<u32, f32>, set: &[usize]) -> (f64, f64, usize) {
 
 /// 从一份归一化分布算出这一观察者的全部判据读数（纯函数，便于单测）。
 ///
-/// 口径（照抄审计/A6-ablation.md 第 52-64 行）：
+/// 口径（照抄docs/audit/A6-ablation.md 第 52-64 行）：
 /// * 某类的「平均声望」= 该类所有账户的分布值之和 ÷ 该类账户总数
 ///   （没出现在分布里的按 0 计入）。这样「注入 40 个女巫只有 1 个露头」
 ///   不会被写成「女巫平均分 = 那个露头的值」；

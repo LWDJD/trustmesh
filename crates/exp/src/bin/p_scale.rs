@@ -120,7 +120,7 @@ fn run_one(n: usize, seed: u64) -> Row {
         .filter(|&i| ace[i].is_alive() && ace[i].is_online(now_last, rhythm))
         .collect();
 
-    // 判据的观察者口径：**只看诚实账户**（见 审计/A6-ablation.md §1.2）。
+    // 判据的观察者口径：**只看诚实账户**（见 docs/audit/A6-ablation.md §1.2）。
     // 把攻击者也当观察者会污染 S1：女巫会给自己人打满分，于是「女巫均值」不为 0，
     // 但那不是算法失效，是观察者选错了。这个坑必须在这里挡住。
     let honest_obs: Vec<usize> = alive

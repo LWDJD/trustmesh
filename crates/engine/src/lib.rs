@@ -52,7 +52,9 @@ pub mod view;
 pub use snapshot::{EngineSnapshot, ViewSnapshot, SNAPSHOT_MAGIC, SNAPSHOT_VERSION};
 
 // runtime 的公开项（Engine / EngineConfig / StoredView / 等）
-pub use runtime::{Engine, EngineConfig, FetchRequest, FreshnessStats, Rejection, StoredView};
+pub use runtime::{
+    Engine, EngineConfig, FetchRequest, FreshnessStats, RejectedBreakdown, Rejection, StoredView,
+};
 
 // ---- 顶层 re-export（人工挑选，避免 E0252 重名冲突）----
 

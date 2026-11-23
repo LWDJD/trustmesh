@@ -22,7 +22,7 @@
 //! 可观测性通过 rejected_count() 单独提供，stats() 的四元组一个字节都不变。
 
 use tm_engine::view::{AccountKey, CompressedView, ViewParams};
-use tm_engine::{Engine, EngineConfig, Rejection};
+use tm_engine::{Engine, EngineConfig, RejectedBreakdown, Rejection};
 
 fn key(i: u32) -> AccountKey {
     let mut k = [0u8; 32];
@@ -166,7 +166,14 @@ fn max_views_zero_caches_everything() {
         "0 必须表示无上限：{N} 条全部进缓存"
     );
     assert_eq!(e.rejected_count(), 0, "无上限时不得有任何丢弃");
-    assert_eq!(e.rejected_breakdown(), (0, 0));
+    assert_eq!(
+        e.rejected_breakdown(),
+        RejectedBreakdown {
+            capacity: 0,
+            nonfinite: 0,
+            params_mismatch: 0,
+        }
+    );
     assert!(e.query(target, 0) > 0.0, "引擎仍然正常工作");
 }
 
@@ -239,7 +246,11 @@ fn capacity_limit_keeps_at_most_max_views_entries() {
     );
     assert_eq!(
         e.rejected_breakdown(),
-        ((N as usize - CAP) as u64, 0),
+        RejectedBreakdown {
+            capacity: (N as usize - CAP) as u64,
+            nonfinite: 0,
+            params_mismatch: 0,
+        },
         "容量丢弃不得被记成非有限丢弃"
     );
     // 前 CAP 个 owner 收到了观点，后面的一个都没有。
@@ -379,13 +390,19 @@ fn capacity_rejection_does_not_disturb_cached_views() {
     assert!(e.query(target, 500).is_finite());
 }
 
-/// view.params() 不匹配的视图**不计入** rejected_count()。
+/// view.params() 不匹配的视图**计在 params_mismatch 那一栏**，而不是容量那一栏。
 ///
-/// 这是刻意的语义分层：形状不符 = 协议层「无法解释的字节」（静默丢弃）；
-/// 容量 / 非有限 = 「可解释但被拒」（计数 + 失败语义）。
-/// 两种都不改缓存，但上层要看的是后者（它才是安全信号）。
+/// 改前：形状不符 = 协议层「无法解释的字节」，完全静默丢弃（连 rejected_count
+/// 都不涨）。这正是 L3 的缺口：两个节点配错 ViewParams 时，视图被一条条丢掉，
+/// 群体项永远在缩水，而调用方没有任何办法发现。
+///
+/// 改后：丢弃本身不变（不进缓存、不计命中、**不计连败**），但计入
+/// [RejectedBreakdown::params_mismatch]。
+///
+/// 「不计连败」是刻意的：这不是网络故障，给一个网络正常的邻居记连败会让
+/// [Engine::tick] 的退避改变后续抽样序列 —— 那是把配置错误伪装成故障。
 #[test]
-fn params_mismatch_is_not_counted_as_capacity_rejection() {
+fn params_mismatch_is_counted_in_its_own_bucket() {
     let mut e = eng(1);
     let owner = e.intern(key(10_000));
     e.rate(owner, 1.0, 0);
@@ -401,8 +418,16 @@ fn params_mismatch_is_not_counted_as_capacity_rejection() {
     e.on_view(owner, wrong, 0, 0);
     assert_eq!(e.stats().1, 0, "形状不符不计命中");
     assert_eq!(e.stats().2, 0, "形状不符不进缓存");
-    assert_eq!(e.rejected_count(), 0, "形状不符不计入丢弃计数");
-    assert_eq!(e.fail_streak(owner), 0, "形状不符不计连败");
+    assert_eq!(
+        e.rejected_count(),
+        1,
+        "形状不符必须**可观测**：这是参数护栏的全部意义"
+    );
+    let b = e.rejected_breakdown();
+    assert_eq!(b.params_mismatch, 1, "必须计在 params_mismatch");
+    assert_eq!(b.capacity, 0, "不得被误记成容量丢弃（这条只针对新 owner）");
+    assert_eq!(b.nonfinite, 0, "不得被误记成非有限丢弃");
+    assert_eq!(e.fail_streak(owner), 0, "形状不符不计连败（不改变退避）");
 }
 
 // ===========================================================================
@@ -431,7 +456,11 @@ fn nan_total_mass_is_rejected_whole() {
     assert_eq!(e.stats().1, before_stats.1, "被拒的观点不计命中");
     assert_eq!(
         e.rejected_breakdown(),
-        (0, 1),
+        RejectedBreakdown {
+            capacity: 0,
+            nonfinite: 1,
+            params_mismatch: 0,
+        },
         "非有限丢弃必须计在 nonfinite 那一栏"
     );
     assert_eq!(e.rejected_count(), 1);
@@ -458,7 +487,14 @@ fn nan_view_from_new_owner_is_not_cached() {
     assert_eq!(e.stats().2, 0, "脏视图不得进缓存");
     assert_eq!(e.stats().1, 0);
     assert_eq!(e.view_age(owner, 5), None);
-    assert_eq!(e.rejected_breakdown(), (0, 1));
+    assert_eq!(
+        e.rejected_breakdown(),
+        RejectedBreakdown {
+            capacity: 0,
+            nonfinite: 1,
+            params_mismatch: 0,
+        }
+    );
 }
 
 /// 非有限读数按**失败**处理：连败 +1，退避随之生效。
@@ -538,7 +574,7 @@ fn all_zero_view_is_not_mistaken_for_nonfinite() {
     assert_eq!(e.view_age(owner, 0), Some(0));
 }
 
-/// rejected_breakdown() 的两项之和恒等于 rejected_count()（两类混合喂入）。
+/// rejected_breakdown() 的三项之和恒等于 rejected_count()（三类混合喂入）。
 #[test]
 fn rejected_breakdown_sums_to_total() {
     let mut e = eng(4);
@@ -554,11 +590,30 @@ fn rejected_breakdown_sums_to_total() {
         let o = e.lookup(&key(10_000 + i)).unwrap();
         e.on_view(o, nan_view_with_key(key(9)), 0, 10);
     }
-    let (cap, nonfinite) = e.rejected_breakdown();
-    assert_eq!(cap, 4, "前 4 个进缓存、后 4 个被容量拒");
-    assert_eq!(nonfinite, 3);
+    // 再制造 2 次参数不匹配丢弃（形状不符的视图，两条都不会碰缓存）。
+    let wrong = ViewParams {
+        buckets: 64,
+        hashers: 5,
+        seed: 7,
+    };
+    for i in 0..2u32 {
+        let o = e.intern(key(30_000 + i));
+        e.on_view(
+            o,
+            CompressedView::from_pairs(wrong, &[(key(9), 1.0)]),
+            0,
+            20,
+        );
+    }
+    let b = e.rejected_breakdown();
+    assert_eq!(b.capacity, 4, "前 4 个进缓存、后 4 个被容量拒");
+    assert_eq!(b.nonfinite, 3);
     assert_eq!(
-        cap + nonfinite,
+        b.params_mismatch, 2,
+        "形状不符的两条必须计在 params_mismatch"
+    );
+    assert_eq!(
+        b.capacity + b.nonfinite + b.params_mismatch,
         e.rejected_count(),
         "细分计数必须与总数自洽"
     );
@@ -569,16 +624,24 @@ fn rejected_breakdown_sums_to_total() {
 // ③ 丢弃原因的枚举
 // ===========================================================================
 
-/// Rejection 的两种原因都要能被外部匹配（上层据此决定告警还是扩容）。
+/// Rejection 的三种原因都要能被外部匹配（上层据此决定告警还是扩容）。
+///
+/// 穷尽 match 是**故意**的：将来再加变体时这条会编译失败，逼改动者
+/// 同步更新「上层怎么区分这些原因」的清单。
 #[test]
 fn rejection_kind_is_public_and_matchable() {
-    let reasons = [Rejection::Capacity, Rejection::NonFinite];
+    let reasons = [
+        Rejection::Capacity,
+        Rejection::NonFinite,
+        Rejection::ParamsMismatch,
+    ];
     let mut seen = Vec::new();
     for r in reasons {
         match r {
             Rejection::Capacity => seen.push("capacity"),
             Rejection::NonFinite => seen.push("nonfinite"),
+            Rejection::ParamsMismatch => seen.push("params-mismatch"),
         }
     }
-    assert_eq!(seen, vec!["capacity", "nonfinite"]);
+    assert_eq!(seen, vec!["capacity", "nonfinite", "params-mismatch"]);
 }

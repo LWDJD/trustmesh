@@ -296,7 +296,7 @@ fn restored_engine_keeps_breakdown_invariant() {
     let total = e.rejected_count();
 
     let snap = e.snapshot(0);
-    let mut back = Engine::restore(limited, snap).expect("自产快照必须能恢复");
+    let back = Engine::restore(limited, snap).expect("自产快照必须能恢复");
     let after = back.rejected_breakdown();
     assert_eq!(
         after.capacity + after.nonfinite + after.params_mismatch,

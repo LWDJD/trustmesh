@@ -3,7 +3,7 @@
 //!
 //! # 与 A12 报告的口径对照
 //!
-//! A12 报告（「审计/A12-kernel.md」§0、§3）用的是 **20 seed × 400 账户 × 120 步**
+//! A12 报告（「docs/audit/A12-kernel.md」§0、§3）用的是 **20 seed × 400 账户 × 120 步**
 //! （n_initial = 400、steps = 120、follow ∈ [120,200]、max_follows = 256），
 //! 全量跑一次「a12_compare」约 72 s。那个规模不适合放进「cargo test」。
 //!
@@ -82,7 +82,7 @@ const SMALL: Scale = Scale {
     cap: 512,
 };
 
-/// A12 报告用的图（「审计/A12-kernel.md」§2 实验设置）。只在 #[ignore] 用例里出现。
+/// A12 报告用的图（「docs/audit/A12-kernel.md」§2 实验设置）。只在 #[ignore] 用例里出现。
 const A12_SCALE: Scale = Scale {
     n_initial: 400,
     steps: 120,

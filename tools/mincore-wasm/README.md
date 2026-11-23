@@ -136,7 +136,7 @@ git diff --no-index --exit-code native.txt regenerated.txt   # 0 = 金标准仍�
 * 验证了：同一台机器上 native x86_64（MSVC, x86-64）vs wasm32（V8 的 wasm 后端）的
   **同一份源码路径**（`run_all()` 是 lib 里的同一个函数，native bin 只是打印它）。
 * 没验证：跨 CPU 架构（aarch64 / riscv）、跨编译器（gcc/clang 的 native）、
-  跨 wasm runtime（wasmer / wasmtime）。见 `审计/威胁模型.md` §5。
+  跨 wasm runtime（wasmer / wasmtime）。见 `../../docs/audit/威胁模型.md` §5。
 
 ## 与 `tools/wasm-smoke` 的关系
 

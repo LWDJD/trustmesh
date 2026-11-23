@@ -57,7 +57,7 @@ const OWNER_BASE: u32 = 1_000_000;
 /// 每份视图除桶矩阵外的固定开销：BTreeMap 节点 + StoredView 字段 + Vec 头 +
 /// 分配器记账。
 ///
-/// 取 384 B 是按 **RSS 实测反推**的上界（见 `审计/P2-security.md` §4.2：默认 2048×5
+/// 取 384 B 是按 **RSS 实测反推**的上界（见 `docs/audit/P2-security.md` §4.2：默认 2048×5
 /// 参数下每份条目的实测开销在 308~375 B 之间，取 384 保证估算不会低估）。
 const ENTRY_OVERHEAD: u64 = 384;
 

@@ -59,7 +59,7 @@ impl ByteRng {
 /// 这在安全上是可以接受的，因为：
 /// * Count Sketch 的桶值本来就是「任意有限的 f32」，没有取值范围约束；
 /// * 真正用它的是 `Engine::on_view`，那里对 `total_mass` 做了 `clamp(0.0, 1.0)`，
-///   并对非有限读数整条拒绝（P2 加固，见 `审计/P2-security.md` §4）；
+///   并对非有限读数整条拒绝（P2 加固，见 `docs/audit/P2-security.md` §4）；
 /// * 也就是说：**视图内容是"不可信但可解"，语义边界在引擎那侧**。
 #[test]
 fn random_bytes_of_wrong_length_are_always_rejected() {

@@ -31,7 +31,7 @@
 | 单来源自吹 | +83% | 未修 |
 | 重放旧观点刷新新鲜度 | ×4.0 | 刻意留给应用层（需要签名） |
 
-**完整的威胁模型见 [审计/威胁模型.md](审计/威胁模型.md)。部署前必读。**
+**完整的威胁模型见 [docs/audit/威胁模型.md](docs/audit/威胁模型.md)。部署前必读。**
 
 ### 「女巫淹没网络」挡得住吗（分两层，答案不同）
 
@@ -73,7 +73,7 @@
 虽然内容排序不归本库，但**「谁可信」这一半本库算得很干净**：陌生垃圾 20 万 = 0 是逐位实测的。
 应用层拿这个可信度去排序时，至少不会被「数量」骗到——只会被「我信任的人被收买」骗到。
 
-完整实测见 [审计/传输淹没.md](审计/传输淹没.md)、[审计/淹没实验.md](审计/淹没实验.md)。
+完整实测见 [docs/audit/传输淹没.md](docs/audit/传输淹没.md)、[docs/audit/淹没实验.md](docs/audit/淹没实验.md)。
 
 ## 快速开始
 
@@ -92,7 +92,7 @@ cd crates/engine && cargo run --example quickstart
 | **[`tm_engine`](crates/engine)** | **运行时（唯一入口）**：账户表 / 压缩观点 / 衰减聚合 / 抽样 / 查询 / badlist / 预算 / 快照，全部在一处 | 479 |
 | [`tm_sim`](crates/sim) | 社会仿真：人口/兴趣/同质性/社团/攻击者编排 | 130 |
 | [`tm_exp`](crates/exp) | 端到端实验装置（26 个 bin） | 29 |
-| [`tm_mincore`](crates/mincore) | **最小反女巫内核**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍。**5 项工程能力已全部补齐**（快照 / 资源上限 / cap 自描述 / 性能基准 / 编码器性质），详见 [`缺口进度`](审计/mincore缺口进度.md)；但**仍不建议现在替换 `tm_engine`**（它缺 badlist 与预算接口），见 [`威胁模型` §8.4.5](审计/威胁模型.md) | 268 |
+| [`tm_mincore`](crates/mincore) | **最小反女巫内核**：定长稀疏表（cap×6+2 B）替代 Count Sketch；S1/S2/S4/S6 全面优于现行实现，体积小 14~50 倍。**5 项工程能力已全部补齐**（快照 / 资源上限 / cap 自描述 / 性能基准 / 编码器性质），详见 [`缺口进度`](docs/audit/mincore缺口进度.md)；但**仍不建议现在替换 `tm_engine`**（它缺 badlist 与预算接口），见 [`威胁模型` §8.4.5](docs/audit/威胁模型.md) | 268 |
 
 原先是四个独立 crate（`tm_store` / `tm_view` / `tm_agg` / `tm_engine`），2026-11-21 合并进
 `tm_engine` 的四个模块（`store` / `view` / `agg` / `runtime`）。三个原 crate 目录**已删除**——
@@ -128,10 +128,11 @@ cd crates/engine && cargo run --example quickstart
 |---|---|
 | 作者到底要什么 | [设计意图.md](设计意图.md)（54 行，全是作者原话） |
 | 规格与不变量 | [设计规格.md](设计规格.md) |
-| **能不能用、什么时候不能用** | [**审计/威胁模型.md**](审计/威胁模型.md) |
-| 接手这个项目 | [交接文档.md](交接文档.md) |
-| 全部文件索引 | [索引.md](索引.md) |
-| 判据 S1~S6 的实测数字 | [审计/B0-baseline.md](审计/B0-baseline.md) |
+| **能不能用、什么时候不能用** | [**docs/audit/威胁模型.md**](docs/audit/威胁模型.md) |
+| 接手这个项目 | [交接文档.md](docs/交接文档.md) |
+| 全部文件索引 | [索引.md](docs/索引.md) |
+| 判据 S1~S6 的实测数字 | [docs/audit/B0-baseline.md](docs/audit/B0-baseline.md) |
+| **文档总目录（历史档案都在这里）** | [**docs/README.md**](docs/README.md) |
 
 ## 构建与测试
 

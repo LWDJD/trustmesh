@@ -39,4 +39,4 @@ node run-compare.mjs
 * wasm 侧**不能从 JS 直接传指针进来**（TypedArray 会被强转成 0，写进线性内存开头）。
   所以探针自己持有缓冲区并导出地址（`out_buf_addr()`），JS 从 `memory.buffer` 读回。
 * 这个探针只验证了「同一台机器上的 native vs 同一台机器上的 wasm32」。
-  跨 CPU 架构（aarch64 / riscv）还没有实测，见 `审计/威胁模型.md` §5。
+  跨 CPU 架构（aarch64 / riscv）还没有实测，见 `../../docs/audit/威胁模型.md` §5。

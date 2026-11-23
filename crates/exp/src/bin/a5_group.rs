@@ -36,7 +36,7 @@ fn key(i: usize) -> [u8; 32] {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Arm {
-    /// 生产语义：只有来源级衰减（§4.9 已删除，判决见 审计/A5-group.md）
+    /// 生产语义：只有来源级衰减（§4.9 已删除，判决见 docs/audit/A5-group.md）
     Off,
 }
 

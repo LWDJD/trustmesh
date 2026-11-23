@@ -3,7 +3,7 @@
 //! 这是 `Config::max_views` / `Config::max_list` 默认值 4096 的**依据**。
 //! 跑：`cargo run --release --example limit_peak`
 //!
-//! 口径与 A12 报告（「审计/A12-kernel.md」§2）一致：
+//! 口径与 A12 报告（「docs/audit/A12-kernel.md」§2）一致：
 //! `n_initial = 400`、`steps = 120`、`follow ∈ [120,200]`、`max_follows = 256`、
 //! `attack = Sybil { cluster: 2 }`、`attack_ratio = 0.1`。seed 取 1..=5
 //! （A12 报告用 1..=20，全量跑约 72 s，这里只取 5 个种子做量级确认）。

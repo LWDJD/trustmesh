@@ -82,5 +82,5 @@ fn main() {
     println!("  我的每一条 on_view 就会变慢，直到我处理不过来。");
     println!();
     println!("**这是无限规模下必须解决的第一个问题**（比内存更急，因为它是 CPU 的）；");
-    println!("解法方向见 审计/无限规模.md §3：`total_mass` 改为**增量维护**或**抽样估计**。");
+    println!("解法方向见 docs/audit/无限规模.md §3：`total_mass` 改为**增量维护**或**抽样估计**。");
 }

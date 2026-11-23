@@ -103,6 +103,6 @@ fn main() {
     println!();
     println!("这个探针用的是 Count Sketch（无 cap 截断），所以它测的是**传播本身的平滑**。");
     println!(
-        "换成 A12 的定长表后，还要**额外**叠加每跳的 cap 截断损失（见审计/A12-kernel.md §5.2）。"
+        "换成 A12 的定长表后，还要**额外**叠加每跳的 cap 截断损失（见docs/audit/A12-kernel.md §5.2）。"
     );
 }

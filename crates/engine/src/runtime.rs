@@ -109,7 +109,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::agg::{aggregate, combine, decay, AggMode};
+use crate::agg::{aggregate, aggregate_signed, combine, combine_signed, decay, AggMode};
 use crate::badlist::SourceSnapshot;
 use crate::store::{
     AccountIdx, AccountKey, AccountTable, PositiveList, Rng, RoundSampler, Score, Time,
@@ -197,6 +197,25 @@ pub struct EngineConfig {
     /// **只有「新 owner 且已满」才丢；已缓存的 owner 更新既有条目永远接受**
     /// （原地覆盖不增长内存）。
     pub max_views: usize,
+    /// 是否允许**群体项取负值**（资源分配模式）。`false`（默认）= 反女巫模式。
+    ///
+    /// # 两种模式互斥，不是叠加
+    ///
+    /// `false`（默认）：分数是「信任度」，值域 [0, 1]，负分被**静默夹成 0**。
+    /// 这是反女巫场景的唯一正确语义 —— 声望没有负数。
+    ///
+    /// `true`：分数是「带符号的观点」，值域 [-1, 1]。负值表示反向流动
+    /// （例如资源分配里的「我欠你」）。**开启后不建议再用作反女巫**：
+    /// Count Sketch 里负分与正分落在同一批桶里相加，攻击者若在信任白名单内
+    /// 就能用自己的负分压低别人（实测幅度 = 他的份额，见
+    /// `docs/audit/负值模式-实现说明.md`）；
+    /// 本库不提供跨层的安全保证 —— 谁能贡献，由应用层的信任筛选决定。
+    ///
+    /// # 默认值必须保持 `false`
+    ///
+    /// `false` 时所有 clamp 保持 [0,1]、`total_mass` 保持 `Σ min(q,1)`，
+    /// 与引入本字段之前**逐位一致**（有测试钉住，且逐位基准探针逐字节比对通过）。
+    pub signed_scores: bool,
 }
 
 impl Default for EngineConfig {
@@ -216,6 +235,9 @@ impl Default for EngineConfig {
             // 0 = 无上限（旧行为）。默认值必须逐位保持：任何一个既有实验/测试
             // 都可能喂超过（将来）某个上限的 owner 数量，改默认值等于改口径。
             max_views: 0,
+            // 默认必须是 false（反女巫模式）。true 是资源分配模式的显式选择，
+            // 打开后 query 的值域从 [0,1] 变成 [-1,1]，既有测试与实验的口径全部改变。
+            signed_scores: false,
         }
     }
 }
@@ -620,6 +642,10 @@ impl Engine {
         // （`f32::max` 返回非 NaN 的那个操作数），于是「查 .max() 之后的值」
         // 永远查不出 NaN，还会把这份视图的总质量塌到 1e-6 这个放大器档位。
         // 所以必须看 `query` 的原始返回值。
+        // signed 模式用 |q| 求和（绝对值和）：负值必须进分母，否则一个
+        // 「1000 个账户各 -1.0」的视图会让 total_mass 落到 1e-6 下限，
+        // 单个视图就能把任何目标压到 -1（实测，见 tests/signed.rs）。
+        // 默认模式保持 Σ min(q,1)，与引入 signed_scores 之前逐位一致。
         let mut total_mass = 0.0f32;
         let mut all_finite = true;
         for i in 0..self.accounts.len() as u32 {
@@ -629,7 +655,11 @@ impl Engine {
                     all_finite = false;
                     break;
                 }
-                total_mass += q.clamp(0.0, 1.0);
+                total_mass += if self.cfg.signed_scores {
+                    q.abs().min(1.0)
+                } else {
+                    q.clamp(0.0, 1.0)
+                };
             }
         }
         let total_mass = total_mass.max(1e-6);
@@ -1066,15 +1096,27 @@ impl Engine {
     /// 给出不同的读数。非有限值一律当 0：badlist 的所有中间量都必须是有限数，
     /// 而 NaN 在协议里就是「没表态」。
     fn reading_of(&self, stored: &StoredView, key: &AccountKey) -> Score {
-        // 分子先夹紧，与分母（Σ min(q,1)）同一口径。
-        let raw = stored.view.query(key).clamp(0.0, 1.0) / stored.total_mass;
+        // 分子先夹紧，与分母同一口径：默认模式分母是 Σ min(q,1)，
+        // signed 模式分母是 Σ |q|（见 [Engine::on_view]）。两种模式在这里必须
+        // 用同一个区间，否则分子分母口径不一致会把读数抬到 [0,1] 之外。
+        let (lo, hi) = if self.cfg.signed_scores {
+            (-1.0f32, 1.0f32)
+        } else {
+            (0.0f32, 1.0f32)
+        };
+        let raw = stored.view.query(key).clamp(lo, hi) / stored.total_mass;
         let mut v = if raw.is_finite() {
-            raw.clamp(0.0, 1.0)
+            raw.clamp(lo, hi)
         } else {
             0.0
         };
         let floor = (stored.noise.median * self.cfg.noise_multiplier).max(0.0);
-        if v < floor {
+        // 噪声底门在 signed 模式下必须按**幅度**判，不能按有符号值判：
+        // 否则一个 -0.01 的读数会被当成「低于噪声底」清零，而它其实可能是真实的反向信号。
+        //
+        // 默认模式下 v 恒 ≥ 0（上面 clamp 到 [0,1]），所以 `v < floor` 与
+        // `v.abs() < floor` 逐位等价 —— 这也是默认模式零漂移的关键之一。
+        if v.abs() < floor {
             v = 0.0;
         }
         v
@@ -1123,7 +1165,16 @@ impl Engine {
 
         let target_key = match self.accounts.key_of(target) {
             Some(k) => k,
-            None => return combine(self.cfg.beta, personal, None),
+            // 未登记的账户：群体项 necessarily 为 None，两种模式结果相同
+            // （personal ∈ [0,1]，combine_signed 对 None 与 combine 逐位一致）。
+            // 按模式分叉只是为了「一行代码一处口径」，不引入任何行为差异。
+            None => {
+                return if self.cfg.signed_scores {
+                    combine_signed(self.cfg.beta, personal, None)
+                } else {
+                    combine(self.cfg.beta, personal, None)
+                };
+            }
         };
 
         // 遍历的是正分清单（我评过谁），不是观点缓存（我手上有谁的观点）：
@@ -1164,9 +1215,13 @@ impl Engine {
             items.push((w, v));
         }
 
-        let group = aggregate(&items, self.cfg.agg_mode);
-
-        combine(self.cfg.beta, personal, group)
+        if self.cfg.signed_scores {
+            let group = aggregate_signed(&items, self.cfg.agg_mode);
+            combine_signed(self.cfg.beta, personal, group)
+        } else {
+            let group = aggregate(&items, self.cfg.agg_mode);
+            combine(self.cfg.beta, personal, group)
+        }
     }
 
     // ---------- 自适应抽样预算（只读观测，A10 §6.2 / §8） ----------

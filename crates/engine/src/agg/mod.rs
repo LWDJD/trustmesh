@@ -6,8 +6,9 @@
 //! | 函数 | 作用 |
 //! | --- | --- |
 //! | [decay] | 时间衰减：0.5 的 (dt / half_life) 次方（**伤害时效**，不是反女巫） |
-//! | [aggregate] | 把多个来源的观点聚成一个数（四种口径） |
-//! | [combine] | β × 个人项 + (1 − β) × 群体项 |
+//! | [aggregate] | 把多个来源的观点聚成一个数（四种口径，值域 [0,1]） |
+//! | [combine] | β × 个人项 + (1 − β) × 群体项（值域 [0,1]） |
+//! | [aggregate_signed] / [combine_signed] / [clamp_signed] | 同上三个的 [-1,1] 变体，只给 signed 模式用 |
 //!
 //! ## [decay] 的目的：伤害时效，不是反女巫
 //!
@@ -33,6 +34,9 @@
 //!   理由：来源可能有几百个，f32 连加会积累可见误差，而聚合结果对精度敏感。
 //! * 对外返回的声望类数值一律 clamp 到 [0, 1]；NaN 一律按 0.0 处理
 //!   （0 在协议里就是「没表态」，是最保守的语义）。
+//! * 唯一的例外是 [aggregate_signed] / [combine_signed] / [clamp_signed] 这一组
+//!   [-1, 1] 变体：它们**只在** [crate::runtime::EngineConfig::signed_scores]
+//!   为 true 时被调用，默认配置下一条都不会走到，所以默认模式的逐位行为不变。
 //! * 衰减在极端 dt 下会下溢，用 [DECAY_FLOOR]（最小正 f32）兜底，
 //!   保证「指数衰减永不精确归零」这条规格在工程上成立。
 //!
@@ -199,6 +203,41 @@ pub fn aggregate(items: &[(f32, f32)], mode: AggMode) -> Option<f32> {
     Some(clamp01(value))
 }
 
+/// 与 [aggregate] 完全相同，只是返回值规范到 [-1, 1] 而不是 [0, 1]。
+///
+/// 内部聚合口径（Mean / Median / WeightedMedian / Trimmed）与卫生检查**共用同一套**
+/// 私有函数 —— 那些函数本来就不假设值域（[weighted_mean] 是 Σ(w·v)/Σw，
+/// [median] 只是排序取中位），[aggregate] 与本文唯一的差别就是末尾那个 clamp。
+///
+/// 唯一额外限制：数值必须落在 [-1, 1] 已经由调用方（[crate::Engine::query] 背后的
+/// `reading_of`）保证，这里再 clamp 一次是兜底。
+///
+/// 默认模式（`signed_scores = false`）**永不调用本函数**，所以 [aggregate] 的
+/// 逐位行为不受影响。
+///
+/// ```
+/// use tm_engine::agg::{aggregate_signed, AggMode};
+/// let items = [(1.0f32, -1.0f32), (1.0, 0.0)];
+/// assert_eq!(aggregate_signed(&items, AggMode::Mean).unwrap(), -0.5);
+/// assert_eq!(aggregate_signed(&[], AggMode::Mean), None);
+/// ```
+#[must_use]
+pub fn aggregate_signed(items: &[(f32, f32)], mode: AggMode) -> Option<f32> {
+    let samples = valid_samples(items);
+    if samples.is_empty() {
+        return None;
+    }
+
+    // 与 aggregate 逐字相同的分发；唯一区别是出口 clamp。
+    let value = match mode {
+        AggMode::Mean => weighted_mean(&samples),
+        AggMode::Median => median(&samples),
+        AggMode::WeightedMedian => weighted_median(&samples),
+        AggMode::Trimmed(p) => trimmed_mean(&samples, p),
+    };
+    Some(clamp_signed(value))
+}
+
 /// 过滤出加权聚合可用的样本，并按数值升序排好。
 fn valid_samples(items: &[(f32, f32)]) -> Vec<(f32, f32)> {
     let mut samples: Vec<(f32, f32)> = items
@@ -319,6 +358,32 @@ fn clamp01(x: f32) -> f32 {
     }
 }
 
+/// 把任意 f32 规范到 [-1, 1]：NaN 视为 0，±inf 截断到边界。
+///
+/// 与 [clamp01] **并列**而不是替换：值域从 [0,1] 放宽到 [-1,1]，只用于
+/// signed 模式（见 [crate::runtime::EngineConfig::signed_scores]）。
+///
+/// # 为什么先判 NaN
+///
+/// `x <= -1.0` 和 `x >= 1.0` 对 NaN 都是 false，写成
+/// `if x.is_nan() || x <= -1.0 { ... }` 也能得到 0，但那个分支的正确性依赖
+/// 「NaN 与任何数比较都是 false」这条编译器细节；先单独判 NaN 最不容易错。
+///
+/// * NaN → 0.0（0 在协议里就是「没表态」，是最保守的语义）
+/// * ±inf → ±1.0（截断到边界）
+/// * [-1, 1] 内的值逐位原样返回（-0.5 仍是 -0.5）
+#[must_use]
+pub fn clamp_signed(x: f32) -> f32 {
+    // 先单独判 NaN：f32::clamp 对 NaN 返回 NaN，而协议里需要 0（「没表态」）。
+    // 判完 NaN 之后剩下的分支恰好就是 clamp 的语义，用内置方法避免 clippy 警告
+    // 也避免手写比较链。
+    if x.is_nan() {
+        0.0
+    } else {
+        x.clamp(-1.0, 1.0)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 【3】合成
 // ---------------------------------------------------------------------------
@@ -344,6 +409,46 @@ pub fn combine(beta: f32, personal: Score, group: Option<Score>) -> Score {
     let group = clamp01(group.unwrap_or(0.0));
     // beta = 1 时 0.0 * group 精确为 0.0，beta = 0 时结果精确为 group。
     clamp01(beta * personal + (1.0 - beta) * group)
+}
+
+/// 与 [combine] 基本相同，但 **群体项可以取负**（signed 模式专用）。
+///
+/// # 语义分层（这是刻意的不对称，不要「对称化」）
+///
+/// * `beta` 仍规范到 [0,1]：它是个人权重，不是分数；
+/// * `personal` 仍规范到 [0,1]：个人项是「我对你的信任」，永远非负 ——
+///   即使 signed 模式也不该变成负的；
+/// * `group` 规范到 [-1,1]：群体项是「大家对你的评价」，signed 模式下可正可负；
+/// * 结果规范到 [-1,1]。
+///
+/// # 为什么 personal 不跟着放宽
+///
+/// 它的来源是 [crate::store::PositiveList]（正分清单），而
+/// [crate::store::PositiveList::set] 的语义是「`score <= 0` = 撤销」——
+/// 负分在那里本来就不存在（存进去就被当成撤销、条目直接删掉）。
+/// 放宽它只会制造一个永远走不到的分支。
+///
+/// # group 为 None
+///
+/// 按 0.0 处理（与 [combine] 相同）：没有取到任何观点 ⇒ 群体项为 0。
+///
+/// # 例子
+///
+/// ```
+/// use tm_engine::agg::combine_signed;
+/// assert_eq!(combine_signed(0.0, 0.5, Some(-1.0)), -1.0);
+/// assert_eq!(combine_signed(1.0, 0.5, Some(-1.0)), 0.5); // 个人项永远非负
+/// assert_eq!(combine_signed(0.3, 0.0, None), 0.0);
+/// ```
+#[must_use]
+pub fn combine_signed(beta: f32, personal: Score, group: Option<Score>) -> Score {
+    let beta = clamp01(beta);
+    let personal = clamp01(personal);
+    let group = clamp_signed(group.unwrap_or(0.0));
+    let out = beta * personal + (1.0 - beta) * group;
+    // beta·personal ∈ [0,1]、group ∈ [-1,1]，因此 out ∈ [-1,1]；仍然兜底 clamp，
+    // 因为 personal/group 的入参可能带了 -0.0 或正好落在边界上。
+    clamp_signed(out)
 }
 
 // ---------------------------------------------------------------------------
